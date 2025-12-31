@@ -15,9 +15,14 @@ if(TPCH_BUILD_EXAMPLES)
         Arrow::arrow
     )
 
-    # Future: simple_orc
-    # add_executable(simple_orc simple_orc.cpp)
-    # target_link_libraries(simple_orc PRIVATE tpch_core)
+    # simple_orc - Demonstrates ORC writing (if ORC is available)
+    if(ORC_FOUND)
+        add_executable(simple_orc simple_orc.cpp)
+        target_link_libraries(simple_orc PRIVATE
+            tpch_core
+            Arrow::arrow
+        )
+    endif()
 
     # Future: async_io_demo
     # if(TPCH_ENABLE_ASYNC_IO)
