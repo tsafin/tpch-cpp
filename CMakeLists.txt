@@ -97,32 +97,33 @@ target_link_libraries(tpch_core PUBLIC
 )
 
 # Link ORC if available
+# ORC is only used by ORC writer, so linking is PRIVATE to tpch_core
+# ORC's vendored libraries need special handling to avoid system library conflicts
 if(ORC_FOUND)
-    target_link_libraries(tpch_core PUBLIC ORC::orc)
-    # ORC was built with vendored dependencies (protobuf, lz4, zlib, zstd)
-    # Link the vendored libraries instead of system libraries to avoid ABI mismatches
+    target_link_libraries(tpch_core PRIVATE ORC::orc)
+    # Link ORC's vendored dependencies to use consistent versions
     find_library(ORC_VENDORED_PROTOBUF NAMES orc_vendored_protobuf
         PATHS /usr/local/lib /usr/lib)
     if(ORC_VENDORED_PROTOBUF)
-        target_link_libraries(tpch_core PUBLIC ${ORC_VENDORED_PROTOBUF})
+        target_link_libraries(tpch_core PRIVATE ${ORC_VENDORED_PROTOBUF})
     endif()
 
     find_library(ORC_VENDORED_LZ4 NAMES orc_vendored_lz4
         PATHS /usr/local/lib /usr/lib)
     if(ORC_VENDORED_LZ4)
-        target_link_libraries(tpch_core PUBLIC ${ORC_VENDORED_LZ4})
+        target_link_libraries(tpch_core PRIVATE ${ORC_VENDORED_LZ4})
     endif()
 
     find_library(ORC_VENDORED_ZLIB NAMES orc_vendored_zlib
         PATHS /usr/local/lib /usr/lib)
     if(ORC_VENDORED_ZLIB)
-        target_link_libraries(tpch_core PUBLIC ${ORC_VENDORED_ZLIB})
+        target_link_libraries(tpch_core PRIVATE ${ORC_VENDORED_ZLIB})
     endif()
 
     find_library(ORC_VENDORED_ZSTD NAMES orc_vendored_zstd
         PATHS /usr/local/lib /usr/lib)
     if(ORC_VENDORED_ZSTD)
-        target_link_libraries(tpch_core PUBLIC ${ORC_VENDORED_ZSTD})
+        target_link_libraries(tpch_core PRIVATE ${ORC_VENDORED_ZSTD})
     endif()
 endif()
 
@@ -133,15 +134,6 @@ if(SNAPPY_LIB)
     target_link_libraries(tpch_core PRIVATE ${SNAPPY_LIB})
 endif()
 
-# When ORC is present, make sure we don't load system protobuf at runtime
-# since it may have ABI mismatches with the vendored version ORC was built with
-if(ORC_FOUND)
-    # Use RPATH to prefer vendored libraries
-    set_target_properties(tpch_core PROPERTIES
-        BUILD_RPATH "/usr/local/lib"
-        INSTALL_RPATH "/usr/local/lib"
-    )
-endif()
 
 # Define compilation flag for available dependencies
 target_compile_definitions(tpch_core PUBLIC TPCH_DEPS_AVAILABLE)
