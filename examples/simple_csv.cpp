@@ -1,23 +1,16 @@
 #include <iostream>
 #include <memory>
-#include <sys/stat.h>
 #include <vector>
 
 #include <arrow/api.h>
-#include <arrow/io/api.h>
-#include <parquet/arrow/writer.h>
 
-using arrow::Array;
-using arrow::ArrayBuilder;
-using arrow::Buffer;
+#include "tpch/csv_writer.hpp"
+
 using arrow::DoubleBuilder;
-using arrow::Field;
 using arrow::Int64Builder;
-using arrow::Schema;
 using arrow::StringBuilder;
-using arrow::Table;
 
-arrow::Status RunExample() {
+arrow::Status RunCSVExample() {
   // 1. Create Arrow schema for TPC-H lineitem-like table
   auto schema = arrow::schema({
       arrow::field("l_orderkey", arrow::int64()),
@@ -64,7 +57,7 @@ arrow::Status RunExample() {
   }
 
   // 3. Build arrays from builders
-  std::shared_ptr<Array> orderkey_array, partkey_array, quantity_array,
+  std::shared_ptr<arrow::Array> orderkey_array, partkey_array, quantity_array,
       extendedprice_array, discount_array, tax_array, returnflag_array,
       linestatus_array;
 
@@ -77,51 +70,37 @@ arrow::Status RunExample() {
   ARROW_ASSIGN_OR_RAISE(returnflag_array, returnflag_builder.Finish());
   ARROW_ASSIGN_OR_RAISE(linestatus_array, linestatus_builder.Finish());
 
-  // 4. Create Arrow Table
-  auto table = arrow::Table::Make(schema, {orderkey_array, partkey_array,
-                                           quantity_array, extendedprice_array,
-                                           discount_array, tax_array,
-                                           returnflag_array, linestatus_array});
+  // 4. Create Arrow RecordBatch
+  auto batch = arrow::RecordBatch::Make(
+      schema, num_rows,
+      {orderkey_array, partkey_array, quantity_array, extendedprice_array,
+       discount_array, tax_array, returnflag_array, linestatus_array});
 
-  // 5. Write to Parquet file
-  const std::string output_file = "/tmp/simple_lineitem.parquet";
+  // 5. Write to CSV file using CSVWriter
+  const std::string output_file = "/tmp/simple_lineitem.csv";
 
-  std::shared_ptr<arrow::io::FileOutputStream> outfile;
-  ARROW_ASSIGN_OR_RAISE(outfile, arrow::io::FileOutputStream::Open(output_file));
+  try {
+    tpch::CSVWriter csv_writer(output_file);
+    csv_writer.write_batch(batch);
+    csv_writer.close();
 
-  // Set write options
-  parquet::WriterProperties::Builder prop_builder;
-  prop_builder.compression(parquet::Compression::SNAPPY);
-  auto write_props = prop_builder.build();
-
-  parquet::ArrowWriterProperties::Builder arrow_prop_builder;
-  auto arrow_props = arrow_prop_builder.build();
-
-  // Write table
-  PARQUET_THROW_NOT_OK(
-      parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), outfile,
-                                 1024 * 1024, write_props, arrow_props));
-
-  // 6. Print summary
-  std::cout << "=== Simple Arrow/Parquet Example ===" << std::endl;
-  std::cout << "Output file: " << output_file << std::endl;
-  std::cout << "Rows written: " << table->num_rows() << std::endl;
-  std::cout << "Columns: " << table->num_columns() << std::endl;
-
-  // Get file size
-  struct stat statbuf;
-  if (stat(output_file.c_str(), &statbuf) == 0) {
-    std::cout << "File size: " << statbuf.st_size << " bytes" << std::endl;
+    // 6. Print summary
+    std::cout << "=== Simple CSV Writer Example ===" << std::endl;
+    std::cout << "Output file: " << output_file << std::endl;
+    std::cout << "Rows written: " << batch->num_rows() << std::endl;
+    std::cout << "Columns: " << batch->num_columns() << std::endl;
+    std::cout << "Schema:" << std::endl;
+    std::cout << schema->ToString() << std::endl;
+  } catch (const std::exception& e) {
+    std::cerr << "Error: " << e.what() << std::endl;
+    return arrow::Status::UnknownError(e.what());
   }
-
-  std::cout << "Schema:" << std::endl;
-  std::cout << schema->ToString() << std::endl;
 
   return arrow::Status::OK();
 }
 
 int main() {
-  auto status = RunExample();
+  auto status = RunCSVExample();
   if (!status.ok()) {
     std::cerr << "Error: " << status.message() << std::endl;
     return 1;

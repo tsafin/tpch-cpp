@@ -39,16 +39,13 @@ if(TPCH_ENABLE_ASAN)
 endif()
 
 # Find required packages from system
-find_package(Arrow QUIET)
-find_package(Parquet QUIET)
+find_package(Arrow REQUIRED)
+find_package(Parquet REQUIRED)
 find_package(ORC QUIET)
 
 # Print found status
-if(Arrow_FOUND)
-    message(STATUS "Arrow found: ${Arrow_LIBRARY}")
-else()
-    message(WARNING "Arrow not found - install with: sudo apt-get install libarrow-dev")
-endif()
+message(STATUS "Arrow found: ${Arrow_LIBRARY}")
+message(STATUS "Parquet found: ${Parquet_LIBRARY}")
 
 if(ORC_FOUND)
     message(STATUS "ORC found: ${ORC_LIBRARY}")
@@ -70,33 +67,34 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
     src/writers/parquet_writer.cpp
-    src/writers/orc_writer.cpp
     src/async/io_uring_context.cpp
     src/dbgen/dbgen_wrapper.cpp
 )
+
+# Add ORC writer if available
+if(ORC_FOUND)
+    list(APPEND TPCH_CORE_SOURCES
+        src/writers/orc_writer.cpp
+    )
+endif()
 
 # Create core library
 add_library(tpch_core STATIC ${TPCH_CORE_SOURCES})
 target_include_directories(tpch_core PUBLIC include)
 
-# Link libraries only if found
-if(Arrow_FOUND AND Parquet_FOUND)
-    target_link_libraries(tpch_core PUBLIC
-        Arrow::arrow
-        Arrow::parquet
-    )
+# Link required libraries (Arrow and Parquet are mandatory)
+target_link_libraries(tpch_core PUBLIC
+    Arrow::arrow
+    Arrow::parquet
+)
 
-    if(ORC_FOUND)
-        target_link_libraries(tpch_core PUBLIC ORC::orc)
-    endif()
-
-    target_compile_definitions(tpch_core PUBLIC TPCH_DEPS_AVAILABLE)
-else()
-    message(STATUS "Building without external dependencies (development mode)")
-    message(STATUS "  Arrow_FOUND: ${Arrow_FOUND}")
-    message(STATUS "  Parquet_FOUND: ${Parquet_FOUND}")
-    message(STATUS "  ORC_FOUND: ${ORC_FOUND}")
+# Link ORC if available
+if(ORC_FOUND)
+    target_link_libraries(tpch_core PUBLIC ORC::orc)
 endif()
+
+# Define compilation flag for available dependencies
+target_compile_definitions(tpch_core PUBLIC TPCH_DEPS_AVAILABLE)
 
 if(TPCH_ENABLE_ASYNC_IO AND uring_FOUND)
     target_link_libraries(tpch_core PUBLIC uring::uring)

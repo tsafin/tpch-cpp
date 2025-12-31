@@ -2,19 +2,18 @@
 
 if(TPCH_BUILD_EXAMPLES)
     # simple_arrow_parquet - Demonstrates Arrow schema and Parquet writing
-    if(Arrow_FOUND AND Parquet_FOUND)
-        add_executable(simple_arrow_parquet simple_arrow_parquet.cpp)
-        target_link_libraries(simple_arrow_parquet PRIVATE
-            Arrow::arrow
-            Arrow::parquet
-        )
-    else()
-        message(WARNING "Arrow not found - simple_arrow_parquet example will not be built")
-    endif()
+    add_executable(simple_arrow_parquet simple_arrow_parquet.cpp)
+    target_link_libraries(simple_arrow_parquet PRIVATE
+        Arrow::arrow
+        Arrow::parquet
+    )
 
-    # Future: simple_csv
-    # add_executable(simple_csv simple_csv.cpp)
-    # target_link_libraries(simple_csv PRIVATE tpch_core)
+    # simple_csv - Demonstrates CSV writing
+    add_executable(simple_csv simple_csv.cpp)
+    target_link_libraries(simple_csv PRIVATE
+        tpch_core
+        Arrow::arrow
+    )
 
     # Future: simple_orc
     # add_executable(simple_orc simple_orc.cpp)
