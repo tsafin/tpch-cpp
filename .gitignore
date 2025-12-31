@@ -17,8 +17,10 @@ install/
 
 # Executables (generated from examples and main)
 /tpch_benchmark
-/examples/simple_*
-/examples/async_*
+/examples/simple_arrow_parquet
+/examples/simple_csv
+/examples/simple_orc
+/examples/async_io_demo
 
 # IDE and editor files
 .vscode/

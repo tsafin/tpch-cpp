@@ -1,11 +1,16 @@
 # Example programs demonstrating TPC-H functionality
 
 if(TPCH_BUILD_EXAMPLES)
-    # Placeholder examples - will be implemented in later phases
-
-    # Future: simple_arrow_parquet
-    # add_executable(simple_arrow_parquet simple_arrow_parquet.cpp)
-    # target_link_libraries(simple_arrow_parquet PRIVATE tpch_core)
+    # simple_arrow_parquet - Demonstrates Arrow schema and Parquet writing
+    if(Arrow_FOUND AND Parquet_FOUND)
+        add_executable(simple_arrow_parquet simple_arrow_parquet.cpp)
+        target_link_libraries(simple_arrow_parquet PRIVATE
+            Arrow::arrow
+            Arrow::parquet
+        )
+    else()
+        message(WARNING "Arrow not found - simple_arrow_parquet example will not be built")
+    endif()
 
     # Future: simple_csv
     # add_executable(simple_csv simple_csv.cpp)

@@ -38,8 +38,7 @@ if(TPCH_ENABLE_ASAN)
     add_link_options(-fsanitize=address)
 endif()
 
-# Find required packages
-# Allow flexible discovery for development/ci environments
+# Find required packages from system
 find_package(Arrow QUIET)
 find_package(Parquet QUIET)
 find_package(ORC QUIET)
@@ -81,12 +80,16 @@ add_library(tpch_core STATIC ${TPCH_CORE_SOURCES})
 target_include_directories(tpch_core PUBLIC include)
 
 # Link libraries only if found
-if(Arrow_FOUND AND Parquet_FOUND AND ORC_FOUND)
+if(Arrow_FOUND AND Parquet_FOUND)
     target_link_libraries(tpch_core PUBLIC
         Arrow::arrow
         Arrow::parquet
-        ORC::orc
     )
+
+    if(ORC_FOUND)
+        target_link_libraries(tpch_core PUBLIC ORC::orc)
+    endif()
+
     target_compile_definitions(tpch_core PUBLIC TPCH_DEPS_AVAILABLE)
 else()
     message(STATUS "Building without external dependencies (development mode)")
