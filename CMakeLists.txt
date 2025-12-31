@@ -99,61 +99,48 @@ target_link_libraries(tpch_core PUBLIC
 # Link ORC if available
 if(ORC_FOUND)
     target_link_libraries(tpch_core PUBLIC ORC::orc)
-    # ORC has transitive dependencies that need to be linked
-    if(Protobuf_FOUND)
-        target_link_libraries(tpch_core PUBLIC protobuf::libprotobuf)
-    else()
-        find_library(PROTOBUF_LIBRARY NAMES protobuf)
-        if(PROTOBUF_LIBRARY)
-            target_link_libraries(tpch_core PUBLIC ${PROTOBUF_LIBRARY})
-        endif()
+    # ORC was built with vendored dependencies (protobuf, lz4, zlib, zstd)
+    # Link the vendored libraries instead of system libraries to avoid ABI mismatches
+    find_library(ORC_VENDORED_PROTOBUF NAMES orc_vendored_protobuf
+        PATHS /usr/local/lib /usr/lib)
+    if(ORC_VENDORED_PROTOBUF)
+        target_link_libraries(tpch_core PUBLIC ${ORC_VENDORED_PROTOBUF})
     endif()
 
-    if(lz4_FOUND)
-        target_link_libraries(tpch_core PUBLIC lz4::lz4)
-    else()
-        find_library(LZ4_LIBRARY NAMES lz4)
-        if(LZ4_LIBRARY)
-            target_link_libraries(tpch_core PUBLIC ${LZ4_LIBRARY})
-        endif()
+    find_library(ORC_VENDORED_LZ4 NAMES orc_vendored_lz4
+        PATHS /usr/local/lib /usr/lib)
+    if(ORC_VENDORED_LZ4)
+        target_link_libraries(tpch_core PUBLIC ${ORC_VENDORED_LZ4})
     endif()
 
-    if(Snappy_FOUND)
-        target_link_libraries(tpch_core PUBLIC Snappy::snappy)
-    else()
-        find_library(SNAPPY_LIBRARY NAMES snappy)
-        if(SNAPPY_LIBRARY)
-            target_link_libraries(tpch_core PUBLIC ${SNAPPY_LIBRARY})
-        endif()
+    find_library(ORC_VENDORED_ZLIB NAMES orc_vendored_zlib
+        PATHS /usr/local/lib /usr/lib)
+    if(ORC_VENDORED_ZLIB)
+        target_link_libraries(tpch_core PUBLIC ${ORC_VENDORED_ZLIB})
     endif()
 
-    if(ZLIB_FOUND)
-        target_link_libraries(tpch_core PUBLIC ZLIB::ZLIB)
-    else()
-        find_library(ZLIB_LIBRARY NAMES z)
-        if(ZLIB_LIBRARY)
-            target_link_libraries(tpch_core PUBLIC ${ZLIB_LIBRARY})
-        endif()
+    find_library(ORC_VENDORED_ZSTD NAMES orc_vendored_zstd
+        PATHS /usr/local/lib /usr/lib)
+    if(ORC_VENDORED_ZSTD)
+        target_link_libraries(tpch_core PUBLIC ${ORC_VENDORED_ZSTD})
     endif()
+endif()
 
-    if(zstd_FOUND)
-        # Try different zstd target names
-        if(TARGET zstd::libzstd_shared)
-            target_link_libraries(tpch_core PUBLIC zstd::libzstd_shared)
-        elseif(TARGET zstd::libzstd_static)
-            target_link_libraries(tpch_core PUBLIC zstd::libzstd_static)
-        else()
-            find_library(ZSTD_LIBRARY NAMES zstd)
-            if(ZSTD_LIBRARY)
-                target_link_libraries(tpch_core PUBLIC ${ZSTD_LIBRARY})
-            endif()
-        endif()
-    else()
-        find_library(ZSTD_LIBRARY NAMES zstd)
-        if(ZSTD_LIBRARY)
-            target_link_libraries(tpch_core PUBLIC ${ZSTD_LIBRARY})
-        endif()
-    endif()
+# Arrow has dependencies on system libraries that need to be linked AFTER ORC
+# Snappy must come at the very end due to linker symbol ordering requirements
+find_library(SNAPPY_LIB NAMES snappy)
+if(SNAPPY_LIB)
+    target_link_libraries(tpch_core PRIVATE ${SNAPPY_LIB})
+endif()
+
+# When ORC is present, make sure we don't load system protobuf at runtime
+# since it may have ABI mismatches with the vendored version ORC was built with
+if(ORC_FOUND)
+    # Use RPATH to prefer vendored libraries
+    set_target_properties(tpch_core PROPERTIES
+        BUILD_RPATH "/usr/local/lib"
+        INSTALL_RPATH "/usr/local/lib"
+    )
 endif()
 
 # Define compilation flag for available dependencies
