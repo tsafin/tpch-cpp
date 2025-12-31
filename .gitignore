@@ -1,0 +1,40 @@
+# Build directories
+build/
+cmake-build-debug/
+cmake-build-release/
+cmake-build-*/
+dist/
+install/
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.lib
+*.obj
+
+# Executables (generated from examples and main)
+/tpch_benchmark
+/examples/simple_*
+/examples/async_*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.user
+
+# Output files
+*.parquet
+*.orc
+*.csv
+data/
+
+# Generated files
+__pycache__/
+*.pyc
