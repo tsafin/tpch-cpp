@@ -4,7 +4,6 @@
 #include <stdexcept>
 
 #include <arrow/api.h>
-#include <arrow/io/file.h>
 #include <orc/OrcFile.hh>
 
 #include "tpch/orc_writer.hpp"
@@ -60,7 +59,7 @@ void copy_array_to_orc_column(
     orc::ColumnVectorBatch* col_batch,
     const std::shared_ptr<arrow::Array>& array) {
 
-    size_t size = array->length();
+    size_t size = static_cast<size_t>(array->length());
     col_batch->numElements = size;
 
     if (array->type()->id() == arrow::Type::INT64) {
@@ -70,25 +69,25 @@ void copy_array_to_orc_column(
             throw std::runtime_error("Failed to cast ORC column to LongVectorBatch");
         }
         for (size_t i = 0; i < size; ++i) {
-            if (int_array->IsNull(i)) {
+            if (int_array->IsNull(static_cast<int64_t>(i))) {
                 long_col->notNull[i] = 0;
             } else {
                 long_col->notNull[i] = 1;
-                long_col->data[i] = int_array->Value(i);
+                long_col->data[i] = int_array->Value(static_cast<int64_t>(i));
             }
         }
     } else if (array->type()->id() == arrow::Type::INT32) {
         auto int_array = std::static_pointer_cast<arrow::Int32Array>(array);
-        auto* long_col = dynamic_cast<orc::LongVectorBatch*>(col_batch);
+        auto* long_col = dynamic_cast<orc::IntVectorBatch*>(col_batch);
         if (!long_col) {
-            throw std::runtime_error("Failed to cast ORC column to LongVectorBatch");
+            throw std::runtime_error("Failed to cast ORC column to IntVectorBatch");
         }
         for (size_t i = 0; i < size; ++i) {
-            if (int_array->IsNull(i)) {
+            if (int_array->IsNull(static_cast<int64_t>(i))) {
                 long_col->notNull[i] = 0;
             } else {
                 long_col->notNull[i] = 1;
-                long_col->data[i] = int_array->Value(i);
+                long_col->data[i] = int_array->Value(static_cast<int64_t>(i));
             }
         }
     } else if (array->type()->id() == arrow::Type::DOUBLE) {
@@ -98,11 +97,11 @@ void copy_array_to_orc_column(
             throw std::runtime_error("Failed to cast ORC column to DoubleVectorBatch");
         }
         for (size_t i = 0; i < size; ++i) {
-            if (double_array->IsNull(i)) {
+            if (double_array->IsNull(static_cast<int64_t>(i))) {
                 double_col->notNull[i] = 0;
             } else {
                 double_col->notNull[i] = 1;
-                double_col->data[i] = double_array->Value(i);
+                double_col->data[i] = double_array->Value(static_cast<int64_t>(i));
             }
         }
     } else if (array->type()->id() == arrow::Type::FLOAT) {
@@ -112,11 +111,11 @@ void copy_array_to_orc_column(
             throw std::runtime_error("Failed to cast ORC column to DoubleVectorBatch");
         }
         for (size_t i = 0; i < size; ++i) {
-            if (float_array->IsNull(i)) {
+            if (float_array->IsNull(static_cast<int64_t>(i))) {
                 double_col->notNull[i] = 0;
             } else {
                 double_col->notNull[i] = 1;
-                double_col->data[i] = float_array->Value(i);
+                double_col->data[i] = float_array->Value(static_cast<int64_t>(i));
             }
         }
     } else if (array->type()->id() == arrow::Type::STRING) {
@@ -126,13 +125,13 @@ void copy_array_to_orc_column(
             throw std::runtime_error("Failed to cast ORC column to StringVectorBatch");
         }
         for (size_t i = 0; i < size; ++i) {
-            if (string_array->IsNull(i)) {
+            if (string_array->IsNull(static_cast<int64_t>(i))) {
                 string_col->notNull[i] = 0;
             } else {
                 string_col->notNull[i] = 1;
-                auto str = string_array->GetString(i);
+                auto str = string_array->GetString(static_cast<int64_t>(i));
                 string_col->data[i] = const_cast<char*>(str.data());
-                string_col->length[i] = str.length();
+                string_col->length[i] = static_cast<int64_t>(str.length());
             }
         }
     } else {
@@ -172,17 +171,17 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
             // Create ORC type from schema string
             auto orc_type = orc::Type::buildTypeFromString(orc_schema_str);
 
-            // Create output file stream
-            auto out_stream = std::make_unique<orc::FileOutputStream>(filepath_);
+            // Create output file stream using ORC factory function
+            auto out_stream = orc::writeLocalFile(filepath_);
 
             // Create writer options
             orc::WriterOptions writer_options;
-            writer_options.setCompression(orc::CompressionKind_SNAPPY);
             writer_options.setStripeSize(64 * 1024 * 1024);  // 64MB stripes
             writer_options.setRowIndexStride(10000);
 
-            // Create ORC writer (cast void* to orc::Writer*)
-            orc_writer_ = new orc::Writer(orc_type, out_stream.release(), writer_options);
+            // Create ORC writer using factory function
+            auto writer = orc::createWriter(*orc_type, out_stream.get(), writer_options);
+            orc_writer_ = writer.release();
 
         } catch (const std::exception& e) {
             schema_locked_ = false;
@@ -200,15 +199,21 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
         auto* writer = reinterpret_cast<orc::Writer*>(orc_writer_);
         auto schema = batch->schema();
         int num_cols = batch->num_columns();
-        int num_rows = batch->num_rows();
+        int64_t num_rows = batch->num_rows();
 
-        // Create root ColumnVectorBatch
-        auto root_batch = writer->createRowBatch(num_rows);
+        // Create root ColumnVectorBatch (ORC manages memory via MemoryPool)
+        auto root_batch = writer->createRowBatch(static_cast<uint64_t>(num_rows));
+
+        // root_batch should be a StructVectorBatch for the row data
+        auto* struct_batch = dynamic_cast<orc::StructVectorBatch*>(root_batch.get());
+        if (!struct_batch) {
+            throw std::runtime_error("Root batch is not a StructVectorBatch");
+        }
 
         // Copy data from Arrow columns to ORC columns
         for (int col_idx = 0; col_idx < num_cols; ++col_idx) {
             auto col_array = batch->column(col_idx);
-            auto* orc_col = root_batch->fields[col_idx];
+            auto* orc_col = struct_batch->fields[col_idx];
             copy_array_to_orc_column(orc_col, col_array);
         }
 
