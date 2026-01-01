@@ -4,10 +4,36 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 #include <arrow/api.h>
 
 namespace tpch {
+
+// C struct definitions for dbgen output types
+// These match the definitions in dbgen's dsstypes.h
+#define DATE_LEN 11
+#define L_CMNT_MAX 44
+
+struct line_t {
+    int64_t okey;
+    int64_t partkey;
+    int64_t suppkey;
+    int64_t lcnt;
+    int64_t quantity;
+    int64_t eprice;
+    int64_t discount;
+    int64_t tax;
+    char rflag[1];
+    char lstatus[1];
+    char cdate[DATE_LEN];
+    char sdate[DATE_LEN];
+    char rdate[DATE_LEN];
+    char shipinstruct[11];
+    char shipmode[11];
+    char comment[L_CMNT_MAX + 1];
+    int clen;
+};
 
 enum class TableType {
     LINEITEM,
