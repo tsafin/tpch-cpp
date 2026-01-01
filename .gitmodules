@@ -1,3 +1,6 @@
 [submodule "third_party/orc"]
 	path = third_party/orc
 	url = https://github.com/apache/orc.git
+[submodule "third_party/tpch"]
+	path = third_party/tpch
+	url = https://github.com/tsafin/tpch-tools.git
