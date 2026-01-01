@@ -81,8 +81,10 @@ else()
 endif()
 
 if(TPCH_ENABLE_ASYNC_IO)
-    find_package(uring QUIET)
-    if(NOT uring_FOUND)
+    find_package(Uring QUIET)
+    if(Uring_FOUND)
+        message(STATUS "Found liburing: ${Uring_LIBRARY}")
+    else()
         message(WARNING "liburing not found - install with: sudo apt-get install liburing-dev")
     endif()
 endif()
@@ -156,8 +158,8 @@ endif()
 # Define compilation flag for available dependencies
 target_compile_definitions(tpch_core PUBLIC TPCH_DEPS_AVAILABLE)
 
-if(TPCH_ENABLE_ASYNC_IO AND uring_FOUND)
-    target_link_libraries(tpch_core PUBLIC uring::uring)
+if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
+    target_link_libraries(tpch_core PUBLIC Uring::uring)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ASYNC_IO)
 endif()
 

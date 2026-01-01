@@ -36,9 +36,18 @@ if(TPCH_BUILD_EXAMPLES)
         endif()
     endif()
 
-    # Future: async_io_demo
-    # if(TPCH_ENABLE_ASYNC_IO)
-    #     add_executable(async_io_demo async_io_demo.cpp)
-    #     target_link_libraries(async_io_demo PRIVATE tpch_core)
-    # endif()
+    # async_io_demo - Demonstrates async I/O with io_uring (if enabled)
+    if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
+        add_executable(async_io_demo async_io_demo.cpp)
+        target_link_libraries(async_io_demo PRIVATE
+            tpch_core
+            Uring::uring
+        )
+    else()
+        # Build stub version when async I/O not available
+        add_executable(async_io_demo async_io_demo.cpp)
+        target_link_libraries(async_io_demo PRIVATE
+            tpch_core
+        )
+    endif()
 endif()
