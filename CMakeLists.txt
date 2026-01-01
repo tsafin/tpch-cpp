@@ -97,7 +97,7 @@ set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
     src/writers/parquet_writer.cpp
     src/async/io_uring_context.cpp
-    # Note: dbgen_wrapper deferred to Phase 7.3 (requires full dbgen build integration)
+    # src/dbgen/dbgen_wrapper.cpp - deferred to Phase 7.4+ when dbgen linking is resolved
 )
 
 # Add ORC writer if available
@@ -116,6 +116,11 @@ target_link_libraries(tpch_core PUBLIC
     Arrow::arrow
     Arrow::parquet
 )
+
+# Optional: dbgen integration deferred to Phase 7.4+
+# Currently using synthetic data generation (PoC)
+# Full dbgen integration requires resolving multiple object file dependencies
+# target_link_libraries(tpch_core PUBLIC dbgen)
 
 # Link ORC if available
 # ORC references protobuf symbols, so we must link protobuf
@@ -166,8 +171,6 @@ endif()
 # Main benchmark executable
 add_executable(tpch_benchmark src/main.cpp)
 target_link_libraries(tpch_benchmark PRIVATE tpch_core)
-# Note: dbgen linking is deferred - dbgen integration is complex and requires proper Make setup
-# For now, the benchmark uses synthetic data generation for PoC
 
 # Examples
 if(TPCH_BUILD_EXAMPLES)
@@ -180,8 +183,8 @@ if(TPCH_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-# Third-party: dbgen
-add_subdirectory(third_party/dbgen)
+# Third-party: dbgen (deferred to Phase 7.4+ - requires dbgen Makefile build fixes)
+# add_subdirectory(third_party/dbgen)
 
 # Install targets
 install(TARGETS tpch_benchmark
