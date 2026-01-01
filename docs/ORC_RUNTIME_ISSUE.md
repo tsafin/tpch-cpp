@@ -44,15 +44,17 @@ The crash occurs during dynamic library initialization, specifically in protobuf
    ...
    ```
 
-### System Information
+### System Information (Updated Jan 2, 2026)
 
-- **System protobuf version**: 3.5.1
-- **ORC libraries location**: `/usr/local/lib/liborc*.a`
-- **ORC vendored libraries**:
-  - `/usr/local/lib/liborc_vendored_protobuf.a` (static)
-  - `/usr/local/lib/liborc_vendored_lz4.a` (static)
-  - `/usr/local/lib/liborc_vendored_zlib.a` (static)
-  - `/usr/local/lib/liborc_vendored_zstd.a` (static)
+- **System protobuf version**: 3.5.1 (pkg-config), 3.12.4 (actual libprotoc)
+- **libprotobuf.so**: 23 (currently loaded version)
+- **ORC rebuilt from source**: Yes, with system libraries (using build_orc_from_source.sh)
+- **ORC libraries location**: `/usr/local/lib/liborc.a` (newly built)
+- **Previous ORC vendored libraries** (removed):
+  - `/usr/local/lib/liborc_vendored_protobuf.a` (removed)
+  - `/usr/local/lib/liborc_vendored_lz4.a` (removed)
+  - `/usr/local/lib/liborc_vendored_zlib.a` (removed)
+  - `/usr/local/lib/liborc_vendored_zstd.a` (removed)
 
 ## Solutions
 
@@ -96,13 +98,43 @@ RUN apt-get update && apt-get install -y cmake git g++ libarrow-dev libparquet-d
 
 Modify ORC's CMakeLists.txt to enforce use of system protobuf 3.5.1 instead of vendored version (if compatible).
 
+## Phase 8.1 Update: ORC Rebuilt from Source (Jan 2, 2026)
+
+### Actions Taken
+1. Rebuilt Apache ORC from source using `scripts/build_orc_from_source.sh`
+2. Used system libraries instead of vendored dependencies (DORC_PREFER_STATIC_*=OFF)
+3. Rebuilt with protobuf 3.12.4 (actual system libprotoc version)
+
+### Current Status
+- ✅ **ORC compilation with Arrow**: Builds successfully with `-DTPCH_ENABLE_ORC=ON`
+- ✅ **CSV and Parquet formats**: Work perfectly, no protobuf conflicts
+- ⚠️ **ORC runtime with Arrow**: Still fails with duplicate protobuf descriptor registration error
+  - Error: "File already exists in database: orc_proto.proto"
+  - This is a protobuf limitation when two libraries define the same message types
+
+### Root Cause (Updated Understanding)
+The issue is not a simple ABI mismatch, but rather **protobuf descriptor database pollution**:
+- Both ORC and Arrow include compiled protobuf message definitions (orc_proto)
+- When both libraries are loaded together, the protobuf library detects duplicate registrations
+- This is a fundamental limitation of static-linking protobuf messages to multiple libraries
+- The error occurs even with rebuilt ORC using system libraries
+
+### Technical Details of Protobuf Issue
+Protobuf uses a global descriptor database to track all known message types. When:
+1. Arrow is loaded (contains protobuf message definitions)
+2. ORC is loaded (contains same protobuf message definitions from build)
+3. Protobuf initialization runs → detects duplicates → throws fatal error
+
+This is different from an ABI mismatch and requires a different solution.
+
 ## Workaround for Current Environment
 
 The code compiles correctly and the ORC writer implementation is sound. To test/develop:
 
-1. **Use ORC without Arrow**: The ORC writer can be tested independently of Arrow
+1. **Use ORC without Arrow**: The ORC writer can be tested independently of Arrow (no protobuf conflict)
 2. **Use static linking where possible**: Prefer static libraries to avoid runtime conflicts
 3. **Consider using Parquet instead**: For the current development phase, use the Parquet writer which doesn't have this conflict
+4. **Use ORC in separate process**: Data can be written in ORC format via subprocess if needed
 
 ## Code Status
 
