@@ -39,6 +39,12 @@ if(TPCH_ENABLE_ASAN)
 endif()
 
 # Find required packages from system
+# Note: We need to find zstd before Arrow to avoid CMake configuration issues
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(ZSTD libzstd)
+endif()
+
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(ORC QUIET)
@@ -46,7 +52,6 @@ find_package(Protobuf QUIET)
 find_package(lz4 QUIET)
 find_package(Snappy QUIET)
 find_package(ZLIB QUIET)
-find_package(zstd QUIET)
 
 # Print found status
 message(STATUS "Arrow found: ${Arrow_LIBRARY}")
@@ -97,37 +102,35 @@ target_link_libraries(tpch_core PUBLIC
 )
 
 # Link ORC if available
-# ORC is only used by ORC writer, so linking is PRIVATE to tpch_core
-# ORC's vendored libraries need special handling to avoid system library conflicts
+# ORC references protobuf symbols, so we must link protobuf
 if(ORC_FOUND)
     target_link_libraries(tpch_core PRIVATE ORC::orc)
-    # Link ORC's vendored dependencies to use consistent versions
-    find_library(ORC_VENDORED_PROTOBUF NAMES orc_vendored_protobuf
-        PATHS /usr/local/lib /usr/lib)
-    if(ORC_VENDORED_PROTOBUF)
-        target_link_libraries(tpch_core PRIVATE ${ORC_VENDORED_PROTOBUF})
-    endif()
 
-    find_library(ORC_VENDORED_LZ4 NAMES orc_vendored_lz4
-        PATHS /usr/local/lib /usr/lib)
-    if(ORC_VENDORED_LZ4)
-        target_link_libraries(tpch_core PRIVATE ${ORC_VENDORED_LZ4})
-    endif()
-
-    find_library(ORC_VENDORED_ZLIB NAMES orc_vendored_zlib
-        PATHS /usr/local/lib /usr/lib)
-    if(ORC_VENDORED_ZLIB)
-        target_link_libraries(tpch_core PRIVATE ${ORC_VENDORED_ZLIB})
-    endif()
-
-    find_library(ORC_VENDORED_ZSTD NAMES orc_vendored_zstd
-        PATHS /usr/local/lib /usr/lib)
-    if(ORC_VENDORED_ZSTD)
-        target_link_libraries(tpch_core PRIVATE ${ORC_VENDORED_ZSTD})
+    # Find and link system protobuf that ORC was built with
+    find_library(PROTOBUF_LIB NAMES protobuf
+        PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib)
+    if(PROTOBUF_LIB)
+        target_link_libraries(tpch_core PRIVATE ${PROTOBUF_LIB})
     endif()
 endif()
 
 # Arrow has dependencies on system libraries that need to be linked AFTER ORC
+# Link compression libraries for Arrow's support
+find_library(ZLIB_LIB NAMES z)
+if(ZLIB_LIB)
+    target_link_libraries(tpch_core PRIVATE ${ZLIB_LIB})
+endif()
+
+find_library(ZSTD_LIB NAMES zstd)
+if(ZSTD_LIB)
+    target_link_libraries(tpch_core PRIVATE ${ZSTD_LIB})
+endif()
+
+find_library(LZ4_LIB NAMES lz4)
+if(LZ4_LIB)
+    target_link_libraries(tpch_core PRIVATE ${LZ4_LIB})
+endif()
+
 # Snappy must come at the very end due to linker symbol ordering requirements
 find_library(SNAPPY_LIB NAMES snappy)
 if(SNAPPY_LIB)
