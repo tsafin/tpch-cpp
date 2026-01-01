@@ -22,6 +22,7 @@ option(TPCH_BUILD_EXAMPLES "Build example applications" ON)
 option(TPCH_BUILD_TESTS "Build unit tests" OFF)
 option(TPCH_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(TPCH_ENABLE_ASYNC_IO "Enable async I/O with io_uring" OFF)
+option(TPCH_ENABLE_ORC "Enable ORC file format support" OFF)
 
 # Compiler configuration
 include(cmake/CompilerWarnings.cmake)
@@ -65,19 +66,26 @@ find_package(ZLIB QUIET)
 
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
-find_package(ORC QUIET)
+
+if(TPCH_ENABLE_ORC)
+    find_package(ORC QUIET)
+endif()
 
 # Print found status
 message(STATUS "Arrow found: ${Arrow_LIBRARY}")
 message(STATUS "Parquet found: ${Parquet_LIBRARY}")
 
-if(ORC_FOUND)
-    message(STATUS "ORC found: ${ORC_LIBRARY}")
-    if(NOT Protobuf_FOUND)
-        message(WARNING "Protobuf not found - ORC may not link correctly")
+if(TPCH_ENABLE_ORC)
+    if(ORC_FOUND)
+        message(STATUS "ORC found: ${ORC_LIBRARY}")
+        if(NOT Protobuf_FOUND)
+            message(WARNING "Protobuf not found - ORC may not link correctly")
+        endif()
+    else()
+        message(FATAL_ERROR "ORC requested (TPCH_ENABLE_ORC=ON) but not found - install with: sudo apt-get install liborc-dev")
     endif()
 else()
-    message(WARNING "ORC not found - install with: sudo apt-get install liborc-dev")
+    message(STATUS "ORC support disabled (TPCH_ENABLE_ORC=OFF)")
 endif()
 
 if(TPCH_ENABLE_ASYNC_IO)
@@ -100,8 +108,8 @@ set(TPCH_CORE_SOURCES
     # src/dbgen/dbgen_wrapper.cpp - deferred to Phase 7.4+ when dbgen linking is resolved
 )
 
-# Add ORC writer if available
-if(ORC_FOUND)
+# Add ORC writer if enabled and available
+if(TPCH_ENABLE_ORC AND ORC_FOUND)
     list(APPEND TPCH_CORE_SOURCES
         src/writers/orc_writer.cpp
     )
@@ -122,9 +130,9 @@ target_link_libraries(tpch_core PUBLIC
 # Full dbgen integration requires resolving multiple object file dependencies
 # target_link_libraries(tpch_core PUBLIC dbgen)
 
-# Link ORC if available
+# Link ORC if enabled and available
 # ORC references protobuf symbols, so we must link protobuf
-if(ORC_FOUND)
+if(TPCH_ENABLE_ORC AND ORC_FOUND)
     target_link_libraries(tpch_core PRIVATE ORC::orc)
 
     if(TARGET protobuf::libprotobuf)
@@ -160,8 +168,12 @@ if(SNAPPY_LIB)
 endif()
 
 
-# Define compilation flag for available dependencies
+# Define compilation flags for enabled features
 target_compile_definitions(tpch_core PUBLIC TPCH_DEPS_AVAILABLE)
+
+if(TPCH_ENABLE_ORC)
+    target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ORC)
+endif()
 
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_link_libraries(tpch_core PUBLIC Uring::uring)
@@ -171,6 +183,14 @@ endif()
 # Main benchmark executable
 add_executable(tpch_benchmark src/main.cpp)
 target_link_libraries(tpch_benchmark PRIVATE tpch_core)
+
+# Ensure main executable sees the same compilation flags
+if(TPCH_ENABLE_ORC)
+    target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ORC)
+endif()
+if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
+    target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ASYNC_IO)
+endif()
 
 # Examples
 if(TPCH_BUILD_EXAMPLES)

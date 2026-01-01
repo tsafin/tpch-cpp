@@ -14,7 +14,7 @@
 #include "tpch/writer_interface.hpp"
 #include "tpch/csv_writer.hpp"
 #include "tpch/parquet_writer.hpp"
-#ifdef TPCH_DEPS_AVAILABLE
+#ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
 #endif
 
@@ -120,7 +120,7 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
     } else if (format == "parquet") {
         return std::make_unique<tpch::ParquetWriter>(filepath);
     }
-#ifdef TPCH_DEPS_AVAILABLE
+#ifdef TPCH_ENABLE_ORC
     else if (format == "orc") {
         return std::make_unique<tpch::ORCWriter>(filepath);
     }
@@ -138,7 +138,7 @@ int main(int argc, char* argv[]) {
 
         // Validate format
         if (opts.format != "csv" && opts.format != "parquet"
-#ifdef TPCH_DEPS_AVAILABLE
+#ifdef TPCH_ENABLE_ORC
             && opts.format != "orc"
 #endif
         ) {

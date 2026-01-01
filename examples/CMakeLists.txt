@@ -15,8 +15,8 @@ if(TPCH_BUILD_EXAMPLES)
         Arrow::arrow
     )
 
-    # simple_orc - Demonstrates ORC writing (if ORC is available)
-    if(ORC_FOUND)
+    # simple_orc - Demonstrates ORC writing (if ORC is enabled and available)
+    if(TPCH_ENABLE_ORC AND ORC_FOUND)
         add_executable(simple_orc simple_orc.cpp)
         # tpch_core already includes snappy via its dependency on arrow
         # We just need to link in the right order
