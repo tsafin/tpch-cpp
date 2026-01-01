@@ -7,12 +7,25 @@
 #include <cstring>
 #include <sys/stat.h>
 #include <cerrno>
+#include <cstdlib>
 
 #ifdef TPCH_ENABLE_ASYNC_IO
 #include "tpch/async_io.hpp"
 #endif
 
 using Clock = std::chrono::high_resolution_clock;
+
+// Helper for aligned memory allocation (required for O_DIRECT)
+struct AlignedDeleter {
+    void operator()(char* p) const { free(p); }
+};
+using AlignedBuffer = std::unique_ptr<char[], AlignedDeleter>;
+
+AlignedBuffer make_aligned_buffer(size_t size) {
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, 4096, size) != 0) throw std::bad_alloc();
+    return AlignedBuffer(static_cast<char*>(ptr));
+}
 
 /**
  * Synchronous write benchmark - baseline comparison
@@ -24,11 +37,11 @@ void benchmark_sync_write(const std::string& filename, size_t num_writes, size_t
     std::cout << "Write size: " << write_size << " bytes" << std::endl;
 
     // Allocate write buffer
-    auto buffer = std::make_unique<char[]>(write_size);
+    auto buffer = make_aligned_buffer(write_size);
     std::memset(buffer.get(), 'A', write_size);
 
-    // Open file for writing
-    int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    // Open file for writing (using O_DIRECT for fair I/O comparison)
+    int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, 0644);
     if (fd < 0) {
         std::cerr << "Failed to open file: " << strerror(errno) << std::endl;
         return;
@@ -56,7 +69,7 @@ void benchmark_sync_write(const std::string& filename, size_t num_writes, size_t
 
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     size_t total_bytes = num_writes * write_size;
-    double throughput = (duration > 0) ? (static_cast<double>(total_bytes) / (1024.0 * 1024.0) / (duration / 1000.0)) : 0.0;
+    double throughput = (duration > 0) ? (static_cast<double>(total_bytes) / (1024.0 * 1024.0) / (static_cast<double>(duration) / 1000.0)) : 0.0;
 
     std::cout << "Time: " << duration << " ms" << std::endl;
     std::cout << "Total written: " << (total_bytes / (1024 * 1024)) << " MB" << std::endl;
@@ -76,22 +89,23 @@ void benchmark_async_write(const std::string& filename, size_t num_writes, size_
 
     try {
         // Allocate write buffers
-        std::vector<std::unique_ptr<char[]>> buffers;
+        std::vector<AlignedBuffer> buffers;
         for (size_t i = 0; i < num_writes; ++i) {
-            auto buffer = std::make_unique<char[]>(write_size);
+            auto buffer = make_aligned_buffer(write_size);
             std::memset(buffer.get(), 'B', write_size);
             buffers.push_back(std::move(buffer));
         }
 
-        // Open file for writing
-        int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        // Open file for writing (using O_DIRECT)
+        int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, 0644);
         if (fd < 0) {
             std::cerr << "Failed to open file: " << strerror(errno) << std::endl;
             return;
         }
 
         // Create async I/O context
-        tpch::AsyncIOContext aio(256);
+        const uint32_t queue_depth = 256;
+        tpch::AsyncIOContext aio(queue_depth);
 
         // Benchmark asynchronous writes
         auto start = Clock::now();
@@ -99,13 +113,13 @@ void benchmark_async_write(const std::string& filename, size_t num_writes, size_
         // Submit all writes
         off_t offset = 0;
         for (size_t i = 0; i < num_writes; ++i) {
+            // Keep the queue full for maximum throughput
+            if (aio.pending_count() >= static_cast<int>(queue_depth)) {
+                aio.wait_completions(1);
+            }
+
             aio.submit_write(fd, buffers[i].get(), write_size, offset);
             offset += write_size;
-
-            // Flush periodically to avoid queue overflow
-            if ((i + 1) % 64 == 0) {
-                aio.wait_completions(32);
-            }
         }
 
         // Wait for all pending operations
@@ -116,7 +130,7 @@ void benchmark_async_write(const std::string& filename, size_t num_writes, size_
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
         size_t total_bytes = num_writes * write_size;
-        double throughput = (duration > 0) ? (static_cast<double>(total_bytes) / (1024.0 * 1024.0) / (duration / 1000.0)) : 0.0;
+        double throughput = (duration > 0) ? (static_cast<double>(total_bytes) / (1024.0 * 1024.0) / (static_cast<double>(duration) / 1000.0)) : 0.0;
 
         std::cout << "Time: " << duration << " ms" << std::endl;
         std::cout << "Total written: " << (total_bytes / (1024 * 1024)) << " MB" << std::endl;
@@ -160,7 +174,7 @@ int main() {
     std::cout << "=== Async I/O Demo (io_uring enabled) ===" << std::endl;
 
     // Test parameters
-    const size_t num_writes = 256;      // Number of write operations
+    const size_t num_writes = 4096;     // Number of write operations (256MB total)
     const size_t write_size = 64 * 1024; // 64KB per write
 
     run_comparison(num_writes, write_size);
