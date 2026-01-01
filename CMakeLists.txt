@@ -203,8 +203,8 @@ if(TPCH_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-# Third-party: dbgen (deferred to Phase 7.4+ - requires dbgen Makefile build fixes)
-# add_subdirectory(third_party/dbgen)
+# Third-party: dbgen
+add_subdirectory(third_party/dbgen)
 
 # Install targets
 install(TARGETS tpch_benchmark
