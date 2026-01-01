@@ -1,4 +1,4 @@
-# Find Apache ORC C++
+# Find Apache ORC
 #
 # This module tries to find ORC's include directory and libraries.
 #
@@ -9,26 +9,21 @@
 #  ORC::orc          - Imported library target for ORC
 #
 
-find_path(ORC_INCLUDE_DIR
-    NAMES orc/OrcFile.hh
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(PC_ORC QUIET orc)
+endif()
+
+find_path(ORC_INCLUDE_DIR NAMES orc/OrcFile.hh
+    HINTS ${PC_ORC_INCLUDEDIR} ${PC_ORC_INCLUDE_DIRS}
     PATH_SUFFIXES include
-    HINTS
-        ${ORC_ROOT}
-        $ENV{ORC_ROOT}
-        /usr
-        /usr/local
-        /opt/orc
+    HINTS /usr/local /usr
 )
 
-find_library(ORC_LIBRARY
-    NAMES orc orc_shared
+find_library(ORC_LIBRARY NAMES orc
+    HINTS ${PC_ORC_LIBDIR} ${PC_ORC_LIBRARY_DIRS}
     PATH_SUFFIXES lib lib64
-    HINTS
-        ${ORC_ROOT}
-        $ENV{ORC_ROOT}
-        /usr
-        /usr/local
-        /opt/orc
+    HINTS /usr/local /usr
 )
 
 # Handle version
@@ -45,7 +40,6 @@ endif()
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(ORC
-    FOUND_VAR ORC_FOUND
     REQUIRED_VARS ORC_INCLUDE_DIR ORC_LIBRARY
     VERSION_VAR ORC_VERSION_MAJOR
 )

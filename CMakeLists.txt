@@ -15,7 +15,7 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # Add CMake modules directory
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Build options
 option(TPCH_BUILD_EXAMPLES "Build example applications" ON)
@@ -45,13 +45,27 @@ if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD libzstd)
 endif()
 
+# Find dependencies before Arrow/Parquet to ensure targets are available
+# and suppress warnings from Arrow's internal dependency checks
+find_package(zstd REQUIRED)
+set(zstdAlt_FOUND TRUE) # Prevent Arrow from trying to find zstd again
+
+find_package(lz4 REQUIRED)
+set(lz4Alt_FOUND TRUE)
+
+find_package(re2 REQUIRED)
+set(re2Alt_FOUND TRUE)
+
+find_package(Thrift REQUIRED)
+set(ThriftAlt_FOUND TRUE)
+
+find_package(Protobuf REQUIRED)
+find_package(Snappy QUIET)
+find_package(ZLIB QUIET)
+
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(ORC QUIET)
-find_package(Protobuf QUIET)
-find_package(lz4 QUIET)
-find_package(Snappy QUIET)
-find_package(ZLIB QUIET)
 
 # Print found status
 message(STATUS "Arrow found: ${Arrow_LIBRARY}")
@@ -106,11 +120,12 @@ target_link_libraries(tpch_core PUBLIC
 if(ORC_FOUND)
     target_link_libraries(tpch_core PRIVATE ORC::orc)
 
-    # Find and link system protobuf that ORC was built with
-    find_library(PROTOBUF_LIB NAMES protobuf
-        PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib)
-    if(PROTOBUF_LIB)
-        target_link_libraries(tpch_core PRIVATE ${PROTOBUF_LIB})
+    if(TARGET protobuf::libprotobuf)
+        target_link_libraries(tpch_core PRIVATE protobuf::libprotobuf)
+    elseif(TARGET Protobuf::protobuf)
+        target_link_libraries(tpch_core PRIVATE Protobuf::protobuf)
+    else()
+        target_link_libraries(tpch_core PRIVATE ${Protobuf_LIBRARIES})
     endif()
 endif()
 

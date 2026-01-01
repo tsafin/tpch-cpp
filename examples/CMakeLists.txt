@@ -23,7 +23,17 @@ if(TPCH_BUILD_EXAMPLES)
         target_link_libraries(simple_orc PRIVATE
             tpch_core
             Arrow::arrow
+            ORC::orc
         )
+
+        find_package(Protobuf REQUIRED)
+        if(TARGET protobuf::libprotobuf)
+            target_link_libraries(simple_orc PRIVATE protobuf::libprotobuf)
+        elseif(TARGET Protobuf::protobuf)
+            target_link_libraries(simple_orc PRIVATE Protobuf::protobuf)
+        else()
+            target_link_libraries(simple_orc PRIVATE ${Protobuf_LIBRARIES})
+        endif()
     endif()
 
     # Future: async_io_demo
