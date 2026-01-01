@@ -34,12 +34,20 @@ TODO
    - Full dbgen integration deferred (Phase 7.4+)
    - Requires resolving multiple object file dependencies
 
-## Current Status
+## Current Status (Updated Jan 2, 2026)
 
-**Phase 8**: ORC support made explicit via `TPCH_ENABLE_ORC` CMake option
-- Default build: Works with CSV and Parquet only
-- Protobuf issues isolated and avoidable
-- Full ORC support available when enabled
+**Phase 8.1**: ORC Runtime Issue Analysis & Documentation
+- ORC rebuilt from source with system libraries using build_orc_from_source.sh
+- Root cause clarified: Protobuf descriptor database collision (not ABI mismatch)
+- Status: ✅ ORC builds with system libraries, CSV/Parquet work perfectly
+- Issue: ORC + Arrow together cause protobuf duplicate registration error
+- Workarounds documented for future resolution
+
+**Phase 8.2**: dbgen Library Building Complete
+- ✅ dbgen Makefile integration fixed and working
+- ✅ libdbgen.a built successfully (178KB with all data generation objects)
+- ✅ Object files compiled: build.o, bm_utils.o, rnd.o, print.o, etc.
+- ✅ Ready for C++ wrapper integration
 
 **Benchmarks Verified**:
 - Parquet: 100 rows, 6804 bytes, 3333 rows/sec ✓
@@ -48,9 +56,17 @@ TODO
 
 ## Next Steps (Priority Order)
 
-1. Resolve protobuf compatibility issues with ORC
-2. Finalize dbgen integration (Phase 7.4+)
-3. Add comprehensive benchmarking harness
-4. Implement remaining TPC-H tables
+1. 🚧 **Phase 8.3**: Connect main.cpp to dbgen library
+   - Implement --use-dbgen command-line flag
+   - Call dbgen functions from C++ wrapper
+   - Enable real TPC-H data generation
+
+2. **Phase 9**: Scale Factor Support
+   - Implement SF parameter support in dbgen_wrapper
+   - Test with SF=1, 10, 100
+   - Verify row count scaling
+
+3. Add comprehensive benchmarking harness (benchmark.sh - already done)
+4. Implement remaining TPC-H tables beyond lineitem
 5. Add multi-threaded data generation support
 
