@@ -29,7 +29,7 @@ git clean -xfd
 # Build and install
 # We explicitly disable building tools/tests and force usage of system libraries
 # to ensure ABI compatibility with Arrow.
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_INSTALL_PREFIX=/usr/local \
     -DBUILD_JAVA=OFF \
     -DBUILD_LIBHDFSPP=OFF \
@@ -46,7 +46,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
     -DORC_PREFER_STATIC_SNAPPY=OFF \
     -DSNAPPY_HOME=/usr
 
-JOBS=$(( ($(nproc)/2) > 0 ? ($(nproc)/2) : 1 ))
+JOBS=$(( ($(nproc)/2) > 0 ? ($(nproc)/2 + 2) : 1 ))
 cmake --build build -j"${JOBS}"
 
 sudo cmake --install build

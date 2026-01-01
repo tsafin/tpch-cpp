@@ -97,7 +97,7 @@ set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
     src/writers/parquet_writer.cpp
     src/async/io_uring_context.cpp
-    src/dbgen/dbgen_wrapper.cpp
+    # Note: dbgen_wrapper deferred to Phase 7.3 (requires full dbgen build integration)
 )
 
 # Add ORC writer if available
@@ -166,6 +166,8 @@ endif()
 # Main benchmark executable
 add_executable(tpch_benchmark src/main.cpp)
 target_link_libraries(tpch_benchmark PRIVATE tpch_core)
+# Note: dbgen linking is deferred - dbgen integration is complex and requires proper Make setup
+# For now, the benchmark uses synthetic data generation for PoC
 
 # Examples
 if(TPCH_BUILD_EXAMPLES)

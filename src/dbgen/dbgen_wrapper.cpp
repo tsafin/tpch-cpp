@@ -34,16 +34,6 @@ typedef long long DSS_HUGE;
 #define N_CMNT_MAX 114
 #define SUPP_PER_PART 4
 
-// From dss.h constants
-#define PART 0
-#define PSUPP 1
-#define SUPP 2
-#define CUST 3
-#define ORDER 4
-#define LINE 5
-#define NATION 8
-#define REGION 9
-
 // Customer structure
 typedef struct {
     DSS_HUGE custkey;
@@ -95,6 +85,16 @@ typedef struct {
     line_t l[O_LCNT_MAX];
 } order_t;
 
+// Partsupp structure (must be defined before part_t)
+typedef struct {
+    DSS_HUGE partkey;
+    DSS_HUGE suppkey;
+    DSS_HUGE qty;
+    DSS_HUGE scost;
+    char comment[PS_CMNT_MAX + 1];
+    int clen;
+} partsupp_t;
+
 // Part structure
 typedef struct {
     DSS_HUGE partkey;
@@ -109,17 +109,8 @@ typedef struct {
     DSS_HUGE retailprice;
     char comment[P_CMNT_MAX + 1];
     int clen;
+    partsupp_t s[SUPP_PER_PART];  // Part has SUPP_PER_PART (4) supplied suppliers
 } part_t;
-
-// Partsupp structure
-typedef struct {
-    DSS_HUGE partkey;
-    DSS_HUGE suppkey;
-    DSS_HUGE qty;
-    DSS_HUGE scost;
-    char comment[PS_CMNT_MAX + 1];
-    int clen;
-} partsupp_t;
 
 // Supplier structure
 typedef struct {
@@ -142,6 +133,16 @@ typedef struct {
     char comment[N_CMNT_MAX + 1];
     int clen;
 } code_t;
+
+// From dss.h constants (table IDs)
+#define DBGEN_TABLE_PART 0
+#define DBGEN_TABLE_PSUPP 1
+#define DBGEN_TABLE_SUPP 2
+#define DBGEN_TABLE_CUST 3
+#define DBGEN_TABLE_ORDER 4
+#define DBGEN_TABLE_LINE 5
+#define DBGEN_TABLE_NATION 8
+#define DBGEN_TABLE_REGION 9
 
 // dbgen global variables
 extern long scale;
@@ -256,7 +257,7 @@ void DBGenWrapper::generate_lineitem(
         init_dbgen();
     }
 
-    row_start(LINE);
+    row_start(DBGEN_TABLE_LINE);
 
     long rows_generated = 0;
 
@@ -276,13 +277,13 @@ void DBGenWrapper::generate_lineitem(
             rows_generated++;
 
             if (max_rows > 0 && rows_generated >= max_rows) {
-                row_stop(LINE);
+                row_stop(DBGEN_TABLE_LINE);
                 return;
             }
         }
     }
 
-    row_stop(LINE);
+    row_stop(DBGEN_TABLE_LINE);
 }
 
 void DBGenWrapper::generate_orders(
@@ -293,7 +294,7 @@ void DBGenWrapper::generate_orders(
         init_dbgen();
     }
 
-    row_start(ORDER);
+    row_start(DBGEN_TABLE_ORDER);
 
     long rows_generated = 0;
     long total_rows = get_row_count(TableType::ORDERS, scale_factor_);
@@ -310,12 +311,12 @@ void DBGenWrapper::generate_orders(
         rows_generated++;
 
         if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(ORDER);
+            row_stop(DBGEN_TABLE_ORDER);
             return;
         }
     }
 
-    row_stop(ORDER);
+    row_stop(DBGEN_TABLE_ORDER);
 }
 
 void DBGenWrapper::generate_customer(
@@ -326,7 +327,7 @@ void DBGenWrapper::generate_customer(
         init_dbgen();
     }
 
-    row_start(CUST);
+    row_start(DBGEN_TABLE_CUST);
 
     long rows_generated = 0;
     long total_rows = get_row_count(TableType::CUSTOMER, scale_factor_);
@@ -343,12 +344,12 @@ void DBGenWrapper::generate_customer(
         rows_generated++;
 
         if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(CUST);
+            row_stop(DBGEN_TABLE_CUST);
             return;
         }
     }
 
-    row_stop(CUST);
+    row_stop(DBGEN_TABLE_CUST);
 }
 
 void DBGenWrapper::generate_part(
@@ -359,7 +360,7 @@ void DBGenWrapper::generate_part(
         init_dbgen();
     }
 
-    row_start(PART);
+    row_start(DBGEN_TABLE_PART);
 
     long rows_generated = 0;
     long total_rows = get_row_count(TableType::PART, scale_factor_);
@@ -376,12 +377,12 @@ void DBGenWrapper::generate_part(
         rows_generated++;
 
         if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(PART);
+            row_stop(DBGEN_TABLE_PART);
             return;
         }
     }
 
-    row_stop(PART);
+    row_stop(DBGEN_TABLE_PART);
 }
 
 void DBGenWrapper::generate_partsupp(
@@ -392,7 +393,7 @@ void DBGenWrapper::generate_partsupp(
         init_dbgen();
     }
 
-    row_start(PSUPP);
+    row_start(DBGEN_TABLE_PSUPP);
 
     long rows_generated = 0;
     long total_rows_part = get_row_count(TableType::PART, scale_factor_);
@@ -411,13 +412,13 @@ void DBGenWrapper::generate_partsupp(
             rows_generated++;
 
             if (max_rows > 0 && rows_generated >= max_rows) {
-                row_stop(PSUPP);
+                row_stop(DBGEN_TABLE_PSUPP);
                 return;
             }
         }
     }
 
-    row_stop(PSUPP);
+    row_stop(DBGEN_TABLE_PSUPP);
 }
 
 void DBGenWrapper::generate_supplier(
@@ -428,7 +429,7 @@ void DBGenWrapper::generate_supplier(
         init_dbgen();
     }
 
-    row_start(SUPP);
+    row_start(DBGEN_TABLE_SUPP);
 
     long rows_generated = 0;
     long total_rows = get_row_count(TableType::SUPPLIER, scale_factor_);
@@ -445,12 +446,12 @@ void DBGenWrapper::generate_supplier(
         rows_generated++;
 
         if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(SUPP);
+            row_stop(DBGEN_TABLE_SUPP);
             return;
         }
     }
 
-    row_stop(SUPP);
+    row_stop(DBGEN_TABLE_SUPP);
 }
 
 void DBGenWrapper::generate_nation(
@@ -460,7 +461,7 @@ void DBGenWrapper::generate_nation(
         init_dbgen();
     }
 
-    row_start(NATION);
+    row_start(DBGEN_TABLE_NATION);
 
     code_t nation;
     for (DSS_HUGE i = 0; i < 25; ++i) {
@@ -473,7 +474,7 @@ void DBGenWrapper::generate_nation(
         }
     }
 
-    row_stop(NATION);
+    row_stop(DBGEN_TABLE_NATION);
 }
 
 void DBGenWrapper::generate_region(
@@ -483,7 +484,7 @@ void DBGenWrapper::generate_region(
         init_dbgen();
     }
 
-    row_start(REGION);
+    row_start(DBGEN_TABLE_REGION);
 
     code_t region;
     for (DSS_HUGE i = 0; i < 5; ++i) {
@@ -496,7 +497,7 @@ void DBGenWrapper::generate_region(
         }
     }
 
-    row_stop(REGION);
+    row_stop(DBGEN_TABLE_REGION);
 }
 
 void DBGenWrapper::generate_all_tables(
