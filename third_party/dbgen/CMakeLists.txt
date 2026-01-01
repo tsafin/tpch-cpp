@@ -14,23 +14,18 @@ endif()
 # Note: MACHINE, DATABASE, WORKLOAD are used in CFLAGS preprocessing
 add_custom_target(dbgen_build ALL
     COMMAND cp makefile.suite Makefile
-    # Build just the dbgen executable (OBJ1) - all necessary data generation objects
-    # This avoids trying to build qgen (OBJ2) which needs query generation defines
+    # Build individual object files needed for data generation
+    # These are the core TPC-H data generation objects (excluding driver.o which has main())
     COMMAND env -u CFLAGS -u CXXFLAGS ${CMAKE_MAKE_PROGRAM}
         CC=${CMAKE_C_COMPILER}
         MACHINE=LINUX
         DATABASE=PGSQL
         WORKLOAD=TPCH
-        LINKIT="ar rcs libdbgen.a"
-        LINKOPT=""
-        OBJ="$(OBJ)"
-        EXE="$(EXE)"
-        PROG1=""
-        \$\(OBJ1\)
-    # Now create libdbgen.a from the full OBJ1 files (excluding driver which has main())
-    COMMAND sh -c "ar r libdbgen.a build.o bm_utils.o rnd.o print.o load_stub.o bcd2.o speed_seed.o text.o permute.o rng64.o 2>/dev/null || true"
+        build.o bm_utils.o rnd.o print.o load_stub.o bcd2.o speed_seed.o text.o permute.o rng64.o
+    # Create library from object files (excluding driver which has main())
+    COMMAND ${CMAKE_AR} r libdbgen.a build.o bm_utils.o rnd.o print.o load_stub.o bcd2.o speed_seed.o text.o permute.o rng64.o
     WORKING_DIRECTORY "${DBGEN_SOURCE_DIR}"
-    COMMENT "Building TPC-H dbgen library (OBJ1 compilation)"
+    COMMENT "Building TPC-H dbgen library (data generation objects only)"
 )
 
 # Create imported library target
