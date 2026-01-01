@@ -105,7 +105,7 @@ set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
     src/writers/parquet_writer.cpp
     src/async/io_uring_context.cpp
-    # src/dbgen/dbgen_wrapper.cpp - deferred to Phase 7.4+ when dbgen linking is resolved
+    # src/dbgen/dbgen_wrapper.cpp  # Deferred - dbgen integration pending
 )
 
 # Add ORC writer if enabled and available
@@ -123,12 +123,8 @@ target_include_directories(tpch_core PUBLIC include)
 target_link_libraries(tpch_core PUBLIC
     Arrow::arrow
     Arrow::parquet
+    # dbgen linking deferred - wrapper uses synthetic data generation instead
 )
-
-# Optional: dbgen integration deferred to Phase 7.4+
-# Currently using synthetic data generation (PoC)
-# Full dbgen integration requires resolving multiple object file dependencies
-# target_link_libraries(tpch_core PUBLIC dbgen)
 
 # Link ORC if enabled and available
 # ORC references protobuf symbols, so we must link protobuf
