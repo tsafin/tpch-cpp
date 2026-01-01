@@ -10,7 +10,7 @@ endif()
 
 # Custom build target for dbgen using its Makefile
 # dbgen uses makefile.suite which needs to be copied to Makefile
-# We compile just OBJ1 (dbgen executable objects) to avoid query generation
+# We compile just OBJ1 (dbgen executable objects) excluding driver.o
 # Note: MACHINE, DATABASE, WORKLOAD are used in CFLAGS preprocessing
 add_custom_target(dbgen_build ALL
     COMMAND cp makefile.suite Makefile
@@ -22,8 +22,10 @@ add_custom_target(dbgen_build ALL
         DATABASE=PGSQL
         WORKLOAD=TPCH
         build.o bm_utils.o rnd.o print.o load_stub.o bcd2.o speed_seed.o text.o permute.o rng64.o
+    # Compile initialization code that provides global state initialization
+    COMMAND ${CMAKE_C_COMPILER} -c -o dbgen_init.o dbgen_init.c
     # Create library from object files (excluding driver which has main())
-    COMMAND ${CMAKE_AR} r libdbgen.a build.o bm_utils.o rnd.o print.o load_stub.o bcd2.o speed_seed.o text.o permute.o rng64.o
+    COMMAND ${CMAKE_AR} r libdbgen.a build.o bm_utils.o rnd.o print.o load_stub.o bcd2.o speed_seed.o text.o permute.o rng64.o dbgen_init.o
     WORKING_DIRECTORY "${DBGEN_SOURCE_DIR}"
     COMMENT "Building TPC-H dbgen library (data generation objects only)"
 )
