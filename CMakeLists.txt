@@ -123,7 +123,7 @@ target_include_directories(tpch_core PUBLIC include)
 target_link_libraries(tpch_core PUBLIC
     Arrow::arrow
     Arrow::parquet
-    # dbgen linking deferred - wrapper uses synthetic data generation instead
+    dbgen_lib
 )
 
 # Link ORC if enabled and available
