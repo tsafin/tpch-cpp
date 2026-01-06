@@ -34,7 +34,7 @@ TODO
    - Full dbgen integration deferred (Phase 7.4+)
    - Requires resolving multiple object file dependencies
 
-## Current Status (Updated Jan 2, 2026)
+## Current Status (Updated Jan 6, 2026)
 
 **Phase 8.1**: ORC Runtime Issue Analysis & Documentation
 - ORC rebuilt from source with system libraries using build_orc_from_source.sh
@@ -62,24 +62,71 @@ TODO
 - CSV: 100 rows, 3219 bytes ✓
 - Examples: simple_csv, simple_arrow_parquet, async_io_demo all working ✓
 
+**Phase 9**: Real DBGen Integration & Scale Factor Support ✅ **PLANNING COMPLETE**
+- ✅ Comprehensive planning documentation created (2,333 lines, 88 KB across 6 documents)
+- ✅ PHASE_9_README.md - Navigation hub and reading guide
+- ✅ PHASE_9_SUMMARY.md - Executive summary with key insights
+- ✅ PHASE_9_PLAN.md - Complete technical specification (7-step plan)
+- ✅ INTEGRATION_ARCHITECTURE.md - System design with diagrams and call sequences
+- ✅ QUICK_REFERENCE.md - Step-by-step implementation guide with code snippets
+- ✅ PLANNING_DELIVERABLES.md - Documentation manifest and index
+- ✅ Core insight identified: Callback pattern for efficient C/C++ integration
+- ✅ Implementation scope defined: 2 new files, 2 modified files, ~500-700 LOC
+- ✅ 7-step implementation plan with detailed instructions
+- ✅ 5-phase testing strategy outlined
+- ✅ Success criteria defined (15+ metrics)
+- ✅ Performance expectations set (1M+ rows/sec target)
+- ✅ Risk assessment and mitigations documented
+- ✅ All planning files ready in `/home/tsafin/src/tpch-cpp/`
+- **Status**: Ready for implementation (no ambiguities, no missing information)
+
 ## Next Steps (Priority Order)
 
-1. **Phase 9**: Scale Factor Support & Real DBGen Integration
-   - Resolve dbgen C library build dependencies (text generation data)
-   - Implement SF parameter support in dbgen_wrapper
-   - Test with SF=1, 10, 100
-   - Verify row count scaling matches TPC-H spec
+### ⏳ IMMEDIATE (Phase 9 Implementation - Ready to Start)
 
-2. **Phase 10**: Multi-Table Support
-   - Add support for all 8 TPC-H tables beyond lineitem
-   - orders, customer, part, partsupp, supplier, nation, region
-   - Update main benchmark driver for table selection
+1. **Phase 9**: Real DBGen Integration & Scale Factor Support
+   - **Planning Status**: ✅ COMPLETE (see Phase 9 planning documents)
+   - **Implementation Ready**: YES
+   - **Recommended Reading Path**:
+     1. PHASE_9_SUMMARY.md (5 min) - Understand the approach
+     2. QUICK_REFERENCE.md (25 min) - Start coding with step-by-step guide
+   - **Scope**: 7-step implementation plan, ~500-700 LOC
+   - **Estimated Effort**: 6-9 hours
+   - **Deliverables**:
+     - Enable DBGenWrapper compilation
+     - Create dbgen_converter.hpp/cpp
+     - Refactor main.cpp for integration
+     - Test with all 8 TPC-H tables
+     - Validate scale factor support (SF=1, 10, 100)
+     - Performance: ≥1M rows/sec
 
-3. **Phase 11**: Multi-Threading & Optimization
-   - Multi-threaded data generation
-   - Parallel table generation
-   - Performance profiling and optimization
+### 🚀 FOLLOW-UP (Phase 10+)
 
-4. Comprehensive benchmarking harness (benchmark.sh - already done)
-5. Integration with csbench for performance tracking
+2. **Phase 10**: Distributed/Parallel Generation
+   - Multi-threaded table generation (one per thread)
+   - Parallel scale factor support
+   - Process-based parallelization
+   - Estimated effort: 3-4 hours
+
+3. **Phase 11**: Performance Optimization
+   - SIMD optimizations for row appending
+   - Parallel I/O operations
+   - Memory pool optimization
+   - Estimated effort: 4-5 hours
+
+4. **Phase 12**: Query Integration
+   - DuckDB/Polars integration
+   - Full end-to-end TPC-H benchmarking
+   - Report generation
+   - Estimated effort: 5-6 hours
+
+### 📚 REFERENCE DOCUMENTS
+
+All Phase 9 planning documents are in `/home/tsafin/src/tpch-cpp/`:
+- PHASE_9_README.md - Start here for navigation
+- PHASE_9_SUMMARY.md - 5-minute overview
+- PHASE_9_PLAN.md - Full technical specification
+- QUICK_REFERENCE.md - Implementation guide with code
+- INTEGRATION_ARCHITECTURE.md - System design details
+- PLANNING_DELIVERABLES.md - Documentation manifest
 

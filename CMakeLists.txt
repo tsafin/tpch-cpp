@@ -105,7 +105,8 @@ set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
     src/writers/parquet_writer.cpp
     src/async/io_uring_context.cpp
-    # src/dbgen/dbgen_wrapper.cpp  # Deferred - dbgen integration pending
+    src/dbgen/dbgen_wrapper.cpp
+    src/dbgen/dbgen_converter.cpp
 )
 
 # Add ORC writer if enabled and available
