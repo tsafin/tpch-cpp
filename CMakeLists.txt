@@ -100,6 +100,10 @@ endif()
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Build dbgen objects
+add_subdirectory(third_party/dbgen EXCLUDE_FROM_ALL)
+include_directories(${DBGEN_INCLUDE_DIRS})
+
 # Source files for main library
 set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
@@ -107,6 +111,7 @@ set(TPCH_CORE_SOURCES
     src/async/io_uring_context.cpp
     src/dbgen/dbgen_wrapper.cpp
     src/dbgen/dbgen_converter.cpp
+    ${DBGEN_OBJECTS}
 )
 
 # Add ORC writer if enabled and available
@@ -124,7 +129,7 @@ target_include_directories(tpch_core PUBLIC include)
 target_link_libraries(tpch_core PUBLIC
     Arrow::arrow
     Arrow::parquet
-    dbgen_lib
+    dbgen_objs
 )
 
 # Link ORC if enabled and available
@@ -199,9 +204,6 @@ if(TPCH_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
-
-# Third-party: dbgen
-add_subdirectory(third_party/dbgen)
 
 # Install targets
 install(TARGETS tpch_benchmark
