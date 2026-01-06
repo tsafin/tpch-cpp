@@ -1,127 +1,14 @@
 #include "tpch/dbgen_converter.hpp"
+#include "tpch/dbgen_wrapper.hpp"
 
-// Define constants needed by dsstypes.h
-#define DSS_HUGE long long
-#define DATE_LEN 11
-#define PHONE_LEN 15
-#define C_NAME_LEN 18
-#define C_ADDR_MAX 40
-#define MAXAGG_LEN 14
-#define C_CMNT_MAX 117
-#define L_CMNT_MAX 44
-#define O_CLRK_LEN 15
-#define O_LCNT_MAX 7
-#define O_CMNT_MAX 79
-#define PS_CMNT_MAX 124
-#define P_NAME_LEN 55
-#define P_MFG_LEN 25
-#define P_BRND_LEN 10
-#define P_TYPE_LEN 25
-#define P_CNTR_LEN 10
-#define P_CMNT_MAX 23
-#define S_NAME_LEN 25
-#define S_ADDR_MAX 40
-#define S_CMNT_MAX 101
-#define N_CMNT_MAX 114
-#define SUPP_PER_PART 4
-
-// Forward declare the structs from dbgen
-extern "C" {
-    typedef struct {
-        DSS_HUGE custkey;
-        char name[C_NAME_LEN + 3];
-        char address[C_ADDR_MAX + 1];
-        int alen;
-        DSS_HUGE nation_code;
-        char phone[PHONE_LEN + 1];
-        DSS_HUGE acctbal;
-        char mktsegment[MAXAGG_LEN + 1];
-        char comment[C_CMNT_MAX + 1];
-        int clen;
-    } customer_t;
-
-    typedef struct {
-        DSS_HUGE okey;
-        DSS_HUGE partkey;
-        DSS_HUGE suppkey;
-        DSS_HUGE lcnt;
-        DSS_HUGE quantity;
-        DSS_HUGE eprice;
-        DSS_HUGE discount;
-        DSS_HUGE tax;
-        char rflag[1];
-        char lstatus[1];
-        char cdate[DATE_LEN];
-        char sdate[DATE_LEN];
-        char rdate[DATE_LEN];
-        char shipinstruct[MAXAGG_LEN + 1];
-        char shipmode[MAXAGG_LEN + 1];
-        char comment[L_CMNT_MAX + 1];
-        int clen;
-    } line_t;
-
-    typedef struct {
-        DSS_HUGE okey;
-        DSS_HUGE custkey;
-        char orderstatus;
-        DSS_HUGE totalprice;
-        char odate[DATE_LEN];
-        char opriority[MAXAGG_LEN + 1];
-        char clerk[O_CLRK_LEN + 1];
-        long spriority;
-        DSS_HUGE lines;
-        char comment[O_CMNT_MAX + 1];
-        int clen;
-    } order_t;
-
-    typedef struct {
-        DSS_HUGE partkey;
-        DSS_HUGE suppkey;
-        DSS_HUGE qty;
-        DSS_HUGE scost;
-        char comment[PS_CMNT_MAX + 1];
-        int clen;
-    } partsupp_t;
-
-    typedef struct {
-        DSS_HUGE partkey;
-        char name[P_NAME_LEN + 1];
-        int nlen;
-        char mfgr[P_MFG_LEN + 1];
-        char brand[P_BRND_LEN + 1];
-        char type[P_TYPE_LEN + 1];
-        int tlen;
-        DSS_HUGE size;
-        char container[P_CNTR_LEN + 1];
-        DSS_HUGE retailprice;
-        char comment[P_CMNT_MAX + 1];
-        int clen;
-        partsupp_t s[SUPP_PER_PART];
-    } part_t;
-
-    typedef struct {
-        DSS_HUGE suppkey;
-        char name[S_NAME_LEN + 1];
-        char address[S_ADDR_MAX + 1];
-        int alen;
-        DSS_HUGE nation_code;
-        char phone[PHONE_LEN + 1];
-        DSS_HUGE acctbal;
-        char comment[S_CMNT_MAX + 1];
-        int clen;
-    } supplier_t;
-
-    typedef struct {
-        DSS_HUGE code;
-        char *text;
-        long join;
-        char comment[N_CMNT_MAX + 1];
-        int clen;
-    } code_t;
-}
-
-#include <stdexcept>
 #include <string>
+#include <stdexcept>
+#include <arrow/builder.h>
+
+// Include the embeddable tpch_dbgen.h header which defines all types
+extern "C" {
+#include "tpch_dbgen.h"
+}
 
 namespace tpch {
 
@@ -141,11 +28,11 @@ void append_lineitem_to_builders(
     static_cast<arrow::Int64Builder*>(builders["l_linenumber"].get())
         ->Append(line->lcnt);
 
-    // Quantity: convert to double (dbgen stores as cents)
+    // Quantity: convert to double (dbgen stores as integer, divide by 100 for cents)
     static_cast<arrow::DoubleBuilder*>(builders["l_quantity"].get())
         ->Append(static_cast<double>(line->quantity) / 100.0);
 
-    // Extended price, discount, tax: convert from cents
+    // Extended price, discount, tax: already double-compatible values (divide by 100)
     static_cast<arrow::DoubleBuilder*>(builders["l_extendedprice"].get())
         ->Append(static_cast<double>(line->eprice) / 100.0);
     static_cast<arrow::DoubleBuilder*>(builders["l_discount"].get())
@@ -161,14 +48,14 @@ void append_lineitem_to_builders(
     lstatus_builder->Append(std::string(line->lstatus, 1));
 
     // Date fields: extract null-terminated strings
-    auto* commitdate_builder = static_cast<arrow::StringBuilder*>(builders["l_commitdate"].get());
-    commitdate_builder->Append(std::string(line->cdate));
+    auto* cdate_builder = static_cast<arrow::StringBuilder*>(builders["l_commitdate"].get());
+    cdate_builder->Append(std::string(line->cdate));
 
-    auto* shipdate_builder = static_cast<arrow::StringBuilder*>(builders["l_shipdate"].get());
-    shipdate_builder->Append(std::string(line->sdate));
+    auto* sdate_builder = static_cast<arrow::StringBuilder*>(builders["l_shipdate"].get());
+    sdate_builder->Append(std::string(line->sdate));
 
-    auto* receiptdate_builder = static_cast<arrow::StringBuilder*>(builders["l_receiptdate"].get());
-    receiptdate_builder->Append(std::string(line->rdate));
+    auto* rdate_builder = static_cast<arrow::StringBuilder*>(builders["l_receiptdate"].get());
+    rdate_builder->Append(std::string(line->rdate));
 
     // Ship instructions and mode
     auto* shipinstruct_builder = static_cast<arrow::StringBuilder*>(builders["l_shipinstruct"].get());
@@ -227,8 +114,8 @@ void append_customer_to_builders(
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["c_name"].get());
     name_builder->Append(std::string(cust->name));
 
-    auto* address_builder = static_cast<arrow::StringBuilder*>(builders["c_address"].get());
-    address_builder->Append(std::string(cust->address, cust->alen));
+    auto* addr_builder = static_cast<arrow::StringBuilder*>(builders["c_address"].get());
+    addr_builder->Append(std::string(cust->address, cust->alen));
 
     static_cast<arrow::Int64Builder*>(builders["c_nationkey"].get())
         ->Append(cust->nation_code);
@@ -284,20 +171,22 @@ void append_partsupp_to_builders(
     const void* row,
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders) {
 
-    auto* ps = static_cast<const partsupp_t*>(row);
+    auto* psupp = static_cast<const partsupp_t*>(row);
 
     static_cast<arrow::Int64Builder*>(builders["ps_partkey"].get())
-        ->Append(ps->partkey);
+        ->Append(psupp->partkey);
+
     static_cast<arrow::Int64Builder*>(builders["ps_suppkey"].get())
-        ->Append(ps->suppkey);
+        ->Append(psupp->suppkey);
+
     static_cast<arrow::Int64Builder*>(builders["ps_availqty"].get())
-        ->Append(ps->qty);
+        ->Append(psupp->qty);
 
     static_cast<arrow::DoubleBuilder*>(builders["ps_supplycost"].get())
-        ->Append(static_cast<double>(ps->scost) / 100.0);
+        ->Append(static_cast<double>(psupp->scost) / 100.0);
 
     auto* comment_builder = static_cast<arrow::StringBuilder*>(builders["ps_comment"].get());
-    comment_builder->Append(std::string(ps->comment, ps->clen));
+    comment_builder->Append(std::string(psupp->comment, psupp->clen));
 }
 
 void append_supplier_to_builders(
@@ -312,8 +201,8 @@ void append_supplier_to_builders(
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["s_name"].get());
     name_builder->Append(std::string(supp->name));
 
-    auto* address_builder = static_cast<arrow::StringBuilder*>(builders["s_address"].get());
-    address_builder->Append(std::string(supp->address, supp->alen));
+    auto* addr_builder = static_cast<arrow::StringBuilder*>(builders["s_address"].get());
+    addr_builder->Append(std::string(supp->address, supp->alen));
 
     static_cast<arrow::Int64Builder*>(builders["s_nationkey"].get())
         ->Append(supp->nation_code);
@@ -332,43 +221,43 @@ void append_nation_to_builders(
     const void* row,
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders) {
 
-    auto* code = static_cast<const code_t*>(row);
+    auto* nation = static_cast<const code_t*>(row);
 
     static_cast<arrow::Int64Builder*>(builders["n_nationkey"].get())
-        ->Append(code->code);
+        ->Append(nation->code);
 
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["n_name"].get());
-    if (code->text) {
-        (void)name_builder->Append(std::string(code->text));
+    if (nation->text) {
+        name_builder->Append(std::string(nation->text));
     } else {
-        (void)name_builder->AppendNull();
+        name_builder->AppendNull();
     }
 
     static_cast<arrow::Int64Builder*>(builders["n_regionkey"].get())
-        ->Append(code->join);
+        ->Append(nation->join);
 
     auto* comment_builder = static_cast<arrow::StringBuilder*>(builders["n_comment"].get());
-    (void)comment_builder->Append(std::string(code->comment, code->clen));
+    comment_builder->Append(std::string(nation->comment, nation->clen));
 }
 
 void append_region_to_builders(
     const void* row,
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders) {
 
-    auto* region_code = static_cast<const code_t*>(row);
+    auto* region = static_cast<const code_t*>(row);
 
     static_cast<arrow::Int64Builder*>(builders["r_regionkey"].get())
-        ->Append(region_code->code);
+        ->Append(region->code);
 
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["r_name"].get());
-    if (region_code->text) {
-        (void)name_builder->Append(std::string(region_code->text));
+    if (region->text) {
+        name_builder->Append(std::string(region->text));
     } else {
-        (void)name_builder->AppendNull();
+        name_builder->AppendNull();
     }
 
     auto* comment_builder = static_cast<arrow::StringBuilder*>(builders["r_comment"].get());
-    (void)comment_builder->Append(std::string(region_code->comment, region_code->clen));
+    comment_builder->Append(std::string(region->comment, region->clen));
 }
 
 void append_row_to_builders(

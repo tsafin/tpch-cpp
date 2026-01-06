@@ -179,6 +179,7 @@ public:
 private:
     long scale_factor_;
     bool initialized_;
+    char** asc_dates_;  // Date array cache for orders/lineitem generation
 
     /**
      * Initialize dbgen global state
