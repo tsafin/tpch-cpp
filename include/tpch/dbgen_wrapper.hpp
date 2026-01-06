@@ -5,35 +5,16 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <mutex>
 
 #include <arrow/api.h>
 
+// Include dbgen types and API
+extern "C" {
+#include "tpch_dbgen.h"
+}
+
 namespace tpch {
-
-// C struct definitions for dbgen output types
-// These match the definitions in dbgen's dsstypes.h
-#define DATE_LEN 11
-#define L_CMNT_MAX 44
-
-struct line_t {
-    int64_t okey;
-    int64_t partkey;
-    int64_t suppkey;
-    int64_t lcnt;
-    int64_t quantity;
-    int64_t eprice;
-    int64_t discount;
-    int64_t tax;
-    char rflag[1];
-    char lstatus[1];
-    char cdate[DATE_LEN];
-    char sdate[DATE_LEN];
-    char rdate[DATE_LEN];
-    char shipinstruct[11];
-    char shipmode[11];
-    char comment[L_CMNT_MAX + 1];
-    int clen;
-};
 
 enum class TableType {
     LINEITEM,
@@ -62,6 +43,23 @@ long get_row_count(TableType table, long scale_factor);
  *
  * Provides iterator-style data generation with Arrow-compatible output.
  * Uses official dbgen C code as backend.
+ *
+ * **THREAD-SAFETY WARNING**:
+ *
+ * DBGenWrapper is NOT thread-safe for concurrent generation. The underlying
+ * dbgen implementation uses global mutable state (RNG seeds, configuration).
+ *
+ * Safe usage patterns:
+ * 1. Single-threaded: One DBGenWrapper per process/thread
+ * 2. Multi-process: Fork separate processes (OS provides memory isolation)
+ * 3. Sequential: Generate one table completely before next
+ *
+ * UNSAFE patterns:
+ * - Calling generate_*() from multiple threads concurrently
+ * - Multiple DBGenWrapper instances generating simultaneously
+ *
+ * For parallel generation, use multiple processes instead of threads.
+ * Distributions are loaded once and are read-only (safe for concurrent reads).
  */
 class DBGenWrapper {
 public:
@@ -69,6 +67,8 @@ public:
      * Initialize DBGenWrapper with scale factor
      *
      * @param scale_factor TPC-H scale factor (1 = 1GB baseline)
+     *
+     * Note: Distribution loading is thread-safe (one-time initialization)
      */
     explicit DBGenWrapper(long scale_factor);
 
