@@ -4,168 +4,16 @@
 #include <iostream>
 #include <stdexcept>
 
-// Declare dbgen C types and functions (avoiding full header includes)
-// These are the public interfaces from dbgen
+// dbgen C types and functions are already declared in tpch_dbgen.h
+// which is included via dbgen_wrapper.hpp
+
+// Additional dbgen globals we need to set
 extern "C" {
-
-// Type definitions from dsstypes.h
-typedef long long DSS_HUGE;
-
-#define DATE_LEN 11
-#define PHONE_LEN 15
-#define C_NAME_LEN 18
-#define C_ADDR_MAX 40
-#define MAXAGG_LEN 14
-#define C_CMNT_MAX 117
-#define L_CMNT_MAX 44
-#define O_CLRK_LEN 15
-#define O_LCNT_MAX 7
-#define O_CMNT_MAX 79
-#define PS_CMNT_MAX 124
-#define P_NAME_LEN 55
-#define P_MFG_LEN 25
-#define P_BRND_LEN 10
-#define P_TYPE_LEN 25
-#define P_CNTR_LEN 10
-#define P_CMNT_MAX 23
-#define S_NAME_LEN 25
-#define S_ADDR_MAX 40
-#define S_CMNT_MAX 101
-#define N_CMNT_MAX 114
-#define SUPP_PER_PART 4
-
-// Customer structure
-typedef struct {
-    DSS_HUGE custkey;
-    char name[C_NAME_LEN + 3];
-    char address[C_ADDR_MAX + 1];
-    int alen;
-    DSS_HUGE nation_code;
-    char phone[PHONE_LEN + 1];
-    DSS_HUGE acctbal;
-    char mktsegment[MAXAGG_LEN + 1];
-    char comment[C_CMNT_MAX + 1];
-    int clen;
-} customer_t;
-
-// Lineitem structure
-typedef struct {
-    DSS_HUGE okey;
-    DSS_HUGE partkey;
-    DSS_HUGE suppkey;
-    DSS_HUGE lcnt;
-    DSS_HUGE quantity;
-    DSS_HUGE eprice;
-    DSS_HUGE discount;
-    DSS_HUGE tax;
-    char rflag[1];
-    char lstatus[1];
-    char cdate[DATE_LEN];
-    char sdate[DATE_LEN];
-    char rdate[DATE_LEN];
-    char shipinstruct[MAXAGG_LEN + 1];
-    char shipmode[MAXAGG_LEN + 1];
-    char comment[L_CMNT_MAX + 1];
-    int clen;
-} line_t;
-
-// Order structure
-typedef struct {
-    DSS_HUGE okey;
-    DSS_HUGE custkey;
-    char orderstatus;
-    DSS_HUGE totalprice;
-    char odate[DATE_LEN];
-    char opriority[MAXAGG_LEN + 1];
-    char clerk[O_CLRK_LEN + 1];
-    long spriority;
-    DSS_HUGE lines;
-    char comment[O_CMNT_MAX + 1];
-    int clen;
-    line_t l[O_LCNT_MAX];
-} order_t;
-
-// Partsupp structure (must be defined before part_t)
-typedef struct {
-    DSS_HUGE partkey;
-    DSS_HUGE suppkey;
-    DSS_HUGE qty;
-    DSS_HUGE scost;
-    char comment[PS_CMNT_MAX + 1];
-    int clen;
-} partsupp_t;
-
-// Part structure
-typedef struct {
-    DSS_HUGE partkey;
-    char name[P_NAME_LEN + 1];
-    int nlen;
-    char mfgr[P_MFG_LEN + 1];
-    char brand[P_BRND_LEN + 1];
-    char type[P_TYPE_LEN + 1];
-    int tlen;
-    DSS_HUGE size;
-    char container[P_CNTR_LEN + 1];
-    DSS_HUGE retailprice;
-    char comment[P_CMNT_MAX + 1];
-    int clen;
-    partsupp_t s[SUPP_PER_PART];  // Part has SUPP_PER_PART (4) supplied suppliers
-} part_t;
-
-// Supplier structure
-typedef struct {
-    DSS_HUGE suppkey;
-    char name[S_NAME_LEN + 1];
-    char address[S_ADDR_MAX + 1];
-    int alen;
-    DSS_HUGE nation_code;
-    char phone[PHONE_LEN + 1];
-    DSS_HUGE acctbal;
-    char comment[S_CMNT_MAX + 1];
-    int clen;
-} supplier_t;
-
-// Code structure (for nation/region)
-typedef struct {
-    DSS_HUGE code;
-    char *text;
-    long join;
-    char comment[N_CMNT_MAX + 1];
-    int clen;
-} code_t;
-
-// From dss.h constants (table IDs)
-#define DBGEN_TABLE_PART 0
-#define DBGEN_TABLE_PSUPP 1
-#define DBGEN_TABLE_SUPP 2
-#define DBGEN_TABLE_CUST 3
-#define DBGEN_TABLE_ORDER 4
-#define DBGEN_TABLE_LINE 5
-#define DBGEN_TABLE_NATION 8
-#define DBGEN_TABLE_REGION 9
-
-// dbgen global variables
-extern long scale;
-extern int verbose;
-extern long force;
-extern char *d_path;
-
-// dbgen functions
-extern void dss_random(DSS_HUGE *tgt, DSS_HUGE min, DSS_HUGE max, long seed);
-extern void row_start(int t);
-extern void row_stop(int t);
-
-// Table building functions
-extern long mk_cust(DSS_HUGE n_cust, customer_t *c);
-extern long mk_order(DSS_HUGE index, order_t *o, long upd_num);
-extern long mk_part(DSS_HUGE index, part_t *p);
-extern long mk_supp(DSS_HUGE index, supplier_t *s);
-extern long mk_nation(DSS_HUGE i, code_t *c);
-extern long mk_region(DSS_HUGE i, code_t *c);
-
-// Partsupp building is done inside mk_part, so we extract from part_t
-
-}  // extern "C"
+    extern long scale;
+    extern long verbose;
+    extern long force;
+    extern char *d_path;
+}
 
 namespace tpch {
 
@@ -211,7 +59,7 @@ long get_row_count(TableType table, long scale_factor) {
 }
 
 DBGenWrapper::DBGenWrapper(long scale_factor)
-    : scale_factor_(scale_factor), initialized_(false) {
+    : scale_factor_(scale_factor), initialized_(false), asc_dates_(nullptr) {
     if (scale_factor <= 0) {
         throw std::invalid_argument("Scale factor must be positive");
     }
@@ -233,23 +81,37 @@ DBGenWrapper& DBGenWrapper::operator=(DBGenWrapper&& other) noexcept {
     return *this;
 }
 
-void DBGenWrapper::init_dbgen() {
+void tpch::DBGenWrapper::init_dbgen() {
     // Set global dbgen state
     // dbgen uses global variables for configuration
     scale = scale_factor_;
     verbose = 0;  // Suppress dbgen output
     force = 0;
     d_path = nullptr;  // Use current directory
+
+    // Pre-allocate the date array needed by mk_order and mk_lineitem
+    // This avoids the lazy allocation in mk_order which can fail if not properly initialized
+    if (asc_dates_ == nullptr) {
+        asc_dates_ = mk_ascdate();
+        if (asc_dates_ == nullptr) {
+            throw std::runtime_error("Failed to allocate date array for dbgen");
+        }
+    }
+
+    // Note: load_dists() is only needed if we're using print functions
+    // For now we skip it since we're directly converting structs to Arrow
+    // load_dists();
+
     initialized_ = true;
 }
 
-unsigned long DBGenWrapper::get_seed(int table_id) {
+unsigned long tpch::DBGenWrapper::get_seed(int table_id) {
     // TPC-H seed generation based on table ID
     // Each table gets a deterministic seed based on its type
     return (123456789UL + table_id * 999999991UL) % (1UL << 31);
 }
 
-void DBGenWrapper::generate_lineitem(
+void tpch::DBGenWrapper::generate_lineitem(
     std::function<void(const void* row)> callback,
     long max_rows) {
 
@@ -257,7 +119,10 @@ void DBGenWrapper::generate_lineitem(
         init_dbgen();
     }
 
-    row_start(DBGEN_TABLE_LINE);
+    // Reset RNG state before generating rows
+    dbgen_reset_seeds();
+
+    row_start(DBGEN_LINE);
 
     long rows_generated = 0;
 
@@ -277,16 +142,16 @@ void DBGenWrapper::generate_lineitem(
             rows_generated++;
 
             if (max_rows > 0 && rows_generated >= max_rows) {
-                row_stop(DBGEN_TABLE_LINE);
+                row_stop(DBGEN_LINE);
                 return;
             }
         }
     }
 
-    row_stop(DBGEN_TABLE_LINE);
+    row_stop(DBGEN_LINE);
 }
 
-void DBGenWrapper::generate_orders(
+void tpch::DBGenWrapper::generate_orders(
     std::function<void(const void* row)> callback,
     long max_rows) {
 
@@ -294,7 +159,8 @@ void DBGenWrapper::generate_orders(
         init_dbgen();
     }
 
-    row_start(DBGEN_TABLE_ORDER);
+    dbgen_reset_seeds();
+    row_start(DBGEN_ORDER);
 
     long rows_generated = 0;
     long total_rows = get_row_count(TableType::ORDERS, scale_factor_);
@@ -311,15 +177,15 @@ void DBGenWrapper::generate_orders(
         rows_generated++;
 
         if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(DBGEN_TABLE_ORDER);
+            row_stop(DBGEN_ORDER);
             return;
         }
     }
 
-    row_stop(DBGEN_TABLE_ORDER);
+    row_stop(DBGEN_ORDER);
 }
 
-void DBGenWrapper::generate_customer(
+void tpch::DBGenWrapper::generate_customer(
     std::function<void(const void* row)> callback,
     long max_rows) {
 
@@ -327,7 +193,8 @@ void DBGenWrapper::generate_customer(
         init_dbgen();
     }
 
-    row_start(DBGEN_TABLE_CUST);
+    dbgen_reset_seeds();
+    row_start(DBGEN_CUST);
 
     long rows_generated = 0;
     long total_rows = get_row_count(TableType::CUSTOMER, scale_factor_);
@@ -344,15 +211,15 @@ void DBGenWrapper::generate_customer(
         rows_generated++;
 
         if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(DBGEN_TABLE_CUST);
+            row_stop(DBGEN_CUST);
             return;
         }
     }
 
-    row_stop(DBGEN_TABLE_CUST);
+    row_stop(DBGEN_CUST);
 }
 
-void DBGenWrapper::generate_part(
+void tpch::DBGenWrapper::generate_part(
     std::function<void(const void* row)> callback,
     long max_rows) {
 
@@ -360,7 +227,8 @@ void DBGenWrapper::generate_part(
         init_dbgen();
     }
 
-    row_start(DBGEN_TABLE_PART);
+    dbgen_reset_seeds();
+    row_start(DBGEN_PART);
 
     long rows_generated = 0;
     long total_rows = get_row_count(TableType::PART, scale_factor_);
@@ -377,15 +245,15 @@ void DBGenWrapper::generate_part(
         rows_generated++;
 
         if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(DBGEN_TABLE_PART);
+            row_stop(DBGEN_PART);
             return;
         }
     }
 
-    row_stop(DBGEN_TABLE_PART);
+    row_stop(DBGEN_PART);
 }
 
-void DBGenWrapper::generate_partsupp(
+void tpch::DBGenWrapper::generate_partsupp(
     std::function<void(const void* row)> callback,
     long max_rows) {
 
@@ -393,7 +261,8 @@ void DBGenWrapper::generate_partsupp(
         init_dbgen();
     }
 
-    row_start(DBGEN_TABLE_PSUPP);
+    dbgen_reset_seeds();
+    row_start(DBGEN_PSUPP);
 
     long rows_generated = 0;
     long total_rows_part = get_row_count(TableType::PART, scale_factor_);
@@ -412,16 +281,16 @@ void DBGenWrapper::generate_partsupp(
             rows_generated++;
 
             if (max_rows > 0 && rows_generated >= max_rows) {
-                row_stop(DBGEN_TABLE_PSUPP);
+                row_stop(DBGEN_PSUPP);
                 return;
             }
         }
     }
 
-    row_stop(DBGEN_TABLE_PSUPP);
+    row_stop(DBGEN_PSUPP);
 }
 
-void DBGenWrapper::generate_supplier(
+void tpch::DBGenWrapper::generate_supplier(
     std::function<void(const void* row)> callback,
     long max_rows) {
 
@@ -429,7 +298,8 @@ void DBGenWrapper::generate_supplier(
         init_dbgen();
     }
 
-    row_start(DBGEN_TABLE_SUPP);
+    dbgen_reset_seeds();
+    row_start(DBGEN_SUPP);
 
     long rows_generated = 0;
     long total_rows = get_row_count(TableType::SUPPLIER, scale_factor_);
@@ -446,22 +316,23 @@ void DBGenWrapper::generate_supplier(
         rows_generated++;
 
         if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(DBGEN_TABLE_SUPP);
+            row_stop(DBGEN_SUPP);
             return;
         }
     }
 
-    row_stop(DBGEN_TABLE_SUPP);
+    row_stop(DBGEN_SUPP);
 }
 
-void DBGenWrapper::generate_nation(
+void tpch::DBGenWrapper::generate_nation(
     std::function<void(const void* row)> callback) {
 
     if (!initialized_) {
         init_dbgen();
     }
 
-    row_start(DBGEN_TABLE_NATION);
+    dbgen_reset_seeds();
+    row_start(DBGEN_NATION);
 
     code_t nation;
     for (DSS_HUGE i = 0; i < 25; ++i) {
@@ -474,17 +345,18 @@ void DBGenWrapper::generate_nation(
         }
     }
 
-    row_stop(DBGEN_TABLE_NATION);
+    row_stop(DBGEN_NATION);
 }
 
-void DBGenWrapper::generate_region(
+void tpch::DBGenWrapper::generate_region(
     std::function<void(const void* row)> callback) {
 
     if (!initialized_) {
         init_dbgen();
     }
 
-    row_start(DBGEN_TABLE_REGION);
+    dbgen_reset_seeds();
+    row_start(DBGEN_REGION);
 
     code_t region;
     for (DSS_HUGE i = 0; i < 5; ++i) {
@@ -497,47 +369,47 @@ void DBGenWrapper::generate_region(
         }
     }
 
-    row_stop(DBGEN_TABLE_REGION);
+    row_stop(DBGEN_REGION);
 }
 
-void DBGenWrapper::generate_all_tables(
+void tpch::DBGenWrapper::generate_all_tables(
     std::function<void(const char* table_name, const void* row)> callback) {
 
     // Generate each table
-    generate_customer([this, callback](const void* row) {
+    generate_customer([this, &callback](const void* row) {
         callback("customer", row);
     });
 
-    generate_supplier([this, callback](const void* row) {
+    generate_supplier([this, &callback](const void* row) {
         callback("supplier", row);
     });
 
-    generate_part([this, callback](const void* row) {
+    generate_part([this, &callback](const void* row) {
         callback("part", row);
     });
 
-    generate_partsupp([this, callback](const void* row) {
+    generate_partsupp([this, &callback](const void* row) {
         callback("partsupp", row);
     });
 
-    generate_nation([this, callback](const void* row) {
+    generate_nation([this, &callback](const void* row) {
         callback("nation", row);
     });
 
-    generate_region([this, callback](const void* row) {
+    generate_region([this, &callback](const void* row) {
         callback("region", row);
     });
 
-    generate_orders([this, callback](const void* row) {
+    generate_orders([this, &callback](const void* row) {
         callback("orders", row);
     });
 
-    generate_lineitem([this, callback](const void* row) {
+    generate_lineitem([this, &callback](const void* row) {
         callback("lineitem", row);
     });
 }
 
-std::shared_ptr<arrow::Schema> DBGenWrapper::get_schema(TableType table) {
+std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table) {
     using arrow::field;
     using arrow::int64;
     using arrow::float64;
@@ -645,3 +517,4 @@ std::shared_ptr<arrow::Schema> DBGenWrapper::get_schema(TableType table) {
 }
 
 }  // namespace tpch
+
