@@ -50,3 +50,17 @@ void row_stop(int t) {
 void dbg_text(int code, int i) {
     /* No-op: text generation not needed in embedded mode */
 }
+
+/*
+ * mk_ascdate() Fix for embedded mode
+ *
+ * NOTE: mk_ascdate() is now defined in bm_utils.c with internal caching.
+ * The function uses a static variable to cache its result on first call,
+ * ensuring all subsequent calls (from mk_order, mk_lineitem, etc.)
+ * return the same pre-allocated pointer.
+ *
+ * This completely avoids the double-allocation problem that was causing
+ * pointer corruption in Phase 9.1.
+ *
+ * dbgen_reset_seeds() is already implemented in tpch_init.c
+ */

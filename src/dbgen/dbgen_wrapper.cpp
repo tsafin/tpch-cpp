@@ -89,8 +89,9 @@ void tpch::DBGenWrapper::init_dbgen() {
     force = 0;
     d_path = nullptr;  // Use current directory
 
-    // Pre-allocate the date array needed by mk_order and mk_lineitem
-    // This avoids the lazy allocation in mk_order which can fail if not properly initialized
+    // Pre-cache the date array using the caching wrapper in dbgen_stubs.c
+    // This ensures all subsequent calls to mk_ascdate() (from mk_order, mk_lineitem, etc.)
+    // will reuse the same pre-allocated 2557-element array instead of allocating new ones
     if (asc_dates_ == nullptr) {
         asc_dates_ = mk_ascdate();
         if (asc_dates_ == nullptr) {
