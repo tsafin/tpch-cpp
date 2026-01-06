@@ -3,6 +3,7 @@
 #include <chrono>
 #include <string>
 #include <vector>
+#include <map>
 #include <getopt.h>
 #include <iomanip>
 #include <sys/stat.h>
@@ -14,6 +15,8 @@
 #include "tpch/writer_interface.hpp"
 #include "tpch/csv_writer.hpp"
 #include "tpch/parquet_writer.hpp"
+#include "tpch/dbgen_wrapper.hpp"
+#include "tpch/dbgen_converter.hpp"
 #ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
 #endif
@@ -28,6 +31,7 @@ struct Options {
     bool async_io = false;
     bool verbose = false;
     bool use_dbgen = false;
+    std::string table = "lineitem";
 };
 
 void print_usage(const char* prog) {
@@ -38,6 +42,8 @@ void print_usage(const char* prog) {
               << "  --output-dir <dir>    Output directory (default: /tmp)\n"
               << "  --max-rows <N>        Maximum rows to generate (default: 1000, 0=all)\n"
               << "  --use-dbgen           Use official TPC-H dbgen (default: synthetic data)\n"
+              << "  --table <name>        TPC-H table: lineitem, orders, customer, part,\n"
+              << "                        partsupp, supplier, nation, region (default: lineitem)\n"
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
@@ -54,6 +60,7 @@ Options parse_args(int argc, char* argv[]) {
         {"output-dir", required_argument, nullptr, 'o'},
         {"max-rows", required_argument, nullptr, 'm'},
         {"use-dbgen", no_argument, nullptr, 'u'},
+        {"table", required_argument, nullptr, 't'},
 #ifdef TPCH_ENABLE_ASYNC_IO
         {"async-io", no_argument, nullptr, 'a'},
 #endif
@@ -63,7 +70,7 @@ Options parse_args(int argc, char* argv[]) {
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "s:f:o:m:uavh", long_options, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:avh", long_options, nullptr)) != -1) {
         switch (c) {
             case 's':
                 opts.scale_factor = std::stol(optarg);
@@ -79,6 +86,9 @@ Options parse_args(int argc, char* argv[]) {
                 break;
             case 'u':
                 opts.use_dbgen = true;
+                break;
+            case 't':
+                opts.table = optarg;
                 break;
 #ifdef TPCH_ENABLE_ASYNC_IO
             case 'a':
@@ -136,6 +146,95 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
     }
 }
 
+std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>
+create_builders_from_schema(std::shared_ptr<arrow::Schema> schema) {
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>> builders;
+
+    for (const auto& field : schema->fields()) {
+        if (field->type()->id() == arrow::Type::INT64) {
+            builders[field->name()] = std::make_shared<arrow::Int64Builder>();
+        } else if (field->type()->id() == arrow::Type::DOUBLE) {
+            builders[field->name()] = std::make_shared<arrow::DoubleBuilder>();
+        } else if (field->type()->id() == arrow::Type::STRING) {
+            builders[field->name()] = std::make_shared<arrow::StringBuilder>();
+        } else {
+            throw std::runtime_error("Unsupported type: " + field->type()->ToString());
+        }
+    }
+
+    return builders;
+}
+
+std::shared_ptr<arrow::RecordBatch> finish_batch(
+    std::shared_ptr<arrow::Schema> schema,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders,
+    size_t num_rows) {
+
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+
+    for (const auto& field : schema->fields()) {
+        auto it = builders.find(field->name());
+        if (it == builders.end()) {
+            throw std::runtime_error("Missing builder for: " + field->name());
+        }
+        arrays.push_back(it->second->Finish().ValueOrDie());
+    }
+
+    return arrow::RecordBatch::Make(schema, num_rows, arrays);
+}
+
+void reset_builders(
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders) {
+    for (auto& [name, builder] : builders) {
+        builder->Reset();
+    }
+}
+
+template<typename GenerateFn>
+void generate_with_dbgen(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    GenerateFn generate_fn,
+    size_t& total_rows) {
+
+    const size_t batch_size = 10000;
+    size_t rows_in_batch = 0;
+
+    auto builders = create_builders_from_schema(schema);
+
+    auto append_callback = [&](const void* row) {
+        tpch::append_row_to_builders(opts.table, row, builders);
+        rows_in_batch++;
+        total_rows++;
+
+        if (rows_in_batch >= batch_size) {
+            auto batch = finish_batch(schema, builders, rows_in_batch);
+            writer->write_batch(batch);
+            reset_builders(builders);
+            rows_in_batch = 0;
+
+            if (opts.verbose && (total_rows % 100000 == 0)) {
+                std::cout << "  Generated " << total_rows << " rows...\n";
+            }
+        }
+    };
+
+    // Call the appropriate generate_* function with callback
+    generate_fn(dbgen, append_callback);
+
+    // Flush remaining rows
+    if (rows_in_batch > 0) {
+        auto batch = finish_batch(schema, builders, rows_in_batch);
+        writer->write_batch(batch);
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated: " << total_rows << "\n";
+    }
+}
+
 }  // anonymous namespace
 
 int main(int argc, char* argv[]) {
@@ -154,9 +253,10 @@ int main(int argc, char* argv[]) {
 
         if (opts.verbose) {
             std::cout << "TPC-H Benchmark Driver\n";
-            std::cout << "Data source: TPC-H-compliant synthetic (official dbgen integration pending)\n";
+            std::cout << "Data source: " << (opts.use_dbgen ? "Official TPC-H dbgen" : "TPC-H-compliant synthetic") << "\n";
             std::cout << "Scale factor: " << opts.scale_factor << "\n";
             std::cout << "Format: " << opts.format << "\n";
+            std::cout << "Table: " << opts.table << "\n";
             std::cout << "Max rows: " << (opts.max_rows > 0 ? std::to_string(opts.max_rows) : std::string("all")) << "\n";
         }
 
@@ -166,19 +266,45 @@ int main(int argc, char* argv[]) {
             std::cout << "Output file: " << output_path << "\n";
         }
 
-        // Create schema for sample lineitem table
-        auto schema = arrow::schema({
-            arrow::field("l_orderkey", arrow::int64()),
-            arrow::field("l_partkey", arrow::int64()),
-            arrow::field("l_suppkey", arrow::int64()),
-            arrow::field("l_linenumber", arrow::int64()),
-            arrow::field("l_quantity", arrow::float64()),
-            arrow::field("l_extendedprice", arrow::float64()),
-            arrow::field("l_discount", arrow::float64()),
-            arrow::field("l_tax", arrow::float64()),
-            arrow::field("l_returnflag", arrow::utf8()),
-            arrow::field("l_linestatus", arrow::utf8()),
-        });
+        // Create schema based on selected table
+        std::shared_ptr<arrow::Schema> schema;
+        if (opts.use_dbgen) {
+            // Use dbgen schema definitions
+            if (opts.table == "lineitem") {
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM);
+            } else if (opts.table == "orders") {
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS);
+            } else if (opts.table == "customer") {
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER);
+            } else if (opts.table == "part") {
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART);
+            } else if (opts.table == "partsupp") {
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP);
+            } else if (opts.table == "supplier") {
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER);
+            } else if (opts.table == "nation") {
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION);
+            } else if (opts.table == "region") {
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION);
+            } else {
+                std::cerr << "Error: Unknown table '" << opts.table << "'\n";
+                return 1;
+            }
+        } else {
+            // Keep existing synthetic schema (lineitem only)
+            schema = arrow::schema({
+                arrow::field("l_orderkey", arrow::int64()),
+                arrow::field("l_partkey", arrow::int64()),
+                arrow::field("l_suppkey", arrow::int64()),
+                arrow::field("l_linenumber", arrow::int64()),
+                arrow::field("l_quantity", arrow::float64()),
+                arrow::field("l_extendedprice", arrow::float64()),
+                arrow::field("l_discount", arrow::float64()),
+                arrow::field("l_tax", arrow::float64()),
+                arrow::field("l_returnflag", arrow::utf8()),
+                arrow::field("l_linestatus", arrow::utf8()),
+            });
+        }
 
         if (opts.verbose) {
             std::cout << "Schema: " << schema->ToString() << "\n";
@@ -196,10 +322,41 @@ int main(int argc, char* argv[]) {
             std::cout << "Starting data generation...\n";
         }
 
-        // Note: dbgen integration is deferred - all modes use TPC-H-compliant synthetic data
-        // The --use-dbgen flag is reserved for future integration with official dbgen library
-        {
-            // Generate TPC-H-compliant synthetic data in batches
+        // Generate data (either real dbgen or synthetic)
+        if (opts.use_dbgen) {
+            // Use official TPC-H dbgen
+            tpch::DBGenWrapper dbgen(opts.scale_factor);
+
+            if (opts.table == "lineitem") {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [](auto& g, auto& cb) { g.generate_lineitem(cb); }, total_rows);
+            } else if (opts.table == "orders") {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [](auto& g, auto& cb) { g.generate_orders(cb); }, total_rows);
+            } else if (opts.table == "customer") {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [](auto& g, auto& cb) { g.generate_customer(cb); }, total_rows);
+            } else if (opts.table == "part") {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [](auto& g, auto& cb) { g.generate_part(cb); }, total_rows);
+            } else if (opts.table == "partsupp") {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [](auto& g, auto& cb) { g.generate_partsupp(cb); }, total_rows);
+            } else if (opts.table == "supplier") {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [](auto& g, auto& cb) { g.generate_supplier(cb); }, total_rows);
+            } else if (opts.table == "nation") {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
+            } else if (opts.table == "region") {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
+            } else {
+                std::cerr << "Error: Unknown table '" << opts.table << "'\n";
+                return 1;
+            }
+        } else {
+            // Synthetic data (current implementation, kept for backward compatibility)
             const size_t batch_size = 10000;
             size_t batch_count = 0;
             size_t rows_in_batch = 0;
@@ -289,7 +446,7 @@ int main(int argc, char* argv[]) {
 
         // Print summary
         std::cout << "\n=== TPC-H Data Generation Complete ===\n";
-        std::cout << "Data source: TPC-H-compliant synthetic\n";
+        std::cout << "Data source: " << (opts.use_dbgen ? "Official TPC-H dbgen" : "TPC-H-compliant synthetic") << "\n";
         std::cout << "Format: " << opts.format << "\n";
         std::cout << "Output file: " << output_path << "\n";
         std::cout << "Rows written: " << total_rows << "\n";

@@ -1,0 +1,26 @@
+TPC-H Benchmark Driver - Proof of Concept
+Scale factor: 1
+Format: csv
+Max rows: 1000
+Output file: ./benchmark-output/sf_1/csv/sample_data.csv
+Schema: l_orderkey: int64
+l_partkey: int64
+l_suppkey: int64
+l_linenumber: int64
+l_quantity: double
+l_extendedprice: double
+l_discount: double
+l_tax: double
+l_returnflag: string
+l_linestatus: string
+Starting data generation...
+
+=== TPC-H Data Generation Complete (PoC) ===
+Format: csv
+Output file: ./benchmark-output/sf_1/csv/sample_data.csv
+Rows written: 1000
+Batches: 1
+File size: 34098 bytes
+Time elapsed: 0.006 seconds
+Throughput: 166667 rows/sec
+Write rate: 5.42 MB/sec
