@@ -104,6 +104,15 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_subdirectory(third_party/dbgen EXCLUDE_FROM_ALL)
 include_directories(${DBGEN_INCLUDE_DIRS})
 
+# Copy TPC-H distribution file to build directory
+# Required by dbgen for loading nations, regions, and other lookup tables
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tpch/dbgen/dists.dss"
+    "${CMAKE_BINARY_DIR}/dists.dss"
+    COPYONLY
+)
+message(STATUS "Copied dists.dss to build directory")
+
 # Source files for main library
 set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
