@@ -1,10 +1,20 @@
-# Build directories
+# Build directories - NEVER build in root directory
 build/
 cmake-build-debug/
 cmake-build-release/
 cmake-build-*/
 dist/
 install/
+
+# Root-level build artifacts (should NEVER exist - always build in build/ directory)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o.d
+*.d
+lib*.a
+libtpch_core.a
 
 # Build artifacts
 *.o
@@ -14,6 +24,14 @@ install/
 *.dll
 *.lib
 *.obj
+
+# Build artifacts in examples/ subdirectory (CMake output)
+examples/CMakeFiles/
+examples/Makefile
+examples/cmake_install.cmake
+examples/*.o
+examples/*.o.d
+examples/*.d
 
 # Executables (generated from examples and main)
 /tpch_benchmark
