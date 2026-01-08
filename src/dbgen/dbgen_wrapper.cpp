@@ -1,6 +1,7 @@
 #include "tpch/dbgen_wrapper.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 
@@ -99,9 +100,14 @@ void tpch::DBGenWrapper::init_dbgen() {
         }
     }
 
-    // Note: load_dists() is only needed if we're using print functions
-    // For now we skip it since we're directly converting structs to Arrow
-    // load_dists();
+    // Load distribution data (required for data generation, not just printing)
+    // This populates the distribution structures used by mk_order, mk_lineitem, etc.
+    fprintf(stderr, "DEBUG: Calling load_dists()...\n");
+    fflush(stderr);
+    verbose = 1;
+    load_dists();
+    fprintf(stderr, "DEBUG: load_dists() completed\n");
+    fflush(stderr);
 
     initialized_ = true;
 }
