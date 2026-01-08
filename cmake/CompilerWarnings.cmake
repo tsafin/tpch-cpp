@@ -1,7 +1,7 @@
 # Compiler warning and optimization flags for TPC-H C++
 
-# Base warning flags for both GCC and Clang
-set(WARNING_FLAGS
+# Common warning flags for both C and C++
+set(COMMON_WARNING_FLAGS
     -Wall
     -Wextra
     -Wpedantic
@@ -15,10 +15,7 @@ set(WARNING_FLAGS
     -Wwrite-strings
     -Wformat=2
     -Wlogical-op
-    -Wnon-virtual-dtor
-    -Wold-style-cast
     -Wopenmp-simd
-    -Woverloaded-virtual
     -Wpacked
     -Wparentheses
     -Wswitch-default
@@ -32,14 +29,26 @@ set(WARNING_FLAGS
     -Wvariadic-macros
 )
 
+# C++-only warning flags
+set(CXX_ONLY_WARNING_FLAGS
+    -Wnon-virtual-dtor
+    -Wold-style-cast
+    -Woverloaded-virtual
+)
+
 # Suppress some warnings that are overly strict for this project
 set(WARNING_SUPPRESSIONS
     -Wno-unknown-pragmas      # Allow pragmas for architecture-specific code
     -Wno-missing-field-initializers  # Arrow types may have optional fields
 )
 
-# Apply warnings
-add_compile_options(${WARNING_FLAGS} ${WARNING_SUPPRESSIONS})
+# Apply common warnings to all languages
+add_compile_options(${COMMON_WARNING_FLAGS} ${WARNING_SUPPRESSIONS})
+
+# Apply C++-specific warnings only to C++
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>)
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wold-style-cast>)
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Woverloaded-virtual>)
 
 # GCC-specific flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -47,9 +56,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         -Wduplicated-branches
         -Wduplicated-cond
         -Wnull-dereference
-        -Wuseless-cast
-        -Wstrict-aliasing=2
     )
+    # GCC-specific C++-only flags
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wuseless-cast>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wstrict-aliasing=2>)
 endif()
 
 # Clang-specific flags
