@@ -7,25 +7,34 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
+#include <cstdlib>
 
 #include <arrow/api.h>
 #include <arrow/csv/api.h>
 
 namespace tpch {
 
-CSVWriter::CSVWriter(const std::string& filepath)
-    : filepath_(filepath) {
+CSVWriter::CSVWriter(const std::string& filepath, bool use_direct_io)
+    : filepath_(filepath), use_direct_io_(use_direct_io) {
   // Use ONLY raw fd for ALL writes (async and sync)
-  file_descriptor_ = ::open(filepath.c_str(),
-                           O_WRONLY | O_CREAT | O_TRUNC,
-                           0644);
+  int flags = O_WRONLY | O_CREAT | O_TRUNC;
+  if (use_direct_io) {
+    flags |= O_DIRECT;
+  }
+
+  file_descriptor_ = ::open(filepath.c_str(), flags, 0644);
   if (file_descriptor_ < 0) {
     throw std::runtime_error("Failed to open: " + filepath);
   }
 
-  // Pre-allocate buffer pool
-  for (auto& buf : buffer_pool_) {
-    buf.reserve(BUFFER_SIZE);
+  // Initialize buffers based on O_DIRECT requirement
+  if (use_direct_io) {
+    init_aligned_buffers();
+  } else {
+    // Pre-allocate regular buffer pool
+    for (auto& buf : buffer_pool_) {
+      buf.reserve(BUFFER_SIZE);
+    }
   }
 }
 
@@ -37,6 +46,40 @@ CSVWriter::~CSVWriter() {
   }
   if (file_descriptor_ >= 0) {
     ::close(file_descriptor_);
+  }
+}
+
+void CSVWriter::init_aligned_buffers() {
+  // Allocate aligned buffers for O_DIRECT
+  for (auto& buf : buffer_pool_) {
+    void* ptr = nullptr;
+    int ret = ::posix_memalign(&ptr, ALIGNMENT, BUFFER_SIZE);
+    if (ret != 0) {
+      throw std::runtime_error("posix_memalign failed: " + std::string(strerror(ret)));
+    }
+    if (ptr == nullptr) {
+      throw std::runtime_error("posix_memalign returned null");
+    }
+    // Wrap aligned memory in vector (takes ownership)
+    buf.assign(static_cast<uint8_t*>(ptr), static_cast<uint8_t*>(ptr) + BUFFER_SIZE);
+  }
+}
+
+void CSVWriter::enable_direct_io(bool enable) {
+  if (header_written_) {
+    throw std::runtime_error("Cannot enable O_DIRECT after writing has begun");
+  }
+  use_direct_io_ = enable;
+
+  if (enable && file_descriptor_ >= 0) {
+    // Re-open file with O_DIRECT flag if not already set
+    ::close(file_descriptor_);
+    int flags = O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT;
+    file_descriptor_ = ::open(filepath_.c_str(), flags, 0644);
+    if (file_descriptor_ < 0) {
+      throw std::runtime_error("Failed to re-open with O_DIRECT: " + filepath_);
+    }
+    init_aligned_buffers();
   }
 }
 

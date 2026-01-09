@@ -9,12 +9,36 @@
 
 namespace tpch {
 
+AsyncIOContext::AsyncIOContext(const AsyncIOConfig& config)
+    : queue_depth_(config.queue_depth), pending_(0) {
+    // Allocate io_uring ring structure
+    ring_ = new io_uring;
+
+    // Setup initialization parameters for SQPOLL if requested
+    struct io_uring_params params = {};
+    if (config.use_sqpoll) {
+        // IORING_SETUP_SQPOLL: kernel thread polls submission queue
+        // This reduces syscalls but requires CAP_SYS_NICE capability
+        params.flags |= IORING_SETUP_SQPOLL;
+        params.sq_thread_idle = 2000;  // 2 second idle timeout
+    }
+
+    // Initialize the io_uring ring with params
+    int ret = io_uring_queue_init_params(config.queue_depth,
+                                         static_cast<io_uring*>(ring_),
+                                         &params);
+    if (ret < 0) {
+        delete static_cast<io_uring*>(ring_);
+        throw std::runtime_error("Failed to initialize io_uring: " + std::string(strerror(-ret)));
+    }
+}
+
 AsyncIOContext::AsyncIOContext(uint32_t queue_depth)
     : queue_depth_(queue_depth), pending_(0) {
     // Allocate io_uring ring structure
     ring_ = new io_uring;
 
-    // Initialize the io_uring ring
+    // Initialize the io_uring ring with default params (no SQPOLL)
     int ret = io_uring_queue_init(queue_depth, static_cast<io_uring*>(ring_), 0);
     if (ret < 0) {
         delete static_cast<io_uring*>(ring_);
@@ -174,6 +198,53 @@ int AsyncIOContext::process_completions() {
     }
 
     return processed;
+}
+
+void AsyncIOContext::register_buffers(const std::vector<iovec>& buffers) {
+    auto ring = static_cast<io_uring*>(ring_);
+
+    // Register buffers with io_uring kernel
+    // The kernel pins these pages, eliminating page table walks during I/O
+    int ret = io_uring_register_buffers(ring, buffers.data(), buffers.size());
+    if (ret < 0) {
+        throw std::runtime_error("Failed to register buffers: " + std::string(strerror(-ret)));
+    }
+
+    // Store registered buffers for later reference
+    registered_buffers_ = buffers;
+}
+
+void AsyncIOContext::queue_write_fixed(int fd, size_t buf_index, size_t count,
+                                       off_t offset, uint64_t user_data) {
+    if (buf_index >= registered_buffers_.size()) {
+        throw std::runtime_error("Buffer index out of range: " + std::to_string(buf_index));
+    }
+
+    auto ring = static_cast<io_uring*>(ring_);
+
+    // Get a submission queue entry
+    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+    if (sqe == nullptr) {
+        // Queue full - submit current batch first
+        submit_queued();
+        sqe = io_uring_get_sqe(ring);
+        if (!sqe) {
+            throw std::runtime_error("Failed to get submission queue entry");
+        }
+    }
+
+    // Prepare write_fixed operation (uses registered buffers)
+    // This is zero-copy: kernel already has buffer pages pinned
+    io_uring_prep_write_fixed(sqe, fd,
+                             registered_buffers_[buf_index].iov_base,
+                             count, offset,
+                             static_cast<int>(buf_index));
+    sqe->user_data = user_data;
+    queued_++;
+}
+
+bool AsyncIOContext::has_registered_buffers() const {
+    return !registered_buffers_.empty();
 }
 
 }  // namespace tpch
