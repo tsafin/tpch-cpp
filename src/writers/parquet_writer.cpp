@@ -15,7 +15,7 @@
 namespace tpch {
 
 ParquetWriter::ParquetWriter(const std::string& filepath)
-    : filepath_(filepath), async_context_(nullptr), closed_(false) {}
+    : filepath_(filepath), async_context_(nullptr), async_buffer_(nullptr), async_fd_(-1), closed_(false) {}
 
 ParquetWriter::~ParquetWriter() {
     if (!closed_) {
@@ -25,6 +25,13 @@ ParquetWriter::~ParquetWriter() {
             // Suppress exceptions in destructor
         }
     }
+    // Emergency cleanup of fd in case close() failed
+    if (async_fd_ >= 0) {
+        ::close(async_fd_);
+        async_fd_ = -1;
+    }
+    // Clear buffer reference
+    async_buffer_.reset();
 }
 
 void ParquetWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
@@ -100,19 +107,33 @@ void ParquetWriter::close() {
             }
             auto buffer = buffer_result.ValueOrDie();
 
+            // Store buffer to keep it alive during async I/O
+            async_buffer_ = buffer;
+
             // Open file for async writing
             int fd = ::open(filepath_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) {
                 throw std::runtime_error("Failed to open file for writing: " + std::string(strerror(errno)));
             }
 
+            // Store fd for cleanup
+            async_fd_ = fd;
+
             // Submit async write of the complete buffer
             async_context_->queue_write(fd, buffer->data(), buffer->size(), 0, 0);
             async_context_->submit_queued();
 
-            // Note: File descriptor cleanup is caller's responsibility
-            // (or async context should manage it)
-            ::close(fd);
+            // Wait for all async operations to complete before returning
+            async_context_->flush();
+
+            // Now safe to close the file descriptor
+            if (async_fd_ >= 0) {
+                ::close(async_fd_);
+                async_fd_ = -1;
+            }
+
+            // Clear buffer reference
+            async_buffer_.reset();
         } else {
             // Synchronous write (original behavior)
             auto outfile_result = arrow::io::FileOutputStream::Open(filepath_);

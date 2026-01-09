@@ -57,6 +57,8 @@ private:
     std::shared_ptr<arrow::RecordBatch> first_batch_;
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches_;
     std::shared_ptr<AsyncIOContext> async_context_;
+    std::shared_ptr<arrow::Buffer> async_buffer_;  // Keep buffer alive during async I/O
+    int async_fd_ = -1;  // Track file descriptor for cleanup
     bool closed_ = false;
 };
 
