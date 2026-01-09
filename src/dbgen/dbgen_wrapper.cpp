@@ -342,7 +342,7 @@ void tpch::DBGenWrapper::generate_nation(
     row_start(DBGEN_NATION);
 
     code_t nation;
-    for (DSS_HUGE i = 0; i < 25; ++i) {
+    for (DSS_HUGE i = 1; i <= 25; ++i) {
         if (mk_nation(i, &nation) < 0) {
             break;
         }
@@ -366,7 +366,7 @@ void tpch::DBGenWrapper::generate_region(
     row_start(DBGEN_REGION);
 
     code_t region;
-    for (DSS_HUGE i = 0; i < 5; ++i) {
+    for (DSS_HUGE i = 1; i <= 5; ++i) {
         if (mk_region(i, &region) < 0) {
             break;
         }

@@ -81,10 +81,51 @@ void row_stop(int t) {
 
 /* Note: load_dists() is now provided by tpch_init.c */
 
-/* dbg_text is called by mk_* functions to generate text descriptions */
-/* We provide a stub that does nothing since we don't generate text */
-void dbg_text(char *t, int min, int max, int s) {
-    /* No-op: text generation not needed in embedded mode */
+/* Minimal dbg_text for nation/region comment fields */
+/* We provide a simple implementation that doesn't require complex text generation */
+#include <stdio.h>
+#include <string.h>
+
+extern unsigned long Seed[];
+
+void dbg_text(char *tgt, int min, int max, int sd)
+{
+    /* Generate a simple deterministic comment based on seed and length */
+    /* This is sufficient for nation and region comment fields */
+    fprintf(stderr, "DEBUG: dbg_text called with min=%d max=%d sd=%d\n", min, max, sd);
+    fflush(stderr);
+
+    if (!tgt) {
+        fprintf(stderr, "ERROR: dbg_text called with NULL target\n");
+        return;
+    }
+
+    /* Clamp to reasonable length to avoid buffer overflow */
+    /* Use N_CMNT_MAX from tpch_dbgen.h */
+    if (min < 0) min = 0;
+    if (max > N_CMNT_MAX) max = N_CMNT_MAX;
+    if (max < min) max = min;
+
+    int len = min;
+    if (max > min) {
+        len = min + ((Seed[sd] >> 8) % (max - min + 1));
+    }
+    if (len > N_CMNT_MAX) len = N_CMNT_MAX;
+    if (len < 0) len = 0;
+
+    fprintf(stderr, "DEBUG: dbg_text generating %d bytes\n", len);
+    fflush(stderr);
+
+    int i;
+    for (i = 0; i < len; i++) {
+        /* Generate printable ASCII characters (32-126) */
+        Seed[sd] = Seed[sd] * 1103515245 + 12345;
+        int c = 32 + ((Seed[sd] >> 8) % 95);
+        tgt[i] = (char)c;
+    }
+    tgt[i] = '\0';
+    fprintf(stderr, "DEBUG: dbg_text done\n");
+    fflush(stderr);
 }
 
 /*
