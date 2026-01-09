@@ -92,8 +92,10 @@ void dbg_text(char *tgt, int min, int max, int sd)
 {
     /* Generate a simple deterministic comment based on seed and length */
     /* This is sufficient for nation and region comment fields */
-    fprintf(stderr, "DEBUG: dbg_text called with min=%d max=%d sd=%d\n", min, max, sd);
-    fflush(stderr);
+    if (verbose) {
+        fprintf(stderr, "DEBUG: dbg_text called with min=%d max=%d sd=%d\n", min, max, sd);
+        fflush(stderr);
+    }
 
     if (!tgt) {
         fprintf(stderr, "ERROR: dbg_text called with NULL target\n");
@@ -113,8 +115,10 @@ void dbg_text(char *tgt, int min, int max, int sd)
     if (len > N_CMNT_MAX) len = N_CMNT_MAX;
     if (len < 0) len = 0;
 
-    fprintf(stderr, "DEBUG: dbg_text generating %d bytes\n", len);
-    fflush(stderr);
+    if (verbose) {
+        fprintf(stderr, "DEBUG: dbg_text generating %d bytes\n", len);
+        fflush(stderr);
+    }
 
     int i;
     for (i = 0; i < len; i++) {
@@ -124,8 +128,10 @@ void dbg_text(char *tgt, int min, int max, int sd)
         tgt[i] = (char)c;
     }
     tgt[i] = '\0';
-    fprintf(stderr, "DEBUG: dbg_text done\n");
-    fflush(stderr);
+    if (verbose) {
+        fprintf(stderr, "DEBUG: dbg_text done\n");
+        fflush(stderr);
+    }
 }
 
 /*
