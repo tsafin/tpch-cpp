@@ -1,10 +1,11 @@
 #ifndef TPCH_CSV_WRITER_HPP
 #define TPCH_CSV_WRITER_HPP
 
-#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
+#include <array>
+#include <bitset>
 #include <cstdint>
 
 #include "writer_interface.hpp"
@@ -52,12 +53,18 @@ public:
 
 private:
     std::string filepath_;
-    std::ofstream output_;
     int file_descriptor_ = -1;
     bool header_written_ = false;
     std::shared_ptr<AsyncIOContext> async_context_;
-    std::vector<uint8_t> write_buffer_;
     static constexpr size_t BUFFER_SIZE = 1024 * 1024;  // 1MB buffer
+    static constexpr size_t NUM_BUFFERS = 8;  // Match reasonable queue depth
+
+    // Buffer pool for async I/O
+    std::array<std::vector<uint8_t>, NUM_BUFFERS> buffer_pool_;
+    std::bitset<NUM_BUFFERS> buffer_in_flight_;  // Track which are pending
+    size_t current_buffer_idx_ = 0;
+    size_t buffer_fill_size_ = 0;  // Current fill level of active buffer
+    off_t current_offset_ = 0;  // Track cumulative file position
 
     /**
      * Write CSV header (field names) to the output.
@@ -87,6 +94,26 @@ private:
      * @param size Number of bytes
      */
     void write_data(const void* data, size_t size);
+
+    /**
+     * Acquire a free buffer from the pool.
+     * Waits for completion if all buffers are in-flight.
+     *
+     * @return Index of free buffer
+     */
+    size_t acquire_buffer();
+
+    /**
+     * Wait for at least one in-flight operation to complete.
+     */
+    void wait_for_completion();
+
+    /**
+     * Release a buffer back to the pool (mark as not in-flight).
+     *
+     * @param idx Buffer index
+     */
+    void release_buffer(size_t idx);
 };
 
 }  // namespace tpch
