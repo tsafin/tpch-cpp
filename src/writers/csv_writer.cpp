@@ -102,9 +102,14 @@ size_t CSVWriter::acquire_buffer() {
 
 void CSVWriter::wait_for_completion() {
   if (!async_context_) return;
-  async_context_->wait_completions(1);
-  // Process completions - need user_data to know which buffer (see Phase 11.2)
-  // For now, we rely on external completion handling via callbacks
+  std::vector<uint64_t> completed_ids;
+  async_context_->wait_completions(1, &completed_ids);
+  // Release completed buffers based on user_data (buffer index)
+  for (uint64_t buf_idx : completed_ids) {
+    if (buf_idx < NUM_BUFFERS) {
+      release_buffer(buf_idx);
+    }
+  }
 }
 
 void CSVWriter::release_buffer(size_t idx) {
@@ -158,11 +163,14 @@ void CSVWriter::flush_buffer() {
     return;
   }
 
-  // Submit async write - buffer stays valid until completion
-  async_context_->submit_write(file_descriptor_,
-                              buffer.data(),
-                              buffer_fill_size_,
-                              current_offset_);
+  // Submit async write with buffer index as user_data for tracking
+  // Buffer stays valid until completion callback
+  async_context_->queue_write(file_descriptor_,
+                             buffer.data(),
+                             buffer_fill_size_,
+                             current_offset_,
+                             static_cast<uint64_t>(buf_idx));  // Use buffer index as user_data
+  async_context_->submit_queued();  // Submit immediately
   current_offset_ += buffer_fill_size_;
 
   // Get next buffer (don't clear current - it's in-flight!)
