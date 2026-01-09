@@ -8,7 +8,8 @@ if(NOT EXISTS "${DBGEN_SOURCE_DIR}")
 endif()
 
 # Core dbgen sources (exclude driver, qgen, text, and print utilities)
-# We exclude text.c since we don't generate text descriptions
+# We exclude text.c because it requires complex text generation and many distributions
+# Instead, we provide a minimal dbg_text stub that generates simple comments
 # We exclude print.c since we convert directly to Arrow
 set(DBGEN_CORE_SOURCES
     ${DBGEN_SOURCE_DIR}/build.c
