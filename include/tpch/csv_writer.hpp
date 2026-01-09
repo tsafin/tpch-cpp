@@ -4,14 +4,19 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <vector>
+#include <cstdint>
 
 #include "writer_interface.hpp"
 
 namespace tpch {
 
+class AsyncIOContext;
+
 /**
  * CSV writer implementation using Arrow's CSV API.
  * Writes Arrow RecordBatch data to CSV files with proper escaping and quoting.
+ * Supports optional async I/O with io_uring when AsyncIOContext is provided.
  */
 class CSVWriter : public WriterInterface {
 public:
@@ -38,10 +43,21 @@ public:
      */
     void close() override;
 
+    /**
+     * Set async I/O context for non-blocking writes.
+     *
+     * @param context AsyncIOContext for io_uring support
+     */
+    void set_async_context(std::shared_ptr<AsyncIOContext> context) override;
+
 private:
     std::string filepath_;
     std::ofstream output_;
+    int file_descriptor_ = -1;
     bool header_written_ = false;
+    std::shared_ptr<AsyncIOContext> async_context_;
+    std::vector<uint8_t> write_buffer_;
+    static constexpr size_t BUFFER_SIZE = 1024 * 1024;  // 1MB buffer
 
     /**
      * Write CSV header (field names) to the output.
@@ -58,6 +74,19 @@ private:
      * @return Escaped string safe for CSV output
      */
     static std::string escape_csv_value(const std::string& value);
+
+    /**
+     * Flush buffered data (async or sync).
+     */
+    void flush_buffer();
+
+    /**
+     * Write data directly or buffer for async I/O.
+     *
+     * @param data Pointer to data
+     * @param size Number of bytes
+     */
+    void write_data(const void* data, size_t size);
 };
 
 }  // namespace tpch

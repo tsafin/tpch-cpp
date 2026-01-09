@@ -59,8 +59,8 @@ long get_row_count(TableType table, long scale_factor) {
     return 0;
 }
 
-DBGenWrapper::DBGenWrapper(long scale_factor)
-    : scale_factor_(scale_factor), initialized_(false), asc_dates_(nullptr) {
+DBGenWrapper::DBGenWrapper(long scale_factor, bool verbose)
+    : scale_factor_(scale_factor), initialized_(false), verbose_(verbose), asc_dates_(nullptr) {
     if (scale_factor <= 0) {
         throw std::invalid_argument("Scale factor must be positive");
     }
@@ -69,7 +69,7 @@ DBGenWrapper::DBGenWrapper(long scale_factor)
 DBGenWrapper::~DBGenWrapper() = default;
 
 DBGenWrapper::DBGenWrapper(DBGenWrapper&& other) noexcept
-    : scale_factor_(other.scale_factor_), initialized_(other.initialized_) {
+    : scale_factor_(other.scale_factor_), initialized_(other.initialized_), verbose_(other.verbose_) {
     other.initialized_ = false;
 }
 
@@ -77,6 +77,7 @@ DBGenWrapper& DBGenWrapper::operator=(DBGenWrapper&& other) noexcept {
     if (this != &other) {
         scale_factor_ = other.scale_factor_;
         initialized_ = other.initialized_;
+        verbose_ = other.verbose_;
         other.initialized_ = false;
     }
     return *this;
@@ -86,7 +87,7 @@ void tpch::DBGenWrapper::init_dbgen() {
     // Set global dbgen state
     // dbgen uses global variables for configuration
     scale = scale_factor_;
-    verbose = 0;  // Suppress dbgen output
+    verbose = verbose_ ? 1 : 0;  // Set based on verbose flag
     force = 0;
     d_path = nullptr;  // Use current directory
 
@@ -102,12 +103,15 @@ void tpch::DBGenWrapper::init_dbgen() {
 
     // Load distribution data (required for data generation, not just printing)
     // This populates the distribution structures used by mk_order, mk_lineitem, etc.
-    fprintf(stderr, "DEBUG: Calling load_dists()...\n");
-    fflush(stderr);
-    verbose = 1;
+    if (verbose_) {
+        fprintf(stderr, "DEBUG: Calling load_dists()...\n");
+        fflush(stderr);
+    }
     load_dists();
-    fprintf(stderr, "DEBUG: load_dists() completed\n");
-    fflush(stderr);
+    if (verbose_) {
+        fprintf(stderr, "DEBUG: load_dists() completed\n");
+        fflush(stderr);
+    }
 
     initialized_ = true;
 }

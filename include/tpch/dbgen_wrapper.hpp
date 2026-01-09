@@ -67,10 +67,11 @@ public:
      * Initialize DBGenWrapper with scale factor
      *
      * @param scale_factor TPC-H scale factor (1 = 1GB baseline)
+     * @param verbose Enable verbose debug output
      *
      * Note: Distribution loading is thread-safe (one-time initialization)
      */
-    explicit DBGenWrapper(long scale_factor);
+    explicit DBGenWrapper(long scale_factor, bool verbose = false);
 
     ~DBGenWrapper();
 
@@ -179,6 +180,7 @@ public:
 private:
     long scale_factor_;
     bool initialized_;
+    bool verbose_;
     char** asc_dates_;  // Date array cache for orders/lineitem generation
 
     /**

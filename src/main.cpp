@@ -17,6 +17,7 @@
 #include "tpch/parquet_writer.hpp"
 #include "tpch/dbgen_wrapper.hpp"
 #include "tpch/dbgen_converter.hpp"
+#include "tpch/async_io.hpp"
 #ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
 #endif
@@ -310,8 +311,32 @@ int main(int argc, char* argv[]) {
             std::cout << "Schema: " << schema->ToString() << "\n";
         }
 
+        // Create async I/O context if enabled
+        std::shared_ptr<tpch::AsyncIOContext> async_context;
+#ifdef TPCH_ENABLE_ASYNC_IO
+        if (opts.async_io) {
+            try {
+                async_context = std::make_shared<tpch::AsyncIOContext>(256);
+                if (opts.verbose) {
+                    std::cout << "Async I/O enabled (io_uring queue depth: 256)\n";
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "Warning: Failed to initialize async I/O: " << e.what() << "\n";
+                std::cerr << "Falling back to synchronous I/O\n";
+            }
+        }
+#endif
+
         // Create writer
         auto writer = create_writer(opts.format, output_path);
+
+        // Set async context if available
+        if (async_context) {
+            writer->set_async_context(async_context);
+            if (opts.verbose) {
+                std::cout << "Async I/O context configured for writer\n";
+            }
+        }
 
         // Start timing
         auto start_time = std::chrono::high_resolution_clock::now();
@@ -325,7 +350,7 @@ int main(int argc, char* argv[]) {
         // Generate data (either real dbgen or synthetic)
         if (opts.use_dbgen) {
             // Use official TPC-H dbgen
-            tpch::DBGenWrapper dbgen(opts.scale_factor);
+            tpch::DBGenWrapper dbgen(opts.scale_factor, opts.verbose);
 
             if (opts.table == "lineitem") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
