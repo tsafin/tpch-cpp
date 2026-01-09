@@ -9,6 +9,9 @@
 
 namespace tpch {
 
+// Forward declaration
+class AsyncIOContext;
+
 /**
  * Parquet writer implementation using Apache Parquet C++ library.
  * Writes Arrow RecordBatch data to Parquet files with compression and schema support.
@@ -37,13 +40,23 @@ public:
 
     /**
      * Finalize and close the output file.
+     * If an async context is set, uses asynchronous I/O for writing.
      */
     void close() override;
+
+    /**
+     * Set an async I/O context for asynchronous writes.
+     * If set, the Parquet file will be written asynchronously.
+     *
+     * @param async_context AsyncIOContext to use for async writes
+     */
+    void set_async_context(std::shared_ptr<AsyncIOContext> async_context);
 
 private:
     std::string filepath_;
     std::shared_ptr<arrow::RecordBatch> first_batch_;
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches_;
+    std::shared_ptr<AsyncIOContext> async_context_;
     bool closed_ = false;
 };
 
