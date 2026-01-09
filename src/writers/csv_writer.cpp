@@ -5,6 +5,8 @@
 #include <sstream>
 #include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstring>
 
 #include <arrow/api.h>
 #include <arrow/csv/api.h>
@@ -12,19 +14,19 @@
 namespace tpch {
 
 CSVWriter::CSVWriter(const std::string& filepath)
-    : filepath_(filepath), output_(filepath) {
-  if (!output_.is_open()) {
-    throw std::runtime_error("Failed to open CSV output file: " + filepath);
-  }
-
-  // Get file descriptor for async I/O operations
-  file_descriptor_ = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    : filepath_(filepath) {
+  // Use ONLY raw fd for ALL writes (async and sync)
+  file_descriptor_ = ::open(filepath.c_str(),
+                           O_WRONLY | O_CREAT | O_TRUNC,
+                           0644);
   if (file_descriptor_ < 0) {
-    throw std::runtime_error("Failed to open file descriptor for: " + filepath);
+    throw std::runtime_error("Failed to open: " + filepath);
   }
 
-  // Pre-allocate buffer for async writes
-  write_buffer_.reserve(BUFFER_SIZE);
+  // Pre-allocate buffer pool
+  for (auto& buf : buffer_pool_) {
+    buf.reserve(BUFFER_SIZE);
+  }
 }
 
 CSVWriter::~CSVWriter() {
@@ -42,57 +44,87 @@ void CSVWriter::set_async_context(std::shared_ptr<AsyncIOContext> context) {
   async_context_ = context;
 }
 
-void CSVWriter::write_data(const void* data, size_t size) {
-  if (!async_context_) {
-    // Synchronous write to ofstream
-    output_.write(static_cast<const char*>(data), size);
-    return;
+size_t CSVWriter::acquire_buffer() {
+  // Find free buffer, or wait for completion if all in-flight
+  for (size_t i = 0; i < NUM_BUFFERS; ++i) {
+    if (!buffer_in_flight_[i]) {
+      buffer_in_flight_[i] = true;
+      return i;
+    }
   }
+  // All buffers in-flight - wait for at least one completion
+  wait_for_completion();
+  return acquire_buffer();  // Retry
+}
 
-  // Async writes: buffer data and submit when full
+void CSVWriter::wait_for_completion() {
+  if (!async_context_) return;
+  async_context_->wait_completions(1);
+  // Process completions - need user_data to know which buffer (see Phase 11.2)
+  // For now, we rely on external completion handling via callbacks
+}
+
+void CSVWriter::release_buffer(size_t idx) {
+  if (idx < NUM_BUFFERS) {
+    buffer_in_flight_[idx] = false;
+    buffer_pool_[idx].clear();
+  }
+}
+
+void CSVWriter::write_data(const void* data, size_t size) {
   const uint8_t* byte_data = static_cast<const uint8_t*>(data);
   size_t written = 0;
 
   while (written < size) {
-    size_t available = BUFFER_SIZE - write_buffer_.size();
+    auto& buffer = buffer_pool_[current_buffer_idx_];
+    size_t available = BUFFER_SIZE - buffer_fill_size_;
     size_t to_write = std::min(available, size - written);
 
-    // Add data to buffer
-    write_buffer_.insert(write_buffer_.end(),
-                        byte_data + written,
-                        byte_data + written + to_write);
+    // Add data to current buffer
+    buffer.insert(buffer.end(),
+                 byte_data + written,
+                 byte_data + written + to_write);
+    buffer_fill_size_ += to_write;
     written += to_write;
 
     // Submit if buffer is full
-    if (write_buffer_.size() >= BUFFER_SIZE) {
+    if (buffer_fill_size_ >= BUFFER_SIZE) {
       flush_buffer();
     }
   }
 }
 
 void CSVWriter::flush_buffer() {
-  if (write_buffer_.empty()) {
-    return;
-  }
+  if (buffer_fill_size_ == 0) return;
+
+  size_t buf_idx = current_buffer_idx_;
+  auto& buffer = buffer_pool_[buf_idx];
 
   if (!async_context_) {
-    // Synchronous flush
-    output_.write(reinterpret_cast<const char*>(write_buffer_.data()),
-                 write_buffer_.size());
-    write_buffer_.clear();
+    // Use pwrite for sync (NOT ofstream)
+    ssize_t written = ::pwrite(file_descriptor_,
+                              buffer.data(),
+                              buffer_fill_size_,
+                              current_offset_);
+    if (written < 0) {
+      throw std::runtime_error("Write failed: " + std::string(strerror(errno)));
+    }
+    current_offset_ += written;
+    buffer.clear();
+    buffer_fill_size_ = 0;
     return;
   }
 
-  // Async flush: submit write to io_uring
-  try {
-    async_context_->submit_write(file_descriptor_,
-                                write_buffer_.data(),
-                                write_buffer_.size(),
-                                0);  // offset is managed by O_APPEND or tracked
-    write_buffer_.clear();
-  } catch (const std::exception& e) {
-    throw std::runtime_error("Async write failed: " + std::string(e.what()));
-  }
+  // Submit async write - buffer stays valid until completion
+  async_context_->submit_write(file_descriptor_,
+                              buffer.data(),
+                              buffer_fill_size_,
+                              current_offset_);
+  current_offset_ += buffer_fill_size_;
+
+  // Get next buffer (don't clear current - it's in-flight!)
+  current_buffer_idx_ = acquire_buffer();
+  buffer_fill_size_ = 0;
 }
 
 void CSVWriter::write_header(
@@ -200,17 +232,21 @@ void CSVWriter::write_batch(
 }
 
 void CSVWriter::close() {
-  // Flush any remaining buffered data
-  flush_buffer();
+  // Flush current buffer if has data
+  if (buffer_fill_size_ > 0) {
+    flush_buffer();
+  }
 
-  // Wait for all async operations to complete
+  // Wait for ALL in-flight operations
   if (async_context_) {
     async_context_->flush();
   }
 
-  if (output_.is_open()) {
-    output_.flush();
-    output_.close();
+  // Sync file data to disk
+  if (file_descriptor_ >= 0) {
+    ::fsync(file_descriptor_);
+    ::close(file_descriptor_);
+    file_descriptor_ = -1;
   }
 }
 
