@@ -67,7 +67,7 @@ void AsyncIOContext::submit_write(int fd, const void* buf, size_t count, off_t o
     pending_++;
 }
 
-int AsyncIOContext::wait_completions(int min_complete) {
+int AsyncIOContext::wait_completions(int min_complete, std::vector<uint64_t>* completed_ids) {
     auto ring = static_cast<io_uring*>(ring_);
 
     if (pending_ == 0) {
@@ -91,6 +91,11 @@ int AsyncIOContext::wait_completions(int min_complete) {
             throw std::runtime_error("I/O operation failed with error: " + std::string(strerror(-cqe->res)));
         }
 
+        // Return which buffers completed
+        if (completed_ids) {
+            completed_ids->push_back(cqe->user_data);
+        }
+
         completed++;
         pending_--;
     }
@@ -111,6 +116,66 @@ void AsyncIOContext::flush() {
     }
 }
 
+void AsyncIOContext::queue_write(int fd, const void* buf, size_t count, off_t offset, uint64_t user_data) {
+    auto ring = static_cast<io_uring*>(ring_);
+
+    // Get a submission queue entry
+    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+    if (sqe == nullptr) {
+        // Queue full - submit current batch first
+        submit_queued();
+        sqe = io_uring_get_sqe(ring);
+        if (!sqe) {
+            throw std::runtime_error("Failed to get submission queue entry");
+        }
+    }
+
+    // Prepare the write operation
+    io_uring_prep_write(sqe, fd, buf, static_cast<unsigned>(count), offset);
+    sqe->user_data = user_data;  // Track which buffer
+    queued_++;
+}
+
+int AsyncIOContext::submit_queued() {
+    if (queued_ == 0) return 0;
+
+    auto ring = static_cast<io_uring*>(ring_);
+    int ret = io_uring_submit(ring);
+    if (ret < 0) {
+        throw std::runtime_error("Submit failed: " + std::string(strerror(-ret)));
+    }
+
+    pending_ += queued_;
+    int submitted = queued_;
+    queued_ = 0;
+    return submitted;
+}
+
+int AsyncIOContext::queued_count() const {
+    return queued_;
+}
+
+void AsyncIOContext::set_completion_callback(CompletionCallback cb) {
+    completion_callback_ = cb;
+}
+
+int AsyncIOContext::process_completions() {
+    auto ring = static_cast<io_uring*>(ring_);
+    struct io_uring_cqe* cqe;
+    int processed = 0;
+
+    while (io_uring_peek_cqe(ring, &cqe) == 0) {
+        if (completion_callback_) {
+            completion_callback_(cqe->user_data, cqe->res);
+        }
+        io_uring_cqe_seen(ring, cqe);
+        pending_--;
+        processed++;
+    }
+
+    return processed;
+}
+
 }  // namespace tpch
 
 #else
@@ -128,6 +193,25 @@ void AsyncIOContext::submit_write(int fd, const void* buf, size_t count, off_t o
     (void)count;   // unused
     (void)offset;  // unused
     // Stub implementation - no-op
+}
+
+void AsyncIOContext::queue_write(int fd, const void* buf, size_t count, off_t offset, uint64_t user_data) {
+    // Stub implementation - no-op
+    (void)fd;
+    (void)buf;
+    (void)count;
+    (void)offset;
+    (void)user_data;
+}
+
+void AsyncIOContext::set_completion_callback(CompletionCallback cb) {
+    // Stub implementation - no-op
+    (void)cb;
+}
+
+int AsyncIOContext::process_completions() {
+    // Stub implementation - no-op
+    return 0;
 }
 
 }  // namespace tpch
