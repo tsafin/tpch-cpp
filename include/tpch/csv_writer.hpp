@@ -26,8 +26,9 @@ public:
      * The file will be created or overwritten.
      *
      * @param filepath Path to the output CSV file
+     * @param use_direct_io Enable O_DIRECT for bypassing page cache (default: false)
      */
-    explicit CSVWriter(const std::string& filepath);
+    explicit CSVWriter(const std::string& filepath, bool use_direct_io = false);
 
     ~CSVWriter() override;
 
@@ -51,6 +52,14 @@ public:
      */
     void set_async_context(std::shared_ptr<AsyncIOContext> context) override;
 
+    /**
+     * Enable or disable O_DIRECT mode (must be called before first write).
+     * O_DIRECT bypasses page cache for direct disk writes, improving throughput for large sequential writes.
+     *
+     * @param enable Enable O_DIRECT (requires buffer alignment)
+     */
+    void enable_direct_io(bool enable);
+
 private:
     std::string filepath_;
     int file_descriptor_ = -1;
@@ -58,6 +67,10 @@ private:
     std::shared_ptr<AsyncIOContext> async_context_;
     static constexpr size_t BUFFER_SIZE = 1024 * 1024;  // 1MB buffer
     static constexpr size_t NUM_BUFFERS = 8;  // Match reasonable queue depth
+    static constexpr size_t ALIGNMENT = 4096;  // O_DIRECT alignment requirement
+
+    // O_DIRECT support
+    bool use_direct_io_ = false;
 
     // Buffer pool for async I/O
     std::array<std::vector<uint8_t>, NUM_BUFFERS> buffer_pool_;
@@ -65,6 +78,11 @@ private:
     size_t current_buffer_idx_ = 0;
     size_t buffer_fill_size_ = 0;  // Current fill level of active buffer
     off_t current_offset_ = 0;  // Track cumulative file position
+
+    /**
+     * Initialize aligned buffers for O_DIRECT if enabled.
+     */
+    void init_aligned_buffers();
 
     /**
      * Write CSV header (field names) to the output.
