@@ -329,28 +329,28 @@ int main(int argc, char* argv[]) {
 
             if (opts.table == "lineitem") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
-                    [](auto& g, auto& cb) { g.generate_lineitem(cb); }, total_rows);
+                    [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
             } else if (opts.table == "orders") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
-                    [](auto& g, auto& cb) { g.generate_orders(cb); }, total_rows);
+                    [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);
             } else if (opts.table == "customer") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
-                    [](auto& g, auto& cb) { g.generate_customer(cb); }, total_rows);
+                    [&](auto& g, auto& cb) { g.generate_customer(cb, opts.max_rows); }, total_rows);
             } else if (opts.table == "part") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
-                    [](auto& g, auto& cb) { g.generate_part(cb); }, total_rows);
+                    [&](auto& g, auto& cb) { g.generate_part(cb, opts.max_rows); }, total_rows);
             } else if (opts.table == "partsupp") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
-                    [](auto& g, auto& cb) { g.generate_partsupp(cb); }, total_rows);
+                    [&](auto& g, auto& cb) { g.generate_partsupp(cb, opts.max_rows); }, total_rows);
             } else if (opts.table == "supplier") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
-                    [](auto& g, auto& cb) { g.generate_supplier(cb); }, total_rows);
+                    [&](auto& g, auto& cb) { g.generate_supplier(cb, opts.max_rows); }, total_rows);
             } else if (opts.table == "nation") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
-                    [](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
+                    [&](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
             } else if (opts.table == "region") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
-                    [](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
+                    [&](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
             } else {
                 std::cerr << "Error: Unknown table '" << opts.table << "'\n";
                 return 1;
