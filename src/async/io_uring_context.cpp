@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <sys/types.h>
+#include <algorithm>
 
 namespace tpch {
 
@@ -64,31 +65,45 @@ AsyncIOContext::~AsyncIOContext() {
 
 void AsyncIOContext::submit_write(int fd, const void* buf, size_t count, off_t offset) {
     auto ring = static_cast<io_uring*>(ring_);
+    const uint8_t* byte_buf = static_cast<const uint8_t*>(buf);
 
-    // Get a submission queue entry
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    if (sqe == nullptr) {
-        // Queue is full, wait for some completions
-        wait_completions(1);
-        sqe = io_uring_get_sqe(ring);
+    // Split large writes into chunks (max 2GB per io_uring operation to avoid 32-bit truncation)
+    // io_uring_prep_write() takes unsigned (32-bit), so we split at 2GB to be safe
+    static constexpr size_t MAX_CHUNK_SIZE = 2ULL * 1024 * 1024 * 1024;  // 2GB
+
+    size_t written = 0;
+    while (written < count) {
+        size_t chunk_size = std::min(MAX_CHUNK_SIZE, count - written);
+
+        // Get a submission queue entry
+        struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
         if (sqe == nullptr) {
-            throw std::runtime_error("Failed to get submission queue entry");
+            // Queue is full, wait for some completions
+            wait_completions(1);
+            sqe = io_uring_get_sqe(ring);
+            if (sqe == nullptr) {
+                throw std::runtime_error("Failed to get submission queue entry");
+            }
         }
+
+        // Prepare the write operation (safe cast - chunk_size is at most 2GB)
+        io_uring_prep_write(sqe, fd, byte_buf + written,
+                           static_cast<unsigned>(chunk_size),
+                           offset + written);
+
+        // Set user data (not used but available for tracking)
+        sqe->user_data = 0;
+
+        written += chunk_size;
     }
 
-    // Prepare the write operation
-    io_uring_prep_write(sqe, fd, buf, static_cast<unsigned>(count), offset);
-
-    // Set user data (not used but available for tracking)
-    sqe->user_data = 0;
-
-    // Submit to kernel
+    // Submit all chunks to kernel
     int ret = io_uring_submit(ring);
     if (ret < 0) {
         throw std::runtime_error("Failed to submit write operation: " + std::string(strerror(-ret)));
     }
 
-    pending_++;
+    pending_ += (count + MAX_CHUNK_SIZE - 1) / MAX_CHUNK_SIZE;  // Count number of chunks
 }
 
 int AsyncIOContext::wait_completions(int min_complete, std::vector<uint64_t>* completed_ids) {
@@ -142,22 +157,35 @@ void AsyncIOContext::flush() {
 
 void AsyncIOContext::queue_write(int fd, const void* buf, size_t count, off_t offset, uint64_t user_data) {
     auto ring = static_cast<io_uring*>(ring_);
+    const uint8_t* byte_buf = static_cast<const uint8_t*>(buf);
 
-    // Get a submission queue entry
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    if (sqe == nullptr) {
-        // Queue full - submit current batch first
-        submit_queued();
-        sqe = io_uring_get_sqe(ring);
-        if (!sqe) {
-            throw std::runtime_error("Failed to get submission queue entry");
+    // Split large writes into chunks (max 2GB per io_uring operation to avoid 32-bit truncation)
+    static constexpr size_t MAX_CHUNK_SIZE = 2ULL * 1024 * 1024 * 1024;  // 2GB
+
+    size_t written = 0;
+    while (written < count) {
+        size_t chunk_size = std::min(MAX_CHUNK_SIZE, count - written);
+
+        // Get a submission queue entry
+        struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+        if (sqe == nullptr) {
+            // Queue full - submit current batch first
+            submit_queued();
+            sqe = io_uring_get_sqe(ring);
+            if (!sqe) {
+                throw std::runtime_error("Failed to get submission queue entry");
+            }
         }
-    }
 
-    // Prepare the write operation
-    io_uring_prep_write(sqe, fd, buf, static_cast<unsigned>(count), offset);
-    sqe->user_data = user_data;  // Track which buffer
-    queued_++;
+        // Prepare the write operation (safe cast - chunk_size is at most 2GB)
+        io_uring_prep_write(sqe, fd, byte_buf + written,
+                           static_cast<unsigned>(chunk_size),
+                           offset + written);
+        sqe->user_data = user_data;  // Track which buffer
+        queued_++;
+
+        written += chunk_size;
+    }
 }
 
 int AsyncIOContext::submit_queued() {
