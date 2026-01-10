@@ -1,0 +1,58 @@
+======================================================================
+Phase 12.5: Detailed Performance Analysis
+======================================================================
+
+TEST 1: Single Table Baseline (Parquet, 200k rows)
+------
+
+=== TPC-H Data Generation Complete ===
+Data source: Official TPC-H dbgen
+Format: parquet
+Output file: /tmp/test_single/lineitem.parquet
+Rows written: 200000
+File size: 12313386 bytes
+Time elapsed: 0.342 seconds
+Throughput: 584795 rows/sec
+Write rate: 34.34 MB/sec
+
+real	0m0.357s
+user	0m0.279s
+sys	0m0.061s
+
+TEST 2: Sequential Multi-Table (Parquet, 200k rows each)
+------
+Generating lineitem...
+
+=== TPC-H Data Generation Complete ===
+Data source: Official TPC-H dbgen
+Format: parquet
+Output file: /tmp/test_seq/lineitem.parquet
+Rows written: 200000
+File size: 12313386 bytes
+Time elapsed: 0.290 seconds
+Throughput: 689655 rows/sec
+Write rate: 40.49 MB/sec
+Generating orders...
+
+=== TPC-H Data Generation Complete ===
+Data source: Official TPC-H dbgen
+Format: parquet
+Output file: /tmp/test_seq/orders.parquet
+Rows written: 200000
+File size: 16158467 bytes
+Time elapsed: 0.373 seconds
+Throughput: 536193 rows/sec
+Write rate: 41.31 MB/sec
+Generating customer...
+
+=== TPC-H Data Generation Complete ===
+Data source: Official TPC-H dbgen
+Format: parquet
+Output file: /tmp/test_seq/customer.parquet
+Rows written: 150000
+File size: 25392347 bytes
+Time elapsed: 0.218 seconds
+Throughput: 688073 rows/sec
+Write rate: 111.08 MB/sec
+Generating part...
+/tmp/analyze_phase12_5.sh: line 24: 16639 Segmentation fault      (core dumped) ./build/tpch_benchmark --use-dbgen --table $table --format parquet --scale-factor 1 --max-rows 200000 --output-dir /tmp/test_seq
