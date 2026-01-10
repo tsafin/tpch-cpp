@@ -118,6 +118,8 @@ set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
     src/writers/parquet_writer.cpp
     src/async/io_uring_context.cpp
+    src/async/shared_async_io.cpp
+    src/multi_table_writer.cpp
     src/dbgen/dbgen_wrapper.cpp
     src/dbgen/dbgen_converter.cpp
     ${DBGEN_OBJECTS}
