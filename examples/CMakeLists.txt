@@ -50,4 +50,19 @@ if(TPCH_BUILD_EXAMPLES)
             tpch_core
         )
     endif()
+
+    # multi_table_benchmark - Demonstrates multi-file async I/O (Phase 12.5)
+    if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
+        add_executable(multi_table_benchmark multi_table_benchmark.cpp)
+        target_link_libraries(multi_table_benchmark PRIVATE
+            tpch_core
+            Uring::uring
+        )
+    else()
+        # Build stub version when async I/O not available
+        add_executable(multi_table_benchmark multi_table_benchmark.cpp)
+        target_link_libraries(multi_table_benchmark PRIVATE
+            tpch_core
+        )
+    endif()
 endif()
