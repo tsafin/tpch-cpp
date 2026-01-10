@@ -48,7 +48,6 @@ void print_usage(const char* prog) {
               << "  --use-dbgen           Use official TPC-H dbgen (default: synthetic data)\n"
               << "  --table <name>        TPC-H table: lineitem, orders, customer, part,\n"
               << "                        partsupp, supplier, nation, region (default: lineitem)\n"
-              << "  --parallel            Generate all 8 tables concurrently (overrides --table)\n"
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
@@ -66,7 +65,7 @@ Options parse_args(int argc, char* argv[]) {
         {"max-rows", required_argument, nullptr, 'm'},
         {"use-dbgen", no_argument, nullptr, 'u'},
         {"table", required_argument, nullptr, 't'},
-        {"parallel", no_argument, nullptr, 'p'},
+        // NOTE: --parallel removed (Phase 12.3 - broken, 16x slower)
 #ifdef TPCH_ENABLE_ASYNC_IO
         {"async-io", no_argument, nullptr, 'a'},
 #endif
@@ -76,7 +75,11 @@ Options parse_args(int argc, char* argv[]) {
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pavh", long_options, nullptr)) != -1) {
+#ifdef TPCH_ENABLE_ASYNC_IO
+    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:avh", long_options, nullptr)) != -1) {
+#else
+    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:vh", long_options, nullptr)) != -1) {
+#endif
         switch (c) {
             case 's':
                 opts.scale_factor = std::stol(optarg);
@@ -95,9 +98,6 @@ Options parse_args(int argc, char* argv[]) {
                 break;
             case 't':
                 opts.table = optarg;
-                break;
-            case 'p':
-                opts.parallel = true;
                 break;
 #ifdef TPCH_ENABLE_ASYNC_IO
             case 'a':
@@ -250,113 +250,11 @@ void generate_with_dbgen(
     }
 }
 
-// Generate all 8 TPC-H tables in parallel using separate processes
-int generate_all_tables_parallel(const Options& base_opts, const char* prog_name) {
-    static const std::vector<std::string> tables = {
-        "region", "nation", "supplier", "part",
-        "partsupp", "customer", "orders", "lineitem"
-    };
-
-    if (!base_opts.use_dbgen) {
-        std::cerr << "Error: --parallel requires --use-dbgen\n";
-        return 1;
-    }
-
-    std::cout << "====================================================================\n";
-    std::cout << "Parallel TPC-H Data Generation\n";
-    std::cout << "====================================================================\n";
-    std::cout << "Scale Factor: " << base_opts.scale_factor << "\n";
-    std::cout << "Format:       " << base_opts.format << "\n";
-    std::cout << "Output Dir:   " << base_opts.output_dir << "\n";
-    std::cout << "Tables:       " << tables.size() << "\n";
-    std::cout << "====================================================================\n";
-    std::cout << "\nLaunching table generation processes...\n";
-
-    std::vector<pid_t> pids;
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    // Launch all tables in parallel
-    for (const auto& table : tables) {
-        pid_t pid = fork();
-        if (pid == -1) {
-            std::cerr << "Error: fork failed\n";
-            return 1;
-        }
-
-        if (pid == 0) {
-            // Child process - build arguments with proper lifetime
-            std::vector<std::string> arg_strings;
-            arg_strings.push_back(prog_name);
-            arg_strings.push_back("--use-dbgen");
-            arg_strings.push_back("--table");
-            arg_strings.push_back(table);
-            arg_strings.push_back("--format");
-            arg_strings.push_back(base_opts.format);
-            arg_strings.push_back("--scale-factor");
-            arg_strings.push_back(std::to_string(base_opts.scale_factor));
-            arg_strings.push_back("--output-dir");
-            arg_strings.push_back(base_opts.output_dir);
-            arg_strings.push_back("--max-rows");
-            arg_strings.push_back(std::to_string(base_opts.max_rows));
-            if (base_opts.async_io) {
-                arg_strings.push_back("--async-io");
-            }
-            if (base_opts.verbose) {
-                arg_strings.push_back("--verbose");
-            }
-
-            // Build argv array with pointers to string data
-            std::vector<char*> argv_for_execv;
-            for (auto& arg : arg_strings) {
-                argv_for_execv.push_back(const_cast<char*>(arg.c_str()));
-            }
-            argv_for_execv.push_back(nullptr);
-
-            // Execute child process
-            execv(prog_name, argv_for_execv.data());
-
-            // execv only returns if there's an error
-            std::cerr << "Error: execv failed for table " << table << "\n";
-            exit(1);
-        } else {
-            // Parent process
-            pids.push_back(pid);
-            std::cout << "  [" << std::setw(10) << table << "] PID " << pid << "\n";
-        }
-    }
-
-    // Wait for all child processes
-    std::cout << "\nWaiting for all processes to complete...\n\n";
-    int failed_count = 0;
-    for (size_t i = 0; i < pids.size(); ++i) {
-        int status;
-        waitpid(pids[i], &status, 0);
-        const auto& table = tables[i];
-
-        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-            std::cout << "[" << std::setw(2) << (i + 1) << "/" << tables.size() << "] ✓ " << table << "\n";
-        } else {
-            std::cout << "[" << std::setw(2) << (i + 1) << "/" << tables.size() << "] ✗ " << table << " (failed)\n";
-            failed_count++;
-        }
-    }
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(end_time - start_time);
-
-    std::cout << "\n====================================================================\n";
-    if (failed_count == 0) {
-        std::cout << "All tables generated successfully!\n";
-    } else {
-        std::cout << "Generation completed with " << failed_count << " failure(s)\n";
-    }
-    std::cout << "====================================================================\n";
-    std::cout << "Total files:  " << tables.size() << "\n";
-    std::cout << "Duration:     " << std::fixed << std::setprecision(2) << duration.count() << "s\n";
-    std::cout << "====================================================================\n";
-
-    return failed_count > 0 ? 1 : 0;
-}
+// NOTE: generate_all_tables_parallel() function removed in Phase 12 Integration Testing
+// See CLAUDE.md and async-io-performance-fixes.md for details
+// The --parallel flag was found to be 16x SLOWER (not faster) due to dbgen global
+// variable conflicts and excessive context switching overhead. Do not re-implement
+// without first addressing the root causes documented in the plan.
 
 }  // anonymous namespace
 
@@ -364,10 +262,8 @@ int main(int argc, char* argv[]) {
     try {
         auto opts = parse_args(argc, argv);
 
-        // Handle parallel generation (all 8 tables at once)
-        if (opts.parallel) {
-            return generate_all_tables_parallel(opts, argv[0]);
-        }
+        // NOTE: --parallel flag disabled (Phase 12.3 - broken, 16x slower)
+        // See CLAUDE.md and async-io-performance-fixes.md for details
 
         // Validate format
         if (opts.format != "csv" && opts.format != "parquet"
