@@ -1,0 +1,122 @@
+[93mPhase 12.5: Multi-File Async I/O Benchmarking[0m
+Starting benchmark suite...
+
+
+[1m[95m
+===========================================================================
+Phase 12.5: Multi-File Async I/O Benchmarking
+===========================================================================
+[0m
+
+[1m[94mSCENARIO 1: Single Table (Baseline Sync)[0m
+---------------------------------------------------------------------------
+
+[96mRunning: Single Table (50k rows, Parquet) Sync[0m
+  Baseline: write single table without async I/O
+  Command: ./build/tpch_benchmark --use-dbgen --table lineitem --format parquet --scale-factor 1 --max-rows 50000 --output-dir /tmp/phase12_single_table
+[92m✓ Elapsed: 0.107s[0m
+
+[96mRunning: Single Table (100k rows, Parquet) Sync[0m
+  Baseline: write single table without async I/O
+  Command: ./build/tpch_benchmark --use-dbgen --table lineitem --format parquet --scale-factor 1 --max-rows 100000 --output-dir /tmp/phase12_single_table
+[92m✓ Elapsed: 0.169s[0m
+
+[96mRunning: Single Table (200k rows, Parquet) Sync[0m
+  Baseline: write single table without async I/O
+  Command: ./build/tpch_benchmark --use-dbgen --table lineitem --format parquet --scale-factor 1 --max-rows 200000 --output-dir /tmp/phase12_single_table
+[92m✓ Elapsed: 0.310s[0m
+
+[96mRunning: Single Table (50k rows, CSV) Sync[0m
+  Baseline: write single table without async I/O
+  Command: ./build/tpch_benchmark --use-dbgen --table lineitem --format csv --scale-factor 1 --max-rows 50000 --output-dir /tmp/phase12_single_table
+[92m✓ Elapsed: 0.198s[0m
+
+[96mRunning: Single Table (100k rows, CSV) Sync[0m
+  Baseline: write single table without async I/O
+  Command: ./build/tpch_benchmark --use-dbgen --table lineitem --format csv --scale-factor 1 --max-rows 100000 --output-dir /tmp/phase12_single_table
+[92m✓ Elapsed: 0.324s[0m
+
+[1m[94mSCENARIO 2: Multiple Tables Sequential (Sync)[0m
+---------------------------------------------------------------------------
+
+[96mRunning: Multi-Table Seq (lineitem)[0m
+  Sequential write to lineitem
+  Command: ./build/tpch_benchmark --use-dbgen --table lineitem --format parquet --scale-factor 1 --max-rows 50000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ lineitem: 0.086s[0m
+
+[96mRunning: Multi-Table Seq (orders)[0m
+  Sequential write to orders
+  Command: ./build/tpch_benchmark --use-dbgen --table orders --format parquet --scale-factor 1 --max-rows 50000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ orders: 0.099s[0m
+
+[96mRunning: Multi-Table Seq (customer)[0m
+  Sequential write to customer
+  Command: ./build/tpch_benchmark --use-dbgen --table customer --format parquet --scale-factor 1 --max-rows 50000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ customer: 0.077s[0m
+
+[96mRunning: Multi-Table Seq (part)[0m
+  Sequential write to part
+  Command: ./build/tpch_benchmark --use-dbgen --table part --format parquet --scale-factor 1 --max-rows 50000 --output-dir /tmp/phase12_multi_seq
+[91mERROR: Benchmark failed[0m
+[93mSequential total (50k rows, Parquet): 120.533s[0m
+
+[96mRunning: Multi-Table Seq (lineitem)[0m
+  Sequential write to lineitem
+  Command: ./build/tpch_benchmark --use-dbgen --table lineitem --format parquet --scale-factor 1 --max-rows 100000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ lineitem: 0.148s[0m
+
+[96mRunning: Multi-Table Seq (orders)[0m
+  Sequential write to orders
+  Command: ./build/tpch_benchmark --use-dbgen --table orders --format parquet --scale-factor 1 --max-rows 100000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ orders: 0.176s[0m
+
+[96mRunning: Multi-Table Seq (customer)[0m
+  Sequential write to customer
+  Command: ./build/tpch_benchmark --use-dbgen --table customer --format parquet --scale-factor 1 --max-rows 100000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ customer: 0.142s[0m
+
+[96mRunning: Multi-Table Seq (part)[0m
+  Sequential write to part
+  Command: ./build/tpch_benchmark --use-dbgen --table part --format parquet --scale-factor 1 --max-rows 100000 --output-dir /tmp/phase12_multi_seq
+[91mERROR: Benchmark failed[0m
+[93mSequential total (100k rows, Parquet): 110.451s[0m
+
+[96mRunning: Multi-Table Seq (lineitem)[0m
+  Sequential write to lineitem
+  Command: ./build/tpch_benchmark --use-dbgen --table lineitem --format parquet --scale-factor 1 --max-rows 200000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ lineitem: 0.310s[0m
+
+[96mRunning: Multi-Table Seq (orders)[0m
+  Sequential write to orders
+  Command: ./build/tpch_benchmark --use-dbgen --table orders --format parquet --scale-factor 1 --max-rows 200000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ orders: 0.347s[0m
+
+[96mRunning: Multi-Table Seq (customer)[0m
+  Sequential write to customer
+  Command: ./build/tpch_benchmark --use-dbgen --table customer --format parquet --scale-factor 1 --max-rows 200000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ customer: 0.213s[0m
+
+[96mRunning: Multi-Table Seq (part)[0m
+  Sequential write to part
+  Command: ./build/tpch_benchmark --use-dbgen --table part --format parquet --scale-factor 1 --max-rows 200000 --output-dir /tmp/phase12_multi_seq
+[92m  ✓ part: 0.522s[0m
+[93mSequential total (200k rows, Parquet): 1.399s[0m
+
+[1m[94mSCENARIO 3: Parallel Generation (Phase 12.3 --parallel)[0m
+---------------------------------------------------------------------------
+
+[96mRunning: Parallel All Tables (50k rows, Parquet)[0m
+  Parallel generation with --parallel flag (Phase 12.3)
+  Command: ./build/tpch_benchmark --use-dbgen --table all --format parquet --scale-factor 1 --max-rows 50000 --output-dir /tmp/phase12_parallel --parallel
+[91mERROR: Benchmark failed[0m
+
+[96mRunning: Parallel All Tables (100k rows, Parquet)[0m
+  Parallel generation with --parallel flag (Phase 12.3)
+  Command: ./build/tpch_benchmark --use-dbgen --table all --format parquet --scale-factor 1 --max-rows 100000 --output-dir /tmp/phase12_parallel --parallel
+[92m✓ Elapsed: 0.410s[0m
+
+[92mReport written to: /home/tsafin/src/tpch-cpp/benchmark-results/phase12_5_async_benchmark.md[0m
+
+[92m[1mBenchmarking complete![0m
+Results saved to: benchmark-results/phase12_5_async_benchmark.md
+
