@@ -239,10 +239,56 @@ Uses Arrow as the central in-memory columnar format:
 - Compile-time flag for portability
 - 20-50% throughput improvement target
 
+## Phase 12: Async I/O Performance Optimization
+
+**Status**: ✅ PARTIALLY COMPLETE
+
+### Achievements
+
+**✅ Phase 12.1: Fixed critical 2GB offset truncation bug**
+- Root cause: io_uring_prep_write() using 32-bit unsigned for byte count
+- Solution: Chunked writes at 2GB boundary
+- Impact: Prevents silent data loss on large files (lineitem SF10)
+
+**✅ Phase 12.2: Profiling identified actual bottlenecks**
+- Parquet generation is CPU-bound (serialization), not I/O-bound
+- CSV generation is I/O-bound (many small writes) - async I/O helps here
+- CPU usage identical in both sync and async modes
+- Recommendation: Async I/O beneficial for I/O-heavy workloads
+
+**✅ Phase 12.5: Multi-file async I/O architecture**
+- Shared AsyncIOContext for concurrent writes to multiple files
+- Per-file offset tracking and automatic advancement
+- Production-ready, fully benchmarked
+- Integrated with multi-table generation
+- 7.8% improvement for Parquet, 32% for CSV (I/O-bound workloads)
+
+**❌ Phase 12.3: Parallel generation - BROKEN (do not use)**
+- Performance: 16x SLOWER (2 minutes vs 9 seconds)
+- Consistent "part" table generation failures
+- Root cause: dbgen uses global variables (Seed[], scale, etc.) that conflict in parallel
+- Context switches: 1.4M (normal = 1-10), pathological overhead
+- CPU utilization: Only 8-9% (shows processes serializing despite fork/execv)
+
+### Recommendations
+
+1. **Use `--async-io` flag** for I/O-bound workloads (CSV, streaming)
+2. **Do NOT use `--parallel` flag** - it makes performance worse
+3. For multi-table generation: Use sequential `--table` calls with `--async-io`
+4. Future redesign needed for true parallelization (requires addressing dbgen globals)
+
+### Documentation
+
+See `/home/tsafin/.claude/plans/async-io-performance-fixes.md` for comprehensive analysis including:
+- Detailed profiling results
+- Root cause analysis for parallel failures
+- Integration testing results
+- Design options for future improvements
+
 ## Future Enhancements
 
 - Additional formats: Avro, Arrow IPC, Protobuf
-- Distributed parallel generation
+- True parallel data generation (requires dbgen refactoring)
 - Query integration with DuckDB/Polars
 - Direct I/O (O_DIRECT) support
 - Advanced observability and metrics
