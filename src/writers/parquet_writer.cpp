@@ -15,8 +15,25 @@
 
 namespace tpch {
 
-ParquetWriter::ParquetWriter(const std::string& filepath)
-    : filepath_(filepath), async_context_(nullptr), async_buffer_(nullptr), async_fd_(-1), closed_(false) {}
+ParquetWriter::ParquetWriter(
+    const std::string& filepath,
+    arrow::MemoryPool* memory_pool,
+    int64_t estimated_rows)
+    : filepath_(filepath)
+    , async_context_(nullptr)
+    , async_buffer_(nullptr)
+    , async_fd_(-1)
+    , closed_(false)
+    , memory_pool_(memory_pool ? memory_pool : arrow::default_memory_pool())
+    , estimated_rows_(estimated_rows) {
+
+    // Pre-allocate batches vector if we have an estimate
+    if (estimated_rows_ > 0) {
+        // Reserve space for batches (assume 10k rows per batch)
+        size_t estimated_batches = (estimated_rows_ + 9999) / 10000;
+        batches_.reserve(estimated_batches);
+    }
+}
 
 ParquetWriter::~ParquetWriter() {
     if (!closed_) {
@@ -99,7 +116,7 @@ void ParquetWriter::close() {
                 TPCH_SCOPED_TIMER("parquet_encode");
                 auto status = parquet::arrow::WriteTable(
                     *table_ptr,
-                    arrow::default_memory_pool(),
+                    memory_pool_,  // Use configured memory pool
                     buffer_stream,
                     1024 * 1024  // 1MB row group size
                 );
@@ -170,7 +187,7 @@ void ParquetWriter::close() {
                 TPCH_SCOPED_TIMER("parquet_encode_sync");
                 auto status = parquet::arrow::WriteTable(
                     *table_ptr,
-                    arrow::default_memory_pool(),
+                    memory_pool_,  // Use configured memory pool
                     outfile,
                     1024 * 1024  // 1MB row group size
                 );

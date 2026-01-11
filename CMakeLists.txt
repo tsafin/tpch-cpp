@@ -150,6 +150,7 @@ set(TPCH_CORE_SOURCES
     src/multi_table_writer.cpp
     src/dbgen/dbgen_wrapper.cpp
     src/dbgen/dbgen_converter.cpp
+    src/util/builder_pool.cpp
     ${DBGEN_OBJECTS}
 )
 

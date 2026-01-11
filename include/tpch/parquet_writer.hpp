@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <arrow/record_batch.h>
+#include <arrow/memory_pool.h>
 
 #include "writer_interface.hpp"
 
@@ -23,9 +24,14 @@ public:
      * The file will be created or overwritten.
      *
      * @param filepath Path to the output Parquet file
+     * @param memory_pool Custom Arrow memory pool (nullptr = default pool)
+     * @param estimated_rows Estimated number of rows for pre-allocation (0 = no pre-alloc)
      * @throws std::runtime_error if Parquet initialization fails
      */
-    explicit ParquetWriter(const std::string& filepath);
+    explicit ParquetWriter(
+        const std::string& filepath,
+        arrow::MemoryPool* memory_pool = nullptr,
+        int64_t estimated_rows = 0);
 
     ~ParquetWriter() override;
 
@@ -60,6 +66,10 @@ private:
     std::shared_ptr<arrow::Buffer> async_buffer_;  // Keep buffer alive during async I/O
     int async_fd_ = -1;  // Track file descriptor for cleanup
     bool closed_ = false;
+
+    // Memory pool optimization (Phase 13.3)
+    arrow::MemoryPool* memory_pool_ = nullptr;
+    int64_t estimated_rows_ = 0;
 };
 
 }  // namespace tpch
