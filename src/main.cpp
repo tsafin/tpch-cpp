@@ -170,13 +170,25 @@ std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>
 create_builders_from_schema(std::shared_ptr<arrow::Schema> schema) {
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>> builders;
 
+    // Pre-allocate capacity for batch size (10000 rows)
+    // This reduces memory allocation overhead by avoiding incremental growth
+    const int64_t capacity = 10000;
+
     for (const auto& field : schema->fields()) {
         if (field->type()->id() == arrow::Type::INT64) {
-            builders[field->name()] = std::make_shared<arrow::Int64Builder>();
+            auto builder = std::make_shared<arrow::Int64Builder>();
+            builder->Reserve(capacity);
+            builders[field->name()] = builder;
         } else if (field->type()->id() == arrow::Type::DOUBLE) {
-            builders[field->name()] = std::make_shared<arrow::DoubleBuilder>();
+            auto builder = std::make_shared<arrow::DoubleBuilder>();
+            builder->Reserve(capacity);
+            builders[field->name()] = builder;
         } else if (field->type()->id() == arrow::Type::STRING) {
-            builders[field->name()] = std::make_shared<arrow::StringBuilder>();
+            auto builder = std::make_shared<arrow::StringBuilder>();
+            // Reserve for values and estimate 50 bytes average string length
+            builder->Reserve(capacity);
+            builder->ReserveData(capacity * 50);
+            builders[field->name()] = builder;
         } else {
             throw std::runtime_error("Unsupported type: " + field->type()->ToString());
         }

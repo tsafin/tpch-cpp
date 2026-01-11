@@ -1,6 +1,7 @@
 #include "tpch/dbgen_converter.hpp"
 #include "tpch/dbgen_wrapper.hpp"
 #include "tpch/performance_counters.hpp"
+#include "tpch/simd_string_utils.hpp"
 
 #include <string>
 #include <stdexcept>
@@ -50,22 +51,22 @@ void append_lineitem_to_builders(
     auto* lstatus_builder = static_cast<arrow::StringBuilder*>(builders["l_linestatus"].get());
     lstatus_builder->Append(std::string(line->lstatus, 1));
 
-    // Date fields: extract null-terminated strings
+    // Date fields: extract null-terminated strings using SIMD strlen
     auto* cdate_builder = static_cast<arrow::StringBuilder*>(builders["l_commitdate"].get());
-    cdate_builder->Append(std::string(line->cdate));
+    cdate_builder->Append(line->cdate, simd::strlen_sse42_unaligned(line->cdate));
 
     auto* sdate_builder = static_cast<arrow::StringBuilder*>(builders["l_shipdate"].get());
-    sdate_builder->Append(std::string(line->sdate));
+    sdate_builder->Append(line->sdate, simd::strlen_sse42_unaligned(line->sdate));
 
     auto* rdate_builder = static_cast<arrow::StringBuilder*>(builders["l_receiptdate"].get());
-    rdate_builder->Append(std::string(line->rdate));
+    rdate_builder->Append(line->rdate, simd::strlen_sse42_unaligned(line->rdate));
 
-    // Ship instructions and mode
+    // Ship instructions and mode (null-terminated, use SIMD strlen)
     auto* shipinstruct_builder = static_cast<arrow::StringBuilder*>(builders["l_shipinstruct"].get());
-    shipinstruct_builder->Append(std::string(line->shipinstruct));
+    shipinstruct_builder->Append(line->shipinstruct, simd::strlen_sse42_unaligned(line->shipinstruct));
 
     auto* shipmode_builder = static_cast<arrow::StringBuilder*>(builders["l_shipmode"].get());
-    shipmode_builder->Append(std::string(line->shipmode));
+    shipmode_builder->Append(line->shipmode, simd::strlen_sse42_unaligned(line->shipmode));
 
     // Comment: use clen to extract exact string length
     auto* comment_builder = static_cast<arrow::StringBuilder*>(builders["l_comment"].get());
@@ -92,13 +93,13 @@ void append_orders_to_builders(
         ->Append(static_cast<double>(order->totalprice) / 100.0);
 
     auto* odate_builder = static_cast<arrow::StringBuilder*>(builders["o_orderdate"].get());
-    odate_builder->Append(std::string(order->odate));
+    odate_builder->Append(order->odate, simd::strlen_sse42_unaligned(order->odate));
 
     auto* priority_builder = static_cast<arrow::StringBuilder*>(builders["o_orderpriority"].get());
-    priority_builder->Append(std::string(order->opriority));
+    priority_builder->Append(order->opriority, simd::strlen_sse42_unaligned(order->opriority));
 
     auto* clerk_builder = static_cast<arrow::StringBuilder*>(builders["o_clerk"].get());
-    clerk_builder->Append(std::string(order->clerk));
+    clerk_builder->Append(order->clerk, simd::strlen_sse42_unaligned(order->clerk));
 
     static_cast<arrow::Int64Builder*>(builders["o_shippriority"].get())
         ->Append(order->spriority);
@@ -117,22 +118,22 @@ void append_customer_to_builders(
         ->Append(cust->custkey);
 
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["c_name"].get());
-    name_builder->Append(std::string(cust->name));
+    name_builder->Append(cust->name, simd::strlen_sse42_unaligned(cust->name));
 
     auto* addr_builder = static_cast<arrow::StringBuilder*>(builders["c_address"].get());
-    addr_builder->Append(std::string(cust->address, cust->alen));
+    addr_builder->Append(cust->address, cust->alen);
 
     static_cast<arrow::Int64Builder*>(builders["c_nationkey"].get())
         ->Append(cust->nation_code);
 
     auto* phone_builder = static_cast<arrow::StringBuilder*>(builders["c_phone"].get());
-    phone_builder->Append(std::string(cust->phone));
+    phone_builder->Append(cust->phone, simd::strlen_sse42_unaligned(cust->phone));
 
     static_cast<arrow::DoubleBuilder*>(builders["c_acctbal"].get())
         ->Append(static_cast<double>(cust->acctbal) / 100.0);
 
     auto* mktseg_builder = static_cast<arrow::StringBuilder*>(builders["c_mktsegment"].get());
-    mktseg_builder->Append(std::string(cust->mktsegment));
+    mktseg_builder->Append(cust->mktsegment, simd::strlen_sse42_unaligned(cust->mktsegment));
 
     auto* comment_builder = static_cast<arrow::StringBuilder*>(builders["c_comment"].get());
     comment_builder->Append(std::string(cust->comment, cust->clen));
@@ -151,10 +152,10 @@ void append_part_to_builders(
     name_builder->Append(std::string(part->name, part->nlen));
 
     auto* mfgr_builder = static_cast<arrow::StringBuilder*>(builders["p_mfgr"].get());
-    mfgr_builder->Append(std::string(part->mfgr));
+    mfgr_builder->Append(part->mfgr, simd::strlen_sse42_unaligned(part->mfgr));
 
     auto* brand_builder = static_cast<arrow::StringBuilder*>(builders["p_brand"].get());
-    brand_builder->Append(std::string(part->brand));
+    brand_builder->Append(part->brand, simd::strlen_sse42_unaligned(part->brand));
 
     auto* type_builder = static_cast<arrow::StringBuilder*>(builders["p_type"].get());
     type_builder->Append(std::string(part->type, part->tlen));
@@ -163,7 +164,7 @@ void append_part_to_builders(
         ->Append(part->size);
 
     auto* container_builder = static_cast<arrow::StringBuilder*>(builders["p_container"].get());
-    container_builder->Append(std::string(part->container));
+    container_builder->Append(part->container, simd::strlen_sse42_unaligned(part->container));
 
     static_cast<arrow::DoubleBuilder*>(builders["p_retailprice"].get())
         ->Append(static_cast<double>(part->retailprice) / 100.0);
@@ -204,16 +205,16 @@ void append_supplier_to_builders(
         ->Append(supp->suppkey);
 
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["s_name"].get());
-    name_builder->Append(std::string(supp->name));
+    name_builder->Append(supp->name, simd::strlen_sse42_unaligned(supp->name));
 
     auto* addr_builder = static_cast<arrow::StringBuilder*>(builders["s_address"].get());
-    addr_builder->Append(std::string(supp->address, supp->alen));
+    addr_builder->Append(supp->address, supp->alen);
 
     static_cast<arrow::Int64Builder*>(builders["s_nationkey"].get())
         ->Append(supp->nation_code);
 
     auto* phone_builder = static_cast<arrow::StringBuilder*>(builders["s_phone"].get());
-    phone_builder->Append(std::string(supp->phone));
+    phone_builder->Append(supp->phone, simd::strlen_sse42_unaligned(supp->phone));
 
     static_cast<arrow::DoubleBuilder*>(builders["s_acctbal"].get())
         ->Append(static_cast<double>(supp->acctbal) / 100.0);
@@ -233,7 +234,7 @@ void append_nation_to_builders(
 
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["n_name"].get());
     if (nation->text) {
-        name_builder->Append(std::string(nation->text));
+        name_builder->Append(nation->text, simd::strlen_sse42_unaligned(nation->text));
     } else {
         name_builder->AppendNull();
     }
@@ -256,7 +257,7 @@ void append_region_to_builders(
 
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["r_name"].get());
     if (region->text) {
-        name_builder->Append(std::string(region->text));
+        name_builder->Append(region->text, simd::strlen_sse42_unaligned(region->text));
     } else {
         name_builder->AppendNull();
     }
