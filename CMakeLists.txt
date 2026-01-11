@@ -5,8 +5,8 @@ project(tpch-cpp
     LANGUAGES CXX C
 )
 
-# Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
+# Set C++ standard (C++20 required for std::span in Phase 13.4 zero-copy)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -150,6 +150,7 @@ set(TPCH_CORE_SOURCES
     src/multi_table_writer.cpp
     src/dbgen/dbgen_wrapper.cpp
     src/dbgen/dbgen_converter.cpp
+    src/dbgen/zero_copy_converter.cpp  # Phase 13.4: Zero-copy optimizations
     src/util/builder_pool.cpp
     ${DBGEN_OBJECTS}
 )
