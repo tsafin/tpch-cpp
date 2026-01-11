@@ -19,6 +19,7 @@
 #include "tpch/parquet_writer.hpp"
 #include "tpch/dbgen_wrapper.hpp"
 #include "tpch/dbgen_converter.hpp"
+#include "tpch/zero_copy_converter.hpp"  // Phase 13.4: Zero-copy optimizations
 #include "tpch/async_io.hpp"
 #include "tpch/performance_counters.hpp"
 #ifdef TPCH_ENABLE_ORC
@@ -36,6 +37,7 @@ struct Options {
     bool verbose = false;
     bool use_dbgen = false;
     bool parallel = false;
+    bool zero_copy = false;  // Phase 13.4: Enable zero-copy optimizations
     std::string table = "lineitem";
 };
 
@@ -50,6 +52,7 @@ void print_usage(const char* prog) {
               << "  --table <name>        TPC-H table: lineitem, orders, customer, part,\n"
               << "                        partsupp, supplier, nation, region (default: lineitem)\n"
               << "  --parallel            Generate all 8 tables in parallel (Phase 12.6)\n"
+              << "  --zero-copy           Enable zero-copy optimizations (Phase 13.4, lineitem only)\n"
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
@@ -68,6 +71,7 @@ Options parse_args(int argc, char* argv[]) {
         {"use-dbgen", no_argument, nullptr, 'u'},
         {"table", required_argument, nullptr, 't'},
         {"parallel", no_argument, nullptr, 'p'},  // Phase 12.6: Fork-after-init
+        {"zero-copy", no_argument, nullptr, 'z'},  // Phase 13.4: Zero-copy optimization
 #ifdef TPCH_ENABLE_ASYNC_IO
         {"async-io", no_argument, nullptr, 'a'},
 #endif
@@ -78,9 +82,9 @@ Options parse_args(int argc, char* argv[]) {
 
     int c;
 #ifdef TPCH_ENABLE_ASYNC_IO
-    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pavh", long_options, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pzavh", long_options, nullptr)) != -1) {
 #else
-    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pvh", long_options, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pzvh", long_options, nullptr)) != -1) {
 #endif
         switch (c) {
             case 's':
@@ -103,6 +107,9 @@ Options parse_args(int argc, char* argv[]) {
                 break;
             case 'p':
                 opts.parallel = true;
+                break;
+            case 'z':
+                opts.zero_copy = true;
                 break;
 #ifdef TPCH_ENABLE_ASYNC_IO
             case 'a':
@@ -264,6 +271,56 @@ void generate_with_dbgen(
 
     if (opts.verbose) {
         std::cout << "  Total rows generated: " << total_rows << "\n";
+    }
+}
+
+// ============================================================================
+// Phase 13.4: Zero-copy generation for lineitem
+// ============================================================================
+
+/**
+ * Generate lineitem using zero-copy batch iterator
+ *
+ * Uses std::span and std::string_view for minimal memory copies.
+ * Expected 60-80% reduction in memory bandwidth.
+ */
+void generate_lineitem_zero_copy(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    size_t& total_rows) {
+
+    const size_t batch_size = 10000;  // Match Phase 13.4 plan
+
+    // Use batch iterator (zero-copy friendly)
+    auto batch_iter = dbgen.generate_lineitem_batches(batch_size, opts.max_rows);
+
+    while (batch_iter.has_next()) {
+        auto dbgen_batch = batch_iter.next();
+
+        // Convert batch to Arrow using zero-copy span
+        auto arrow_batch_result = tpch::ZeroCopyConverter::lineitem_to_recordbatch(
+            dbgen_batch.span(),  // std::span view (no copy!)
+            schema
+        );
+
+        if (!arrow_batch_result.ok()) {
+            throw std::runtime_error("Failed to convert batch: " + arrow_batch_result.status().ToString());
+        }
+
+        auto arrow_batch = arrow_batch_result.ValueOrDie();
+        writer->write_batch(arrow_batch);
+
+        total_rows += dbgen_batch.size();
+
+        if (opts.verbose && (total_rows % 100000 == 0)) {
+            std::cout << "  Generated " << total_rows << " rows (zero-copy)...\n";
+        }
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated (zero-copy): " << total_rows << "\n";
     }
 }
 
@@ -562,8 +619,13 @@ int main(int argc, char* argv[]) {
             tpch::DBGenWrapper dbgen(opts.scale_factor, opts.verbose);
 
             if (opts.table == "lineitem") {
-                generate_with_dbgen(dbgen, opts, schema, writer,
-                    [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
+                // Phase 13.4: Use zero-copy path if enabled
+                if (opts.zero_copy) {
+                    generate_lineitem_zero_copy(dbgen, opts, schema, writer, total_rows);
+                } else {
+                    generate_with_dbgen(dbgen, opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
+                }
             } else if (opts.table == "orders") {
                 generate_with_dbgen(dbgen, opts, schema, writer,
                     [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);

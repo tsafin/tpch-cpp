@@ -6,6 +6,7 @@
 #include <vector>
 #include <cstdint>
 #include <mutex>
+#include <span>
 
 #include <arrow/api.h>
 
@@ -37,6 +38,27 @@ std::string table_type_name(TableType table);
  * Get expected row count for a table at given scale factor
  */
 long get_row_count(TableType table, long scale_factor);
+
+/**
+ * Batch result from dbgen - owns memory, provides span views
+ *
+ * This structure owns the generated data and provides zero-copy
+ * access via std::span. Useful for Phase 13.4 zero-copy optimizations.
+ */
+template<typename T>
+struct DBGenBatch {
+    std::vector<T> rows;  // Owns the data
+
+    /**
+     * Get zero-copy span view over rows
+     */
+    std::span<const T> span() const {
+        return std::span<const T>(rows);
+    }
+
+    size_t size() const { return rows.size(); }
+    bool empty() const { return rows.empty(); }
+};
 
 /**
  * C++ wrapper around TPC-H dbgen reference implementation
@@ -184,6 +206,51 @@ public:
      * because it assumes initialization was already done globally.
      */
     void set_skip_init(bool skip) { skip_init_ = skip; }
+
+    // =======================================================================
+    // Phase 13.4: Batch generation interfaces for zero-copy optimization
+    // =======================================================================
+
+    /**
+     * Batch iterator for lineitem rows (zero-copy friendly)
+     *
+     * Generates lineitem rows in batches instead of one-by-one callbacks.
+     * This enables zero-copy conversion using std::span views.
+     *
+     * Example usage:
+     * ```cpp
+     * auto iter = dbgen.generate_lineitem_batches(10000, 100000);
+     * while (iter.has_next()) {
+     *     auto batch = iter.next();
+     *     auto span = batch.span();  // Zero-copy span view
+     *     // Process span...
+     * }
+     * ```
+     */
+    class LineitemBatchIterator {
+    public:
+        using Batch = DBGenBatch<line_t>;
+
+        LineitemBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
+
+        bool has_next() const { return remaining_ > 0; }
+        Batch next();
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_order_;
+    };
+
+    /**
+     * Create a batch iterator for lineitem generation
+     *
+     * @param batch_size Number of rows per batch
+     * @param max_rows Maximum total rows to generate
+     * @return Iterator over batches
+     */
+    LineitemBatchIterator generate_lineitem_batches(size_t batch_size, size_t max_rows);
 
 private:
     long scale_factor_;
