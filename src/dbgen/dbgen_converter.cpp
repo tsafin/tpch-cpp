@@ -1,5 +1,6 @@
 #include "tpch/dbgen_converter.hpp"
 #include "tpch/dbgen_wrapper.hpp"
+#include "tpch/performance_counters.hpp"
 
 #include <string>
 #include <stdexcept>
@@ -15,6 +16,8 @@ namespace tpch {
 void append_lineitem_to_builders(
     const void* row,
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders) {
+
+    TPCH_SCOPED_TIMER("arrow_append_lineitem");
 
     auto* line = static_cast<const line_t*>(row);
 
@@ -72,6 +75,8 @@ void append_lineitem_to_builders(
 void append_orders_to_builders(
     const void* row,
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders) {
+
+    TPCH_SCOPED_TIMER("arrow_append_orders");
 
     auto* order = static_cast<const order_t*>(row);
 
