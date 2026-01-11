@@ -1,0 +1,41 @@
+[
+  {
+    "name": "Baseline (Regular Path)",
+    "elapsed_time": 0.12674689292907715,
+    "throughput_rows_per_sec": 450450.0,
+    "flags": [],
+    "stdout": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: benchmark-results/lineitem.parquet\nRows written: 50000\nFile size: 3385243 bytes\nTime elapsed: 0.111 seconds\nThroughput: 450450 rows/sec\nWrite rate: 29.08 MB/sec\n\n===============================================================================\nPerformance Counters Report\n===============================================================================\n\n## Timers\n\nName                                      Total (ms)     Calls    Avg (us)\n------------------------------------------------------------------------------\nparquet_encode_sync                           41.204         1       41204\narrow_append_lineitem                         14.231     50000           0\nparquet_create_table                           0.027         1          27\n\n===============================================================================\n",
+    "stderr": ""
+  },
+  {
+    "name": "Zero-Copy Only",
+    "elapsed_time": 0.07047295570373535,
+    "throughput_rows_per_sec": 833333.0,
+    "flags": [
+      "--zero-copy"
+    ],
+    "stdout": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: benchmark-results/lineitem.parquet\nRows written: 50000\nFile size: 3385228 bytes\nTime elapsed: 0.060 seconds\nThroughput: 833333 rows/sec\nWrite rate: 53.81 MB/sec\n\n===============================================================================\nPerformance Counters Report\n===============================================================================\n\n## Timers\n\nName                                      Total (ms)     Calls    Avg (us)\n------------------------------------------------------------------------------\nparquet_encode_sync                           34.467         1       34467\nparquet_create_table                           0.026         1          26\n\n===============================================================================\n",
+    "stderr": ""
+  },
+  {
+    "name": "Parallel Generation (Regular)",
+    "elapsed_time": 0.23670196533203125,
+    "throughput_rows_per_sec": 394486.9877637012,
+    "flags": [
+      "--parallel"
+    ],
+    "stdout": "Initializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240850)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240850)\n  Forked nation (PID 240851)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240850)\n  Forked nation (PID 240851)\n  Forked supplier (PID 240852)\n  Forked part (PID 240853)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240850)\n  Forked nation (PID 240851)\n  Forked supplier (PID 240852)\n  Forked part (PID 240853)\n  Forked partsupp (PID 240854)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240850)\n  Forked nation (PID 240851)\n  Forked supplier (PID 240852)\n  Forked part (PID 240853)\n  Forked partsupp (PID 240854)\n  Forked customer (PID 240855)\n  Forked orders (PID 240856)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240850)\n  Forked nation (PID 240851)\n  Forked supplier (PID 240852)\n  Forked part (PID 240853)\n  Forked partsupp (PID 240854)\n  Forked customer (PID 240855)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240850)\n  Forked nation (PID 240851)\n  Forked supplier (PID 240852)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240850)\n  Forked nation (PID 240851)\n  Forked supplier (PID 240852)\n  Forked part (PID 240853)\n  Forked partsupp (PID 240854)\n  Forked customer (PID 240855)\n  Forked orders (PID 240856)\n  Forked lineitem (PID 240857)\n  region completed successfully\n  nation completed successfully\n  supplier completed successfully\n  partsupp completed successfully\n  customer completed successfully\n  lineitem completed successfully\n  orders completed successfully\n  part completed successfully\n\n=== Parallel Generation Summary ===\nTotal time (excluding init): 0.225s\nTotal time (including init): 0.226s\nAll tables generated successfully!\n",
+    "stderr": ""
+  },
+  {
+    "name": "Parallel + Zero-Copy",
+    "elapsed_time": 0.21259188652038574,
+    "throughput_rows_per_sec": 394486.9877637012,
+    "flags": [
+      "--parallel",
+      "--zero-copy"
+    ],
+    "stdout": "Initializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240859)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240859)\n  Forked nation (PID 240860)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240859)\n  Forked nation (PID 240860)\n  Forked supplier (PID 240861)\n  Forked part (PID 240862)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240859)\n  Forked nation (PID 240860)\n  Forked supplier (PID 240861)\n  Forked part (PID 240862)\n  Forked partsupp (PID 240863)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240859)\n  Forked nation (PID 240860)\n  Forked supplier (PID 240861)\n  Forked part (PID 240862)\n  Forked partsupp (PID 240863)\n  Forked customer (PID 240864)\n  Forked orders (PID 240865)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240859)\n  Forked nation (PID 240860)\n  Forked supplier (PID 240861)\n  Forked part (PID 240862)\n  Forked partsupp (PID 240863)\n  Forked customer (PID 240864)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240859)\n  Forked nation (PID 240860)\n  Forked supplier (PID 240861)\nInitializing dbgen (loading distributions)...\nInitialization complete in 0.000s. Forking 8 children...\n  Forked region (PID 240859)\n  Forked nation (PID 240860)\n  Forked supplier (PID 240861)\n  Forked part (PID 240862)\n  Forked partsupp (PID 240863)\n  Forked customer (PID 240864)\n  Forked orders (PID 240865)\n  Forked lineitem (PID 240866)\n  region completed successfully\n  nation completed successfully\n  supplier completed successfully\n  partsupp completed successfully\n  customer completed successfully\n  lineitem completed successfully\n  orders completed successfully\n  part completed successfully\n\n=== Parallel Generation Summary ===\nTotal time (excluding init): 0.203s\nTotal time (including init): 0.204s\nAll tables generated successfully!\n",
+    "stderr": ""
+  }
+]
