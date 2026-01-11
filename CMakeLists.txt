@@ -23,6 +23,7 @@ option(TPCH_BUILD_TESTS "Build unit tests" OFF)
 option(TPCH_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(TPCH_ENABLE_ASYNC_IO "Enable async I/O with io_uring" OFF)
 option(TPCH_ENABLE_ORC "Enable ORC file format support" OFF)
+option(TPCH_ENABLE_PERF_COUNTERS "Enable performance counters instrumentation" OFF)
 
 # Compiler configuration
 include(cmake/CompilerWarnings.cmake)
@@ -193,6 +194,11 @@ if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ASYNC_IO)
 endif()
 
+if(TPCH_ENABLE_PERF_COUNTERS)
+    target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_PERF_COUNTERS)
+    message(STATUS "Performance counters enabled")
+endif()
+
 # Main benchmark executable
 add_executable(tpch_benchmark src/main.cpp)
 target_link_libraries(tpch_benchmark PRIVATE tpch_core)
@@ -203,6 +209,9 @@ if(TPCH_ENABLE_ORC)
 endif()
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ASYNC_IO)
+endif()
+if(TPCH_ENABLE_PERF_COUNTERS)
+    target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_PERF_COUNTERS)
 endif()
 
 # Examples

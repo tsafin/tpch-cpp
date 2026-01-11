@@ -20,6 +20,7 @@
 #include "tpch/dbgen_wrapper.hpp"
 #include "tpch/dbgen_converter.hpp"
 #include "tpch/async_io.hpp"
+#include "tpch/performance_counters.hpp"
 #ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
 #endif
@@ -689,6 +690,11 @@ int main(int argc, char* argv[]) {
             std::cout << "Write rate: " << std::fixed << std::setprecision(2)
                       << mb_per_sec << " MB/sec\n";
         }
+
+#ifdef TPCH_ENABLE_PERF_COUNTERS
+        // Print performance counters report if enabled
+        tpch::PerformanceCounters::instance().print_report();
+#endif
 
         return 0;
 

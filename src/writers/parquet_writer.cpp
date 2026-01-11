@@ -1,5 +1,6 @@
 #include "tpch/parquet_writer.hpp"
 #include "tpch/async_io.hpp"
+#include "tpch/performance_counters.hpp"
 
 #include <iostream>
 #include <vector>
@@ -83,21 +84,29 @@ void ParquetWriter::close() {
             auto buffer_stream = buffer_stream_result.ValueOrDie();
 
             // Create table from batches
-            auto table = arrow::Table::FromRecordBatches(batches_);
-            if (!table.ok()) {
-                throw std::runtime_error("Failed to create Arrow table: " + table.status().message());
+            std::shared_ptr<arrow::Table> table_ptr;
+            {
+                TPCH_SCOPED_TIMER("parquet_create_table");
+                auto table = arrow::Table::FromRecordBatches(batches_);
+                if (!table.ok()) {
+                    throw std::runtime_error("Failed to create Arrow table: " + table.status().message());
+                }
+                table_ptr = *table;
             }
 
             // Write table to Parquet (in memory)
-            auto status = parquet::arrow::WriteTable(
-                **table,
-                arrow::default_memory_pool(),
-                buffer_stream,
-                1024 * 1024  // 1MB row group size
-            );
+            {
+                TPCH_SCOPED_TIMER("parquet_encode");
+                auto status = parquet::arrow::WriteTable(
+                    *table_ptr,
+                    arrow::default_memory_pool(),
+                    buffer_stream,
+                    1024 * 1024  // 1MB row group size
+                );
 
-            if (!status.ok()) {
-                throw std::runtime_error("Failed to write Parquet to buffer: " + status.message());
+                if (!status.ok()) {
+                    throw std::runtime_error("Failed to write Parquet to buffer: " + status.message());
+                }
             }
 
             // Get the complete buffer
@@ -120,11 +129,14 @@ void ParquetWriter::close() {
             async_fd_ = fd;
 
             // Submit async write of the complete buffer
-            async_context_->queue_write(fd, buffer->data(), buffer->size(), 0, 0);
-            async_context_->submit_queued();
+            {
+                TPCH_SCOPED_TIMER("parquet_async_write");
+                async_context_->queue_write(fd, buffer->data(), buffer->size(), 0, 0);
+                async_context_->submit_queued();
 
-            // Wait for all async operations to complete before returning
-            async_context_->flush();
+                // Wait for all async operations to complete before returning
+                async_context_->flush();
+            }
 
             // Now safe to close the file descriptor
             if (async_fd_ >= 0) {
@@ -143,21 +155,29 @@ void ParquetWriter::close() {
             auto outfile = outfile_result.ValueOrDie();
 
             // Create table from batches
-            auto table = arrow::Table::FromRecordBatches(batches_);
-            if (!table.ok()) {
-                throw std::runtime_error("Failed to create Arrow table: " + table.status().message());
+            std::shared_ptr<arrow::Table> table_ptr;
+            {
+                TPCH_SCOPED_TIMER("parquet_create_table");
+                auto table = arrow::Table::FromRecordBatches(batches_);
+                if (!table.ok()) {
+                    throw std::runtime_error("Failed to create Arrow table: " + table.status().message());
+                }
+                table_ptr = *table;
             }
 
             // Write table to Parquet
-            auto status = parquet::arrow::WriteTable(
-                **table,
-                arrow::default_memory_pool(),
-                outfile,
-                1024 * 1024  // 1MB row group size
-            );
+            {
+                TPCH_SCOPED_TIMER("parquet_encode_sync");
+                auto status = parquet::arrow::WriteTable(
+                    *table_ptr,
+                    arrow::default_memory_pool(),
+                    outfile,
+                    1024 * 1024  // 1MB row group size
+                );
 
-            if (!status.ok()) {
-                throw std::runtime_error("Failed to write Parquet: " + status.message());
+                if (!status.ok()) {
+                    throw std::runtime_error("Failed to write Parquet: " + status.message());
+                }
             }
         }
 
