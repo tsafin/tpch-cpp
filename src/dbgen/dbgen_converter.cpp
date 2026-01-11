@@ -149,7 +149,7 @@ void append_part_to_builders(
         ->Append(part->partkey);
 
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["p_name"].get());
-    name_builder->Append(std::string(part->name, part->nlen));
+    name_builder->Append(part->name, simd::strlen_sse42_unaligned(part->name));
 
     auto* mfgr_builder = static_cast<arrow::StringBuilder*>(builders["p_mfgr"].get());
     mfgr_builder->Append(part->mfgr, simd::strlen_sse42_unaligned(part->mfgr));
