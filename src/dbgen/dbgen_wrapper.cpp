@@ -60,7 +60,7 @@ long get_row_count(TableType table, long scale_factor) {
 }
 
 DBGenWrapper::DBGenWrapper(long scale_factor, bool verbose)
-    : scale_factor_(scale_factor), initialized_(false), verbose_(verbose), asc_dates_(nullptr) {
+    : scale_factor_(scale_factor), initialized_(false), verbose_(verbose), skip_init_(false), asc_dates_(nullptr) {
     if (scale_factor <= 0) {
         throw std::invalid_argument("Scale factor must be positive");
     }
@@ -84,6 +84,13 @@ DBGenWrapper& DBGenWrapper::operator=(DBGenWrapper&& other) noexcept {
 }
 
 void tpch::DBGenWrapper::init_dbgen() {
+    // If skip_init_ is true, global init was already done
+    // Just mark as initialized and return
+    if (skip_init_) {
+        initialized_ = true;
+        return;
+    }
+
     // Set global dbgen state
     // dbgen uses global variables for configuration
     scale = scale_factor_;
@@ -525,6 +532,71 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table) {
     }
 
     return nullptr;
+}
+
+// ============================================================================
+// Global initialization functions for fork-after-init pattern (Phase 12.6)
+// ============================================================================
+
+namespace {
+    // Track whether global initialization was performed
+    bool g_dbgen_initialized = false;
+}
+
+void dbgen_init_global(long scale_factor, bool verbose_flag) {
+    if (g_dbgen_initialized) {
+        // Already initialized - this is safe to call multiple times
+        return;
+    }
+
+    // Set global dbgen configuration
+    scale = scale_factor;
+    verbose = verbose_flag ? 1 : 0;
+    force = 0;
+    d_path = nullptr;
+
+    // Load distributions from dists.dss (expensive I/O and parsing)
+    // This is the heaviest part of initialization
+    if (verbose_flag) {
+        fprintf(stderr, "dbgen_init_global: Loading distributions...\n");
+        fflush(stderr);
+    }
+    load_dists();
+    if (verbose_flag) {
+        fprintf(stderr, "dbgen_init_global: Distributions loaded\n");
+        fflush(stderr);
+    }
+
+    // Pre-cache date array (2557 date strings)
+    if (verbose_flag) {
+        fprintf(stderr, "dbgen_init_global: Pre-caching date array...\n");
+        fflush(stderr);
+    }
+    char** dates = mk_ascdate();
+    if (dates == nullptr) {
+        throw std::runtime_error("Failed to allocate date array in global init");
+    }
+    if (verbose_flag) {
+        fprintf(stderr, "dbgen_init_global: Date array cached\n");
+        fflush(stderr);
+    }
+
+    // Optional: Pre-warm text pool (300MB)
+    // This uses Seed[5] which is marked {NONE} - not used by any table
+    // Uncomment if you want to pre-generate the text pool before forking
+    // char dummy[256];
+    // dbg_text(dummy, 100, 200, 5);
+
+    g_dbgen_initialized = true;
+
+    if (verbose_flag) {
+        fprintf(stderr, "dbgen_init_global: Initialization complete\n");
+        fflush(stderr);
+    }
+}
+
+bool dbgen_is_initialized() {
+    return g_dbgen_initialized;
 }
 
 }  // namespace tpch

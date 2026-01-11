@@ -48,6 +48,7 @@ void print_usage(const char* prog) {
               << "  --use-dbgen           Use official TPC-H dbgen (default: synthetic data)\n"
               << "  --table <name>        TPC-H table: lineitem, orders, customer, part,\n"
               << "                        partsupp, supplier, nation, region (default: lineitem)\n"
+              << "  --parallel            Generate all 8 tables in parallel (Phase 12.6)\n"
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
@@ -65,7 +66,7 @@ Options parse_args(int argc, char* argv[]) {
         {"max-rows", required_argument, nullptr, 'm'},
         {"use-dbgen", no_argument, nullptr, 'u'},
         {"table", required_argument, nullptr, 't'},
-        // NOTE: --parallel removed (Phase 12.3 - broken, 16x slower)
+        {"parallel", no_argument, nullptr, 'p'},  // Phase 12.6: Fork-after-init
 #ifdef TPCH_ENABLE_ASYNC_IO
         {"async-io", no_argument, nullptr, 'a'},
 #endif
@@ -76,9 +77,9 @@ Options parse_args(int argc, char* argv[]) {
 
     int c;
 #ifdef TPCH_ENABLE_ASYNC_IO
-    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:avh", long_options, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pavh", long_options, nullptr)) != -1) {
 #else
-    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:vh", long_options, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pvh", long_options, nullptr)) != -1) {
 #endif
         switch (c) {
             case 's':
@@ -98,6 +99,9 @@ Options parse_args(int argc, char* argv[]) {
                 break;
             case 't':
                 opts.table = optarg;
+                break;
+            case 'p':
+                opts.parallel = true;
                 break;
 #ifdef TPCH_ENABLE_ASYNC_IO
             case 'a':
@@ -250,11 +254,173 @@ void generate_with_dbgen(
     }
 }
 
-// NOTE: generate_all_tables_parallel() function removed in Phase 12 Integration Testing
-// See CLAUDE.md and async-io-performance-fixes.md for details
-// The --parallel flag was found to be 16x SLOWER (not faster) due to dbgen global
-// variable conflicts and excessive context switching overhead. Do not re-implement
-// without first addressing the root causes documented in the plan.
+// ============================================================================
+// Phase 12.6: Fork-after-init parallel generation (fixes Phase 12.3)
+// ============================================================================
+
+/**
+ * Generate all tables in parallel using fork-after-init pattern
+ *
+ * Key insight: dbgen initialization does NOT corrupt table-generation seeds.
+ * Seeds are partitioned by table, so we can initialize ONCE in the parent,
+ * then fork child processes that inherit all initialization via COW.
+ *
+ * This eliminates the 8× initialization overhead that made Phase 12.3 broken.
+ */
+int generate_all_tables_parallel_v2(const Options& opts) {
+    static const std::vector<std::string> tables = {
+        "region", "nation", "supplier", "part",
+        "partsupp", "customer", "orders", "lineitem"
+    };
+
+    // === PARENT: Heavy initialization ONCE ===
+    std::cout << "Initializing dbgen (loading distributions)...\n";
+    auto init_start = std::chrono::high_resolution_clock::now();
+
+    tpch::dbgen_init_global(opts.scale_factor, opts.verbose);
+
+    auto init_end = std::chrono::high_resolution_clock::now();
+    auto init_duration = std::chrono::duration<double>(init_end - init_start).count();
+    std::cout << "Initialization complete in " << std::fixed << std::setprecision(3)
+              << init_duration << "s. Forking " << tables.size() << " children...\n";
+
+    std::vector<pid_t> children;
+    std::map<pid_t, std::string> pid_to_table;
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    for (const auto& table : tables) {
+        pid_t pid = fork();
+
+        if (pid == -1) {
+            perror("fork");
+            return 1;
+        }
+
+        if (pid == 0) {
+            // === CHILD: Inherits all init via COW ===
+            // Seed[] is pristine, distributions loaded, dates cached
+
+            try {
+                std::string output_path = get_output_filename(opts.output_dir, opts.format, table);
+
+                // Create DBGenWrapper and tell it to skip init
+                tpch::DBGenWrapper dbgen(opts.scale_factor, opts.verbose);
+                dbgen.set_skip_init(true);  // Don't re-initialize!
+
+                // Get schema for this table
+                std::shared_ptr<arrow::Schema> schema;
+                if (table == "lineitem") {
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM);
+                } else if (table == "orders") {
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS);
+                } else if (table == "customer") {
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER);
+                } else if (table == "part") {
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART);
+                } else if (table == "partsupp") {
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP);
+                } else if (table == "supplier") {
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER);
+                } else if (table == "nation") {
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION);
+                } else if (table == "region") {
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION);
+                } else {
+                    std::cerr << "Unknown table: " << table << "\n";
+                    exit(1);
+                }
+
+                // Create writer
+                auto writer = create_writer(opts.format, output_path);
+
+                // Generate table
+                size_t total_rows = 0;
+                Options child_opts = opts;
+                child_opts.table = table;
+
+                if (table == "lineitem") {
+                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
+                } else if (table == "orders") {
+                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);
+                } else if (table == "customer") {
+                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_customer(cb, opts.max_rows); }, total_rows);
+                } else if (table == "part") {
+                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_part(cb, opts.max_rows); }, total_rows);
+                } else if (table == "partsupp") {
+                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_partsupp(cb, opts.max_rows); }, total_rows);
+                } else if (table == "supplier") {
+                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_supplier(cb, opts.max_rows); }, total_rows);
+                } else if (table == "nation") {
+                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
+                } else if (table == "region") {
+                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                        [&](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
+                }
+
+                writer->close();
+
+                exit(0);  // Success
+            } catch (const std::exception& e) {
+                std::cerr << "Child process for table " << table << " failed: " << e.what() << "\n";
+                exit(1);
+            }
+        }
+
+        // Parent continues
+        children.push_back(pid);
+        pid_to_table[pid] = table;
+        std::cout << "  Forked " << table << " (PID " << pid << ")\n";
+    }
+
+    // Wait for all children
+    int failed = 0;
+    std::map<std::string, int> table_status;
+
+    for (size_t i = 0; i < children.size(); ++i) {
+        int status;
+        pid_t finished_pid = waitpid(-1, &status, 0);  // Wait for any child
+
+        if (finished_pid == -1) {
+            perror("waitpid");
+            continue;
+        }
+
+        std::string table_name = pid_to_table[finished_pid];
+
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            std::cout << "  " << table_name << " FAILED (status=" << WEXITSTATUS(status) << ")\n";
+            table_status[table_name] = 1;
+            failed++;
+        } else {
+            std::cout << "  " << table_name << " completed successfully\n";
+            table_status[table_name] = 0;
+        }
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration<double>(end_time - start_time).count();
+
+    std::cout << "\n=== Parallel Generation Summary ===\n";
+    std::cout << "Total time (excluding init): " << std::fixed << std::setprecision(3)
+              << duration << "s\n";
+    std::cout << "Total time (including init): " << std::fixed << std::setprecision(3)
+              << (duration + init_duration) << "s\n";
+
+    if (failed > 0) {
+        std::cout << "Failed tables: " << failed << "/" << tables.size() << "\n";
+        return 1;
+    } else {
+        std::cout << "All tables generated successfully!\n";
+        return 0;
+    }
+}
 
 }  // anonymous namespace
 
@@ -262,8 +428,14 @@ int main(int argc, char* argv[]) {
     try {
         auto opts = parse_args(argc, argv);
 
-        // NOTE: --parallel flag disabled (Phase 12.3 - broken, 16x slower)
-        // See CLAUDE.md and async-io-performance-fixes.md for details
+        // Phase 12.6: Fork-after-init parallel generation
+        if (opts.parallel) {
+            if (!opts.use_dbgen) {
+                std::cerr << "Error: --parallel requires --use-dbgen\n";
+                return 1;
+            }
+            return generate_all_tables_parallel_v2(opts);
+        }
 
         // Validate format
         if (opts.format != "csv" && opts.format != "parquet"

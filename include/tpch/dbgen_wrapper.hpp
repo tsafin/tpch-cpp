@@ -177,10 +177,19 @@ public:
      */
     static std::shared_ptr<arrow::Schema> get_schema(TableType table);
 
+    /**
+     * Set skip initialization flag (for use after global init)
+     *
+     * When set to true, the DBGenWrapper will not call init_dbgen()
+     * because it assumes initialization was already done globally.
+     */
+    void set_skip_init(bool skip) { skip_init_ = skip; }
+
 private:
     long scale_factor_;
     bool initialized_;
     bool verbose_;
+    bool skip_init_;  // Skip initialization (global init already done)
     char** asc_dates_;  // Date array cache for orders/lineitem generation
 
     /**
@@ -194,5 +203,32 @@ private:
      */
     unsigned long get_seed(int table_id);
 };
+
+/**
+ * Global initialization for dbgen (call ONCE before fork())
+ *
+ * Performs heavy one-time initialization:
+ * - Loads distributions from dists.dss file
+ * - Pre-caches date array (2557 strings)
+ * - Optionally pre-warms text pool (300MB)
+ * - Sets global dbgen configuration
+ *
+ * After calling this, child processes can skip initialization
+ * by using DBGenWrapper::set_skip_init(true).
+ *
+ * Thread-safety: Must be called from parent process before fork().
+ * Child processes inherit all initialized state via copy-on-write.
+ *
+ * @param scale_factor TPC-H scale factor (1 = 1GB baseline)
+ * @param verbose_flag Enable verbose debug output
+ */
+void dbgen_init_global(long scale_factor, bool verbose_flag);
+
+/**
+ * Check if global dbgen initialization was completed
+ *
+ * @return true if dbgen_init_global() was called
+ */
+bool dbgen_is_initialized();
 
 }  // namespace tpch
