@@ -29,8 +29,35 @@ option(TPCH_ENABLE_PERF_COUNTERS "Enable performance counters instrumentation" O
 include(cmake/CompilerWarnings.cmake)
 
 # Apply compiler flags based on configuration
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_compile_options(-O3 -march=native)
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    # Enable aggressive optimizations with SIMD support
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        add_compile_options(-O3 -march=native)
+
+        # Enable auto-vectorization and report optimizations
+        add_compile_options(
+            -ftree-vectorize              # Enable loop vectorization
+            -fopt-info-vec-optimized      # Report successful vectorizations
+        )
+
+        # Check for AVX2 support (preferred)
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+
+        if(COMPILER_SUPPORTS_AVX2)
+            message(STATUS "Enabling AVX2 SIMD optimizations")
+            add_compile_options(-mavx2 -mfma)
+        else()
+            # Fallback to SSE4.2 (required for SIMD string utils)
+            check_cxx_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE42)
+            if(COMPILER_SUPPORTS_SSE42)
+                message(STATUS "Enabling SSE4.2 SIMD optimizations")
+                add_compile_options(-msse4.2)
+            else()
+                message(WARNING "No SIMD support detected - performance will be degraded")
+            endif()
+        endif()
+    endif()
 elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-O0 -g)
 endif()
