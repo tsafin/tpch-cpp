@@ -95,6 +95,16 @@ find_package(ZLIB QUIET)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 
+# Use local xsimd (modern version from third_party)
+set(XSIMD_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/xsimd/include")
+if(EXISTS "${XSIMD_INCLUDE_DIR}/xsimd/xsimd.hpp")
+    message(STATUS "Using local xsimd from: ${XSIMD_INCLUDE_DIR}")
+    set(xsimd_FOUND TRUE)
+else()
+    message(STATUS "xsimd not found in third_party - will use manual SIMD intrinsics")
+    set(xsimd_FOUND FALSE)
+endif()
+
 if(TPCH_ENABLE_ORC)
     find_package(ORC QUIET)
 endif()
@@ -145,8 +155,6 @@ message(STATUS "Copied dists.dss to build directory")
 set(TPCH_CORE_SOURCES
     src/writers/csv_writer.cpp
     src/writers/parquet_writer.cpp
-    src/async/io_uring_context.cpp
-    src/async/shared_async_io.cpp
     src/multi_table_writer.cpp
     src/dbgen/dbgen_wrapper.cpp
     src/dbgen/dbgen_converter.cpp
@@ -154,6 +162,19 @@ set(TPCH_CORE_SOURCES
     src/util/builder_pool.cpp
     ${DBGEN_OBJECTS}
 )
+
+# Add async IO sources only if enabled
+if(TPCH_ENABLE_ASYNC_IO)
+    list(APPEND TPCH_CORE_SOURCES
+        src/async/io_uring_context.cpp
+        src/async/shared_async_io.cpp
+    )
+else()
+    # Use stub implementation when async IO is disabled
+    list(APPEND TPCH_CORE_SOURCES
+        src/async/async_io_stub.cpp
+    )
+endif()
 
 # Add ORC writer if enabled and available
 if(TPCH_ENABLE_ORC AND ORC_FOUND)
@@ -172,6 +193,13 @@ target_link_libraries(tpch_core PUBLIC
     Arrow::parquet
     dbgen_objs
 )
+
+# Link xsimd if available (header-only library)
+if(xsimd_FOUND)
+    target_include_directories(tpch_core PUBLIC ${XSIMD_INCLUDE_DIR})
+    target_compile_definitions(tpch_core PUBLIC TPCH_USE_XSIMD)
+    message(STATUS "xsimd SIMD optimizations enabled")
+endif()
 
 # Link ORC if enabled and available
 # ORC references protobuf symbols, so we must link protobuf

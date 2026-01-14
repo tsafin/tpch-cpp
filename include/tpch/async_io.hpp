@@ -181,6 +181,17 @@ private:
 
 namespace tpch {
 
+// Forward declare types needed by stub
+struct AsyncIOConfig {
+    uint32_t queue_depth = 256;
+    size_t buffer_size = 1024 * 1024;
+    size_t num_buffers = 8;
+    bool use_sqpoll = false;
+    bool use_direct_io = false;
+};
+
+using CompletionCallback = std::function<void(uint64_t user_data, int result)>;
+
 class AsyncIOContext {
 public:
     explicit AsyncIOContext(const AsyncIOConfig& config)
