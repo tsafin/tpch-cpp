@@ -211,4 +211,467 @@ ZeroCopyConverter::lineitem_to_recordbatch(
     return arrow::RecordBatch::Make(schema, count, arrays);
 }
 
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+ZeroCopyConverter::orders_to_recordbatch(
+    std::span<const order_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        return arrow::RecordBatch::Make(schema, 0, empty_arrays);
+    }
+
+    // Extract data into temporary contiguous arrays
+    std::vector<int64_t> orderkeys;
+    std::vector<int64_t> custkeys;
+    std::vector<double> totalprices;
+    std::vector<int64_t> shippriorities;
+
+    std::vector<std::string_view> orderstatuses;
+    std::vector<std::string_view> orderdates;
+    std::vector<std::string_view> orderpriorities;
+    std::vector<std::string_view> clerks;
+    std::vector<std::string_view> comments;
+
+    // Reserve space
+    orderkeys.reserve(count);
+    custkeys.reserve(count);
+    totalprices.reserve(count);
+    shippriorities.reserve(count);
+    orderstatuses.reserve(count);
+    orderdates.reserve(count);
+    orderpriorities.reserve(count);
+    clerks.reserve(count);
+    comments.reserve(count);
+
+    // Single pass: extract all fields
+    for (const order_t& order : batch) {
+        // Numeric fields
+        orderkeys.push_back(order.okey);
+        custkeys.push_back(order.custkey);
+        totalprices.push_back(static_cast<double>(order.totalprice) / 100.0);
+        shippriorities.push_back(order.spriority);
+
+        // String fields (views, not copies!)
+        orderstatuses.emplace_back(&order.orderstatus, 1);  // Single char
+        orderdates.emplace_back(order.odate, strlen_fast(order.odate));
+        orderpriorities.emplace_back(order.opriority, strlen_fast(order.opriority));
+        clerks.emplace_back(order.clerk, strlen_fast(order.clerk));
+        comments.emplace_back(order.comment, order.clen);  // clen is pre-computed
+    }
+
+    // Build Arrow arrays
+    ARROW_ASSIGN_OR_RAISE(auto orderkey_array, build_int64_array(orderkeys));
+    ARROW_ASSIGN_OR_RAISE(auto custkey_array, build_int64_array(custkeys));
+    ARROW_ASSIGN_OR_RAISE(auto totalprice_array, build_double_array(totalprices));
+    ARROW_ASSIGN_OR_RAISE(auto shippriority_array, build_int64_array(shippriorities));
+
+    ARROW_ASSIGN_OR_RAISE(auto orderstatus_array, build_string_array(orderstatuses));
+    ARROW_ASSIGN_OR_RAISE(auto orderdate_array, build_string_array(orderdates));
+    ARROW_ASSIGN_OR_RAISE(auto orderpriority_array, build_string_array(orderpriorities));
+    ARROW_ASSIGN_OR_RAISE(auto clerk_array, build_string_array(clerks));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        orderkey_array,
+        custkey_array,
+        orderstatus_array,
+        totalprice_array,
+        orderdate_array,
+        orderpriority_array,
+        clerk_array,
+        shippriority_array,
+        comment_array
+    };
+
+    return arrow::RecordBatch::Make(schema, count, arrays);
+}
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+ZeroCopyConverter::customer_to_recordbatch(
+    std::span<const customer_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        return arrow::RecordBatch::Make(schema, 0, empty_arrays);
+    }
+
+    // Extract data into temporary contiguous arrays
+    std::vector<int64_t> custkeys;
+    std::vector<int64_t> nationkeys;
+    std::vector<double> acctbals;
+
+    std::vector<std::string_view> names;
+    std::vector<std::string_view> addresses;
+    std::vector<std::string_view> phones;
+    std::vector<std::string_view> mktsegments;
+    std::vector<std::string_view> comments;
+
+    // Reserve space
+    custkeys.reserve(count);
+    nationkeys.reserve(count);
+    acctbals.reserve(count);
+    names.reserve(count);
+    addresses.reserve(count);
+    phones.reserve(count);
+    mktsegments.reserve(count);
+    comments.reserve(count);
+
+    // Single pass: extract all fields
+    for (const customer_t& cust : batch) {
+        // Numeric fields
+        custkeys.push_back(cust.custkey);
+        nationkeys.push_back(cust.nation_code);
+        acctbals.push_back(static_cast<double>(cust.acctbal) / 100.0);
+
+        // String fields (views, not copies!)
+        names.emplace_back(cust.name, strlen_fast(cust.name));
+        addresses.emplace_back(cust.address, cust.alen);
+        phones.emplace_back(cust.phone, strlen_fast(cust.phone));
+        mktsegments.emplace_back(cust.mktsegment, strlen_fast(cust.mktsegment));
+        comments.emplace_back(cust.comment, cust.clen);
+    }
+
+    // Build Arrow arrays
+    ARROW_ASSIGN_OR_RAISE(auto custkey_array, build_int64_array(custkeys));
+    ARROW_ASSIGN_OR_RAISE(auto nationkey_array, build_int64_array(nationkeys));
+    ARROW_ASSIGN_OR_RAISE(auto acctbal_array, build_double_array(acctbals));
+
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(names));
+    ARROW_ASSIGN_OR_RAISE(auto address_array, build_string_array(addresses));
+    ARROW_ASSIGN_OR_RAISE(auto phone_array, build_string_array(phones));
+    ARROW_ASSIGN_OR_RAISE(auto mktsegment_array, build_string_array(mktsegments));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        custkey_array,
+        name_array,
+        address_array,
+        nationkey_array,
+        phone_array,
+        acctbal_array,
+        mktsegment_array,
+        comment_array
+    };
+
+    return arrow::RecordBatch::Make(schema, count, arrays);
+}
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+ZeroCopyConverter::part_to_recordbatch(
+    std::span<const part_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        return arrow::RecordBatch::Make(schema, 0, empty_arrays);
+    }
+
+    // Extract data into temporary contiguous arrays
+    std::vector<int64_t> partkeys;
+    std::vector<int64_t> sizes;
+    std::vector<double> retailprices;
+
+    std::vector<std::string_view> names;
+    std::vector<std::string_view> mfgrs;
+    std::vector<std::string_view> brands;
+    std::vector<std::string_view> types;
+    std::vector<std::string_view> containers;
+    std::vector<std::string_view> comments;
+
+    // Reserve space
+    partkeys.reserve(count);
+    sizes.reserve(count);
+    retailprices.reserve(count);
+    names.reserve(count);
+    mfgrs.reserve(count);
+    brands.reserve(count);
+    types.reserve(count);
+    containers.reserve(count);
+    comments.reserve(count);
+
+    // Single pass: extract all fields
+    for (const part_t& part : batch) {
+        // Numeric fields
+        partkeys.push_back(part.partkey);
+        sizes.push_back(part.size);
+        retailprices.push_back(static_cast<double>(part.retailprice) / 100.0);
+
+        // String fields (views, not copies!)
+        names.emplace_back(part.name, strlen_fast(part.name));
+        mfgrs.emplace_back(part.mfgr, strlen_fast(part.mfgr));
+        brands.emplace_back(part.brand, strlen_fast(part.brand));
+        types.emplace_back(part.type, part.tlen);  // tlen is pre-computed
+        containers.emplace_back(part.container, strlen_fast(part.container));
+        comments.emplace_back(part.comment, part.clen);  // clen is pre-computed
+    }
+
+    // Build Arrow arrays
+    ARROW_ASSIGN_OR_RAISE(auto partkey_array, build_int64_array(partkeys));
+    ARROW_ASSIGN_OR_RAISE(auto size_array, build_int64_array(sizes));
+    ARROW_ASSIGN_OR_RAISE(auto retailprice_array, build_double_array(retailprices));
+
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(names));
+    ARROW_ASSIGN_OR_RAISE(auto mfgr_array, build_string_array(mfgrs));
+    ARROW_ASSIGN_OR_RAISE(auto brand_array, build_string_array(brands));
+    ARROW_ASSIGN_OR_RAISE(auto type_array, build_string_array(types));
+    ARROW_ASSIGN_OR_RAISE(auto container_array, build_string_array(containers));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        partkey_array,
+        name_array,
+        mfgr_array,
+        brand_array,
+        type_array,
+        size_array,
+        container_array,
+        retailprice_array,
+        comment_array
+    };
+
+    return arrow::RecordBatch::Make(schema, count, arrays);
+}
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+ZeroCopyConverter::partsupp_to_recordbatch(
+    std::span<const partsupp_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        return arrow::RecordBatch::Make(schema, 0, empty_arrays);
+    }
+
+    // Extract data into temporary contiguous arrays
+    std::vector<int64_t> partkeys;
+    std::vector<int64_t> suppkeys;
+    std::vector<int64_t> availqtys;
+    std::vector<double> supplycosts;
+
+    std::vector<std::string_view> comments;
+
+    // Reserve space
+    partkeys.reserve(count);
+    suppkeys.reserve(count);
+    availqtys.reserve(count);
+    supplycosts.reserve(count);
+    comments.reserve(count);
+
+    // Single pass: extract all fields
+    for (const partsupp_t& ps : batch) {
+        // Numeric fields
+        partkeys.push_back(ps.partkey);
+        suppkeys.push_back(ps.suppkey);
+        availqtys.push_back(ps.qty);
+        supplycosts.push_back(static_cast<double>(ps.scost) / 100.0);
+
+        // String fields (views, not copies!)
+        comments.emplace_back(ps.comment, ps.clen);  // clen is pre-computed
+    }
+
+    // Build Arrow arrays
+    ARROW_ASSIGN_OR_RAISE(auto partkey_array, build_int64_array(partkeys));
+    ARROW_ASSIGN_OR_RAISE(auto suppkey_array, build_int64_array(suppkeys));
+    ARROW_ASSIGN_OR_RAISE(auto availqty_array, build_int64_array(availqtys));
+    ARROW_ASSIGN_OR_RAISE(auto supplycost_array, build_double_array(supplycosts));
+
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        partkey_array,
+        suppkey_array,
+        availqty_array,
+        supplycost_array,
+        comment_array
+    };
+
+    return arrow::RecordBatch::Make(schema, count, arrays);
+}
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+ZeroCopyConverter::supplier_to_recordbatch(
+    std::span<const supplier_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        return arrow::RecordBatch::Make(schema, 0, empty_arrays);
+    }
+
+    // Extract data into temporary contiguous arrays
+    std::vector<int64_t> suppkeys;
+    std::vector<int64_t> nationkeys;
+    std::vector<double> acctbals;
+
+    std::vector<std::string_view> names;
+    std::vector<std::string_view> addresses;
+    std::vector<std::string_view> phones;
+    std::vector<std::string_view> comments;
+
+    // Reserve space
+    suppkeys.reserve(count);
+    nationkeys.reserve(count);
+    acctbals.reserve(count);
+    names.reserve(count);
+    addresses.reserve(count);
+    phones.reserve(count);
+    comments.reserve(count);
+
+    // Single pass: extract all fields
+    for (const supplier_t& supp : batch) {
+        // Numeric fields
+        suppkeys.push_back(supp.suppkey);
+        nationkeys.push_back(supp.nation_code);
+        acctbals.push_back(static_cast<double>(supp.acctbal) / 100.0);
+
+        // String fields (views, not copies!)
+        names.emplace_back(supp.name, strlen_fast(supp.name));
+        addresses.emplace_back(supp.address, supp.alen);
+        phones.emplace_back(supp.phone, strlen_fast(supp.phone));
+        comments.emplace_back(supp.comment, supp.clen);
+    }
+
+    // Build Arrow arrays
+    ARROW_ASSIGN_OR_RAISE(auto suppkey_array, build_int64_array(suppkeys));
+    ARROW_ASSIGN_OR_RAISE(auto nationkey_array, build_int64_array(nationkeys));
+    ARROW_ASSIGN_OR_RAISE(auto acctbal_array, build_double_array(acctbals));
+
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(names));
+    ARROW_ASSIGN_OR_RAISE(auto address_array, build_string_array(addresses));
+    ARROW_ASSIGN_OR_RAISE(auto phone_array, build_string_array(phones));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        suppkey_array,
+        name_array,
+        address_array,
+        nationkey_array,
+        phone_array,
+        acctbal_array,
+        comment_array
+    };
+
+    return arrow::RecordBatch::Make(schema, count, arrays);
+}
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+ZeroCopyConverter::nation_to_recordbatch(
+    std::span<const code_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        return arrow::RecordBatch::Make(schema, 0, empty_arrays);
+    }
+
+    // Extract data into temporary contiguous arrays
+    std::vector<int64_t> nationkeys;
+    std::vector<int64_t> regionkeys;
+
+    std::vector<std::string_view> names;
+    std::vector<std::string_view> comments;
+
+    // Reserve space
+    nationkeys.reserve(count);
+    regionkeys.reserve(count);
+    names.reserve(count);
+    comments.reserve(count);
+
+    // Single pass: extract all fields
+    for (const code_t& nation : batch) {
+        // Numeric fields
+        nationkeys.push_back(nation.code);
+        regionkeys.push_back(nation.join);
+
+        // String fields (views, not copies!)
+        names.emplace_back(nation.text, strlen_fast(nation.text));
+        comments.emplace_back(nation.comment, nation.clen);
+    }
+
+    // Build Arrow arrays
+    ARROW_ASSIGN_OR_RAISE(auto nationkey_array, build_int64_array(nationkeys));
+    ARROW_ASSIGN_OR_RAISE(auto regionkey_array, build_int64_array(regionkeys));
+
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(names));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        nationkey_array,
+        name_array,
+        regionkey_array,
+        comment_array
+    };
+
+    return arrow::RecordBatch::Make(schema, count, arrays);
+}
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+ZeroCopyConverter::region_to_recordbatch(
+    std::span<const code_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        return arrow::RecordBatch::Make(schema, 0, empty_arrays);
+    }
+
+    // Extract data into temporary contiguous arrays
+    std::vector<int64_t> regionkeys;
+
+    std::vector<std::string_view> names;
+    std::vector<std::string_view> comments;
+
+    // Reserve space
+    regionkeys.reserve(count);
+    names.reserve(count);
+    comments.reserve(count);
+
+    // Single pass: extract all fields
+    for (const code_t& region : batch) {
+        // Numeric fields
+        regionkeys.push_back(region.code);
+
+        // String fields (views, not copies!)
+        names.emplace_back(region.text, strlen_fast(region.text));
+        comments.emplace_back(region.comment, region.clen);
+    }
+
+    // Build Arrow arrays
+    ARROW_ASSIGN_OR_RAISE(auto regionkey_array, build_int64_array(regionkeys));
+
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(names));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        regionkey_array,
+        name_array,
+        comment_array
+    };
+
+    return arrow::RecordBatch::Make(schema, count, arrays);
+}
+
 } // namespace tpch

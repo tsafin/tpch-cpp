@@ -40,6 +40,97 @@ public:
         const std::shared_ptr<arrow::Schema>& schema
     );
 
+    /**
+     * Convert orders batch to Arrow RecordBatch
+     *
+     * @param batch Span view over order_t structs (no copy)
+     * @param schema Arrow schema for orders table
+     * @return RecordBatch with minimal copies
+     */
+    static arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    orders_to_recordbatch(
+        std::span<const order_t> batch,
+        const std::shared_ptr<arrow::Schema>& schema
+    );
+
+    /**
+     * Convert customer batch to Arrow RecordBatch
+     *
+     * @param batch Span view over customer_t structs (no copy)
+     * @param schema Arrow schema for customer table
+     * @return RecordBatch with minimal copies
+     */
+    static arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    customer_to_recordbatch(
+        std::span<const customer_t> batch,
+        const std::shared_ptr<arrow::Schema>& schema
+    );
+
+    /**
+     * Convert part batch to Arrow RecordBatch
+     *
+     * @param batch Span view over part_t structs (no copy)
+     * @param schema Arrow schema for part table
+     * @return RecordBatch with minimal copies
+     */
+    static arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    part_to_recordbatch(
+        std::span<const part_t> batch,
+        const std::shared_ptr<arrow::Schema>& schema
+    );
+
+    /**
+     * Convert partsupp batch to Arrow RecordBatch
+     *
+     * @param batch Span view over partsupp_t structs (no copy)
+     * @param schema Arrow schema for partsupp table
+     * @return RecordBatch with minimal copies
+     */
+    static arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    partsupp_to_recordbatch(
+        std::span<const partsupp_t> batch,
+        const std::shared_ptr<arrow::Schema>& schema
+    );
+
+    /**
+     * Convert supplier batch to Arrow RecordBatch
+     *
+     * @param batch Span view over supplier_t structs (no copy)
+     * @param schema Arrow schema for supplier table
+     * @return RecordBatch with minimal copies
+     */
+    static arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    supplier_to_recordbatch(
+        std::span<const supplier_t> batch,
+        const std::shared_ptr<arrow::Schema>& schema
+    );
+
+    /**
+     * Convert nation batch to Arrow RecordBatch
+     *
+     * @param batch Span view over code_t structs (no copy)
+     * @param schema Arrow schema for nation table
+     * @return RecordBatch with minimal copies
+     */
+    static arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    nation_to_recordbatch(
+        std::span<const code_t> batch,
+        const std::shared_ptr<arrow::Schema>& schema
+    );
+
+    /**
+     * Convert region batch to Arrow RecordBatch
+     *
+     * @param batch Span view over code_t structs (no copy)
+     * @param schema Arrow schema for region table
+     * @return RecordBatch with minimal copies
+     */
+    static arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    region_to_recordbatch(
+        std::span<const code_t> batch,
+        const std::shared_ptr<arrow::Schema>& schema
+    );
+
 private:
     /**
      * Build string array from string_view span

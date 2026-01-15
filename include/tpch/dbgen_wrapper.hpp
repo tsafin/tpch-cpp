@@ -252,6 +252,153 @@ public:
      */
     LineitemBatchIterator generate_lineitem_batches(size_t batch_size, size_t max_rows);
 
+    /**
+     * Batch iterator for orders rows (zero-copy friendly)
+     */
+    class OrdersBatchIterator {
+    public:
+        using Batch = DBGenBatch<order_t>;
+
+        OrdersBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
+
+        bool has_next() const { return remaining_ > 0; }
+        Batch next();
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_row_;
+    };
+
+    OrdersBatchIterator generate_orders_batches(size_t batch_size, size_t max_rows);
+
+    /**
+     * Batch iterator for customer rows (zero-copy friendly)
+     */
+    class CustomerBatchIterator {
+    public:
+        using Batch = DBGenBatch<customer_t>;
+
+        CustomerBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
+
+        bool has_next() const { return remaining_ > 0; }
+        Batch next();
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_row_;
+    };
+
+    CustomerBatchIterator generate_customer_batches(size_t batch_size, size_t max_rows);
+
+    /**
+     * Batch iterator for part rows (zero-copy friendly)
+     */
+    class PartBatchIterator {
+    public:
+        using Batch = DBGenBatch<part_t>;
+
+        PartBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
+
+        bool has_next() const { return remaining_ > 0; }
+        Batch next();
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_row_;
+    };
+
+    PartBatchIterator generate_part_batches(size_t batch_size, size_t max_rows);
+
+    /**
+     * Batch iterator for partsupp rows (zero-copy friendly)
+     */
+    class PartsuppBatchIterator {
+    public:
+        using Batch = DBGenBatch<partsupp_t>;
+
+        PartsuppBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
+
+        bool has_next() const { return remaining_ > 0; }
+        Batch next();
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_row_;
+    };
+
+    PartsuppBatchIterator generate_partsupp_batches(size_t batch_size, size_t max_rows);
+
+    /**
+     * Batch iterator for supplier rows (zero-copy friendly)
+     */
+    class SupplierBatchIterator {
+    public:
+        using Batch = DBGenBatch<supplier_t>;
+
+        SupplierBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
+
+        bool has_next() const { return remaining_ > 0; }
+        Batch next();
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_row_;
+    };
+
+    SupplierBatchIterator generate_supplier_batches(size_t batch_size, size_t max_rows);
+
+    /**
+     * Batch iterator for nation rows (zero-copy friendly)
+     */
+    class NationBatchIterator {
+    public:
+        using Batch = DBGenBatch<code_t>;
+
+        NationBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
+
+        bool has_next() const { return remaining_ > 0; }
+        Batch next();
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_row_;
+    };
+
+    NationBatchIterator generate_nation_batches(size_t batch_size, size_t max_rows);
+
+    /**
+     * Batch iterator for region rows (zero-copy friendly)
+     */
+    class RegionBatchIterator {
+    public:
+        using Batch = DBGenBatch<code_t>;
+
+        RegionBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
+
+        bool has_next() const { return remaining_ > 0; }
+        Batch next();
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_row_;
+    };
+
+    RegionBatchIterator generate_region_batches(size_t batch_size, size_t max_rows);
+
 private:
     long scale_factor_;
     bool initialized_;

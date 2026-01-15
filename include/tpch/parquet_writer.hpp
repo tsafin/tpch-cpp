@@ -8,6 +8,13 @@
 
 #include "writer_interface.hpp"
 
+// Forward declarations
+namespace parquet {
+namespace arrow {
+class FileWriter;
+}
+}
+
 namespace tpch {
 
 // Forward declaration
@@ -58,6 +65,19 @@ public:
      */
     void set_async_context(std::shared_ptr<AsyncIOContext> async_context);
 
+    /**
+     * Enable streaming write mode.
+     * When enabled, RecordBatches are written immediately to the Parquet file
+     * instead of accumulating in memory. This reduces memory usage to O(batch_size)
+     * instead of O(total_rows), enabling large-scale data generation.
+     *
+     * IMPORTANT: Must be called before the first write_batch().
+     *
+     * @param use_threads Enable multi-threaded Parquet encoding (default: true)
+     * @throws std::runtime_error if called after batches have been written
+     */
+    void enable_streaming_write(bool use_threads = true);
+
 private:
     std::string filepath_;
     std::shared_ptr<arrow::RecordBatch> first_batch_;
@@ -70,6 +90,14 @@ private:
     // Memory pool optimization (Phase 13.3)
     arrow::MemoryPool* memory_pool_ = nullptr;
     int64_t estimated_rows_ = 0;
+
+    // Streaming write mode (Phase 14.2)
+    bool streaming_mode_ = false;
+    bool use_threads_ = true;
+    std::unique_ptr<parquet::arrow::FileWriter> parquet_file_writer_;
+
+    // Initialize the Parquet FileWriter for streaming mode
+    void init_file_writer();
 };
 
 }  // namespace tpch
