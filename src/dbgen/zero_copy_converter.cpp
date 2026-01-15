@@ -407,11 +407,11 @@ ZeroCopyConverter::part_to_recordbatch(
         retailprices.push_back(static_cast<double>(part.retailprice) / 100.0);
 
         // String fields (views, not copies!)
-        names.emplace_back(part.name, strlen_fast(part.name));
-        mfgrs.emplace_back(part.mfgr, strlen_fast(part.mfgr));
-        brands.emplace_back(part.brand, strlen_fast(part.brand));
+        names.emplace_back(part.name, part.nlen);  // nlen is pre-computed
+        mfgrs.emplace_back(part.mfgr, part.mlen);  // mlen is pre-computed
+        brands.emplace_back(part.brand, part.blen);  // blen is pre-computed
         types.emplace_back(part.type, part.tlen);  // tlen is pre-computed
-        containers.emplace_back(part.container, strlen_fast(part.container));
+        containers.emplace_back(part.container, part.cnlen);  // cnlen is pre-computed
         comments.emplace_back(part.comment, part.clen);  // clen is pre-computed
     }
 
