@@ -609,7 +609,8 @@ DBGenWrapper::LineitemBatchIterator::LineitemBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(max_rows)
+    , remaining_(std::min(max_rows,
+                         static_cast<size_t>(get_row_count(TableType::LINEITEM, wrapper_->scale_factor_))))
     , current_order_(1) {
 
     // Initialize dbgen if needed
@@ -678,7 +679,8 @@ DBGenWrapper::OrdersBatchIterator::OrdersBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(max_rows)
+    , remaining_(std::min(max_rows,
+                         static_cast<size_t>(get_row_count(TableType::ORDERS, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -734,7 +736,8 @@ DBGenWrapper::CustomerBatchIterator::CustomerBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(max_rows)
+    , remaining_(std::min(max_rows, 
+                         static_cast<size_t>(get_row_count(TableType::CUSTOMER, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -755,9 +758,7 @@ DBGenWrapper::CustomerBatchIterator::next() {
 
     batch.rows.reserve(std::min(batch_size_, remaining_));
 
-    long total_rows = get_row_count(TableType::CUSTOMER, wrapper_->scale_factor_);
-
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= static_cast<size_t>(total_rows)) {
+    while (batch.rows.size() < batch_size_ && remaining_ > 0 ) {
         customer_t cust;
         if (mk_cust(current_row_, &cust) < 0) {
             break;
@@ -768,7 +769,7 @@ DBGenWrapper::CustomerBatchIterator::next() {
         current_row_++;
     }
 
-    if (remaining_ == 0 || current_row_ > static_cast<size_t>(total_rows)) {
+    if (remaining_ <= 0) {
         row_stop(DBGEN_CUST);
     }
 
@@ -790,7 +791,8 @@ DBGenWrapper::PartBatchIterator::PartBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(max_rows)
+    , remaining_(std::min(max_rows,
+                         static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -846,7 +848,8 @@ DBGenWrapper::PartsuppBatchIterator::PartsuppBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(max_rows)
+    , remaining_(std::min(max_rows,
+                         static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_) * SUPP_PER_PART)))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -912,7 +915,8 @@ DBGenWrapper::SupplierBatchIterator::SupplierBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(max_rows)
+    , remaining_(std::min(max_rows,
+                         static_cast<size_t>(get_row_count(TableType::SUPPLIER, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
