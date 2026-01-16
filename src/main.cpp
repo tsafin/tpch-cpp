@@ -638,6 +638,313 @@ void generate_lineitem_true_zero_copy(
     }
 }
 
+void generate_orders_true_zero_copy(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    size_t& total_rows) {
+
+    const size_t batch_size = 10000;
+    auto batch_iter = dbgen.generate_orders_batches(batch_size, opts.max_rows);
+
+    auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
+    if (parquet_writer) {
+        parquet_writer->enable_streaming_write(true);
+    }
+
+    while (batch_iter.has_next()) {
+        auto dbgen_batch = batch_iter.next();
+
+        auto managed_batch_result = tpch::ZeroCopyConverter::orders_to_recordbatch_wrapped(
+            dbgen_batch.span(), schema
+        );
+
+        if (!managed_batch_result.ok()) {
+            throw std::runtime_error("Failed to convert batch: " + managed_batch_result.status().ToString());
+        }
+
+        auto managed_batch = managed_batch_result.ValueOrDie();
+        if (parquet_writer) {
+            parquet_writer->write_managed_batch(managed_batch);
+        } else {
+            writer->write_batch(managed_batch.batch);
+        }
+
+        total_rows += dbgen_batch.size();
+
+        if (opts.verbose && (total_rows % 100000 == 0)) {
+            std::cout << "  Generated " << total_rows << " rows (true zero-copy)...\n";
+        }
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated (true zero-copy): " << total_rows << "\n";
+    }
+}
+
+void generate_customer_true_zero_copy(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    size_t& total_rows) {
+
+    const size_t batch_size = 10000;
+    auto batch_iter = dbgen.generate_customer_batches(batch_size, opts.max_rows);
+
+    auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
+    if (parquet_writer) {
+        parquet_writer->enable_streaming_write(true);
+    }
+
+    while (batch_iter.has_next()) {
+        auto dbgen_batch = batch_iter.next();
+
+        auto managed_batch_result = tpch::ZeroCopyConverter::customer_to_recordbatch_wrapped(
+            dbgen_batch.span(), schema
+        );
+
+        if (!managed_batch_result.ok()) {
+            throw std::runtime_error("Failed to convert batch: " + managed_batch_result.status().ToString());
+        }
+
+        auto managed_batch = managed_batch_result.ValueOrDie();
+        if (parquet_writer) {
+            parquet_writer->write_managed_batch(managed_batch);
+        } else {
+            writer->write_batch(managed_batch.batch);
+        }
+
+        total_rows += dbgen_batch.size();
+
+        if (opts.verbose && (total_rows % 100000 == 0)) {
+            std::cout << "  Generated " << total_rows << " rows (true zero-copy)...\n";
+        }
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated (true zero-copy): " << total_rows << "\n";
+    }
+}
+
+void generate_part_true_zero_copy(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    size_t& total_rows) {
+
+    const size_t batch_size = 10000;
+    auto batch_iter = dbgen.generate_part_batches(batch_size, opts.max_rows);
+
+    auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
+    if (parquet_writer) {
+        parquet_writer->enable_streaming_write(true);
+    }
+
+    while (batch_iter.has_next()) {
+        auto dbgen_batch = batch_iter.next();
+
+        auto managed_batch_result = tpch::ZeroCopyConverter::part_to_recordbatch_wrapped(
+            dbgen_batch.span(), schema
+        );
+
+        if (!managed_batch_result.ok()) {
+            throw std::runtime_error("Failed to convert batch: " + managed_batch_result.status().ToString());
+        }
+
+        auto managed_batch = managed_batch_result.ValueOrDie();
+        if (parquet_writer) {
+            parquet_writer->write_managed_batch(managed_batch);
+        } else {
+            writer->write_batch(managed_batch.batch);
+        }
+
+        total_rows += dbgen_batch.size();
+
+        if (opts.verbose && (total_rows % 100000 == 0)) {
+            std::cout << "  Generated " << total_rows << " rows (true zero-copy)...\n";
+        }
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated (true zero-copy): " << total_rows << "\n";
+    }
+}
+
+void generate_partsupp_true_zero_copy(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    size_t& total_rows) {
+
+    const size_t batch_size = 10000;
+    auto batch_iter = dbgen.generate_partsupp_batches(batch_size, opts.max_rows);
+
+    auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
+    if (parquet_writer) {
+        parquet_writer->enable_streaming_write(true);
+    }
+
+    while (batch_iter.has_next()) {
+        auto dbgen_batch = batch_iter.next();
+
+        auto managed_batch_result = tpch::ZeroCopyConverter::partsupp_to_recordbatch_wrapped(
+            dbgen_batch.span(), schema
+        );
+
+        if (!managed_batch_result.ok()) {
+            throw std::runtime_error("Failed to convert batch: " + managed_batch_result.status().ToString());
+        }
+
+        auto managed_batch = managed_batch_result.ValueOrDie();
+        if (parquet_writer) {
+            parquet_writer->write_managed_batch(managed_batch);
+        } else {
+            writer->write_batch(managed_batch.batch);
+        }
+
+        total_rows += dbgen_batch.size();
+
+        if (opts.verbose && (total_rows % 100000 == 0)) {
+            std::cout << "  Generated " << total_rows << " rows (true zero-copy)...\n";
+        }
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated (true zero-copy): " << total_rows << "\n";
+    }
+}
+
+void generate_supplier_true_zero_copy(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    size_t& total_rows) {
+
+    const size_t batch_size = 10000;
+    auto batch_iter = dbgen.generate_supplier_batches(batch_size, opts.max_rows);
+
+    auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
+    if (parquet_writer) {
+        parquet_writer->enable_streaming_write(true);
+    }
+
+    while (batch_iter.has_next()) {
+        auto dbgen_batch = batch_iter.next();
+
+        auto managed_batch_result = tpch::ZeroCopyConverter::supplier_to_recordbatch_wrapped(
+            dbgen_batch.span(), schema
+        );
+
+        if (!managed_batch_result.ok()) {
+            throw std::runtime_error("Failed to convert batch: " + managed_batch_result.status().ToString());
+        }
+
+        auto managed_batch = managed_batch_result.ValueOrDie();
+        if (parquet_writer) {
+            parquet_writer->write_managed_batch(managed_batch);
+        } else {
+            writer->write_batch(managed_batch.batch);
+        }
+
+        total_rows += dbgen_batch.size();
+
+        if (opts.verbose && (total_rows % 100000 == 0)) {
+            std::cout << "  Generated " << total_rows << " rows (true zero-copy)...\n";
+        }
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated (true zero-copy): " << total_rows << "\n";
+    }
+}
+
+void generate_nation_true_zero_copy(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    size_t& total_rows) {
+
+    const size_t batch_size = 25;  // Nation table has exactly 25 rows
+    auto batch_iter = dbgen.generate_nation_batches(batch_size, opts.max_rows);
+
+    auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
+    if (parquet_writer) {
+        parquet_writer->enable_streaming_write(true);
+    }
+
+    while (batch_iter.has_next()) {
+        auto dbgen_batch = batch_iter.next();
+
+        auto managed_batch_result = tpch::ZeroCopyConverter::nation_to_recordbatch_wrapped(
+            dbgen_batch.span(), schema
+        );
+
+        if (!managed_batch_result.ok()) {
+            throw std::runtime_error("Failed to convert batch: " + managed_batch_result.status().ToString());
+        }
+
+        auto managed_batch = managed_batch_result.ValueOrDie();
+        if (parquet_writer) {
+            parquet_writer->write_managed_batch(managed_batch);
+        } else {
+            writer->write_batch(managed_batch.batch);
+        }
+
+        total_rows += dbgen_batch.size();
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated (true zero-copy): " << total_rows << "\n";
+    }
+}
+
+void generate_region_true_zero_copy(
+    tpch::DBGenWrapper& dbgen,
+    const Options& opts,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    size_t& total_rows) {
+
+    const size_t batch_size = 5;  // Region table has exactly 5 rows
+    auto batch_iter = dbgen.generate_region_batches(batch_size, opts.max_rows);
+
+    auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
+    if (parquet_writer) {
+        parquet_writer->enable_streaming_write(true);
+    }
+
+    while (batch_iter.has_next()) {
+        auto dbgen_batch = batch_iter.next();
+
+        auto managed_batch_result = tpch::ZeroCopyConverter::region_to_recordbatch_wrapped(
+            dbgen_batch.span(), schema
+        );
+
+        if (!managed_batch_result.ok()) {
+            throw std::runtime_error("Failed to convert batch: " + managed_batch_result.status().ToString());
+        }
+
+        auto managed_batch = managed_batch_result.ValueOrDie();
+        if (parquet_writer) {
+            parquet_writer->write_managed_batch(managed_batch);
+        } else {
+            writer->write_batch(managed_batch.batch);
+        }
+
+        total_rows += dbgen_batch.size();
+    }
+
+    if (opts.verbose) {
+        std::cout << "  Total rows generated (true zero-copy): " << total_rows << "\n";
+    }
+}
+
 // ============================================================================
 // Phase 12.6: Fork-after-init parallel generation (fixes Phase 12.3)
 // ============================================================================
@@ -943,56 +1250,70 @@ int main(int argc, char* argv[]) {
                         [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
                 }
             } else if (opts.table == "orders") {
-                // Phase 14: Use zero-copy path if enabled
-                if (opts.zero_copy) {
+                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
+                if (opts.true_zero_copy) {
+                    generate_orders_true_zero_copy(dbgen, opts, schema, writer, total_rows);
+                } else if (opts.zero_copy) {
                     generate_orders_zero_copy(dbgen, opts, schema, writer, total_rows);
                 } else {
                     generate_with_dbgen(dbgen, opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);
                 }
             } else if (opts.table == "customer") {
-                // Phase 14: Use zero-copy path if enabled
-                if (opts.zero_copy) {
+                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
+                if (opts.true_zero_copy) {
+                    generate_customer_true_zero_copy(dbgen, opts, schema, writer, total_rows);
+                } else if (opts.zero_copy) {
                     generate_customer_zero_copy(dbgen, opts, schema, writer, total_rows);
                 } else {
                     generate_with_dbgen(dbgen, opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_customer(cb, opts.max_rows); }, total_rows);
                 }
             } else if (opts.table == "part") {
-                // Phase 14: Use zero-copy path if enabled
-                if (opts.zero_copy) {
+                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
+                if (opts.true_zero_copy) {
+                    generate_part_true_zero_copy(dbgen, opts, schema, writer, total_rows);
+                } else if (opts.zero_copy) {
                     generate_part_zero_copy(dbgen, opts, schema, writer, total_rows);
                 } else {
                     generate_with_dbgen(dbgen, opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_part(cb, opts.max_rows); }, total_rows);
                 }
             } else if (opts.table == "partsupp") {
-                // Phase 14: Use zero-copy path if enabled
-                if (opts.zero_copy) {
+                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
+                if (opts.true_zero_copy) {
+                    generate_partsupp_true_zero_copy(dbgen, opts, schema, writer, total_rows);
+                } else if (opts.zero_copy) {
                     generate_partsupp_zero_copy(dbgen, opts, schema, writer, total_rows);
                 } else {
                     generate_with_dbgen(dbgen, opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_partsupp(cb, opts.max_rows); }, total_rows);
                 }
             } else if (opts.table == "supplier") {
-                // Phase 14: Use zero-copy path if enabled
-                if (opts.zero_copy) {
+                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
+                if (opts.true_zero_copy) {
+                    generate_supplier_true_zero_copy(dbgen, opts, schema, writer, total_rows);
+                } else if (opts.zero_copy) {
                     generate_supplier_zero_copy(dbgen, opts, schema, writer, total_rows);
                 } else {
                     generate_with_dbgen(dbgen, opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_supplier(cb, opts.max_rows); }, total_rows);
                 }
             } else if (opts.table == "nation") {
-                // Phase 14: Use zero-copy path if enabled
-                if (opts.zero_copy) {
+                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
+                if (opts.true_zero_copy) {
+                    generate_nation_true_zero_copy(dbgen, opts, schema, writer, total_rows);
+                } else if (opts.zero_copy) {
                     generate_nation_zero_copy(dbgen, opts, schema, writer, total_rows);
                 } else {
                     generate_with_dbgen(dbgen, opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
                 }
             } else if (opts.table == "region") {
-                // Phase 14: Use zero-copy path if enabled
-                if (opts.zero_copy) {
+                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
+                if (opts.true_zero_copy) {
+                    generate_region_true_zero_copy(dbgen, opts, schema, writer, total_rows);
+                } else if (opts.zero_copy) {
                     generate_region_zero_copy(dbgen, opts, schema, writer, total_rows);
                 } else {
                     generate_with_dbgen(dbgen, opts, schema, writer,
