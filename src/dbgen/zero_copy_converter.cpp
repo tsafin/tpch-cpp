@@ -85,6 +85,40 @@ ZeroCopyConverter::build_double_array(std::span<const double> values) {
     return std::make_shared<arrow::DoubleArray>(count, std::move(buffer));
 }
 
+// ============================================================================
+// Phase 14.2.3: Wrapped Array Builders (True Zero-Copy with Buffer::Wrap)
+// ============================================================================
+
+arrow::Result<std::shared_ptr<arrow::Array>>
+ZeroCopyConverter::build_int64_array_wrapped(std::shared_ptr<std::vector<int64_t>> vec_ptr) {
+    const int64_t count = static_cast<int64_t>(vec_ptr->size());
+
+    if (count == 0) {
+        return std::make_shared<arrow::Int64Array>(0, nullptr);
+    }
+
+    // Wrap existing vector memory WITHOUT copying!
+    // vec_ptr is kept alive by BufferLifetimeManager, so memory is safe
+    auto buffer = arrow::Buffer::Wrap(vec_ptr->data(), count);
+
+    return std::make_shared<arrow::Int64Array>(count, buffer);
+}
+
+arrow::Result<std::shared_ptr<arrow::Array>>
+ZeroCopyConverter::build_double_array_wrapped(std::shared_ptr<std::vector<double>> vec_ptr) {
+    const int64_t count = static_cast<int64_t>(vec_ptr->size());
+
+    if (count == 0) {
+        return std::make_shared<arrow::DoubleArray>(0, nullptr);
+    }
+
+    // Wrap existing vector memory WITHOUT copying!
+    // vec_ptr is kept alive by BufferLifetimeManager, so memory is safe
+    auto buffer = arrow::Buffer::Wrap(vec_ptr->data(), count);
+
+    return std::make_shared<arrow::DoubleArray>(count, buffer);
+}
+
 arrow::Result<std::shared_ptr<arrow::RecordBatch>>
 ZeroCopyConverter::lineitem_to_recordbatch(
     std::span<const line_t> batch,
@@ -672,6 +706,179 @@ ZeroCopyConverter::region_to_recordbatch(
     };
 
     return arrow::RecordBatch::Make(schema, count, arrays);
+}
+
+// ============================================================================
+// Phase 14.2.3: Wrapped Converters (True Zero-Copy with Buffer::Wrap)
+// ============================================================================
+
+arrow::Result<ManagedRecordBatch>
+ZeroCopyConverter::lineitem_to_recordbatch_wrapped(
+    std::span<const line_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        auto empty_batch = arrow::RecordBatch::Make(schema, 0, empty_arrays);
+        return ManagedRecordBatch(empty_batch, nullptr);
+    }
+
+    // Create lifetime manager to hold vectors alive
+    auto lifetime_mgr = std::make_shared<BufferLifetimeManager>();
+
+    // Create managed vectors (shared_ptr extends lifetime)
+    auto orderkeys = lifetime_mgr->create_int64_buffer(count);
+    auto partkeys = lifetime_mgr->create_int64_buffer(count);
+    auto suppkeys = lifetime_mgr->create_int64_buffer(count);
+    auto linenumbers = lifetime_mgr->create_int64_buffer(count);
+    auto quantities = lifetime_mgr->create_double_buffer(count);
+    auto extendedprices = lifetime_mgr->create_double_buffer(count);
+    auto discounts = lifetime_mgr->create_double_buffer(count);
+    auto taxes = lifetime_mgr->create_double_buffer(count);
+
+    auto returnflags = lifetime_mgr->create_string_view_buffer(count);
+    auto linestatuses = lifetime_mgr->create_string_view_buffer(count);
+    auto shipdates = lifetime_mgr->create_string_view_buffer(count);
+    auto commitdates = lifetime_mgr->create_string_view_buffer(count);
+    auto receiptdates = lifetime_mgr->create_string_view_buffer(count);
+    auto shipinstructs = lifetime_mgr->create_string_view_buffer(count);
+    auto shipmodes = lifetime_mgr->create_string_view_buffer(count);
+    auto comments = lifetime_mgr->create_string_view_buffer(count);
+
+    // Single pass: extract all fields into managed vectors
+    for (const line_t& line : batch) {
+        // Numeric fields (will use Buffer::Wrap)
+        orderkeys->push_back(line.okey);
+        partkeys->push_back(line.partkey);
+        suppkeys->push_back(line.suppkey);
+        linenumbers->push_back(line.lcnt);
+        quantities->push_back(static_cast<double>(line.quantity) / 100.0);
+        extendedprices->push_back(static_cast<double>(line.eprice) / 100.0);
+        discounts->push_back(static_cast<double>(line.discount) / 100.0);
+        taxes->push_back(static_cast<double>(line.tax) / 100.0);
+
+        // String fields (zero-copy views, but vectors need lifetime extension)
+        returnflags->emplace_back(&line.rflag[0], 1);
+        linestatuses->emplace_back(&line.lstatus[0], 1);
+        shipdates->emplace_back(line.sdate, strlen_fast(line.sdate));
+        commitdates->emplace_back(line.cdate, strlen_fast(line.cdate));
+        receiptdates->emplace_back(line.rdate, strlen_fast(line.rdate));
+        shipinstructs->emplace_back(line.shipinstruct, strlen_fast(line.shipinstruct));
+        shipmodes->emplace_back(line.shipmode, strlen_fast(line.shipmode));
+        comments->emplace_back(line.comment, line.clen);
+    }
+
+    // Build Arrow arrays using wrapped builders (NO MEMCPY for numeric!)
+    ARROW_ASSIGN_OR_RAISE(auto orderkey_array, build_int64_array_wrapped(orderkeys));
+    ARROW_ASSIGN_OR_RAISE(auto partkey_array, build_int64_array_wrapped(partkeys));
+    ARROW_ASSIGN_OR_RAISE(auto suppkey_array, build_int64_array_wrapped(suppkeys));
+    ARROW_ASSIGN_OR_RAISE(auto linenumber_array, build_int64_array_wrapped(linenumbers));
+    ARROW_ASSIGN_OR_RAISE(auto quantity_array, build_double_array_wrapped(quantities));
+    ARROW_ASSIGN_OR_RAISE(auto extendedprice_array, build_double_array_wrapped(extendedprices));
+    ARROW_ASSIGN_OR_RAISE(auto discount_array, build_double_array_wrapped(discounts));
+    ARROW_ASSIGN_OR_RAISE(auto tax_array, build_double_array_wrapped(taxes));
+
+    // String arrays still use regular builder (memcpy required for non-contiguous data)
+    ARROW_ASSIGN_OR_RAISE(auto returnflag_array, build_string_array(*returnflags));
+    ARROW_ASSIGN_OR_RAISE(auto linestatus_array, build_string_array(*linestatuses));
+    ARROW_ASSIGN_OR_RAISE(auto shipdate_array, build_string_array(*shipdates));
+    ARROW_ASSIGN_OR_RAISE(auto commitdate_array, build_string_array(*commitdates));
+    ARROW_ASSIGN_OR_RAISE(auto receiptdate_array, build_string_array(*receiptdates));
+    ARROW_ASSIGN_OR_RAISE(auto shipinstruct_array, build_string_array(*shipinstructs));
+    ARROW_ASSIGN_OR_RAISE(auto shipmode_array, build_string_array(*shipmodes));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        orderkey_array,
+        partkey_array,
+        suppkey_array,
+        linenumber_array,
+        quantity_array,
+        extendedprice_array,
+        discount_array,
+        tax_array,
+        returnflag_array,
+        linestatus_array,
+        commitdate_array,
+        shipdate_array,
+        receiptdate_array,
+        shipinstruct_array,
+        shipmode_array,
+        comment_array
+    };
+
+    auto record_batch = arrow::RecordBatch::Make(schema, count, arrays);
+
+    // Return batch + lifetime manager (keeps vectors alive until Parquet encoding completes)
+    return ManagedRecordBatch(record_batch, lifetime_mgr);
+}
+
+// Placeholder implementations for remaining tables (to be completed in Phase 2)
+arrow::Result<ManagedRecordBatch>
+ZeroCopyConverter::orders_to_recordbatch_wrapped(
+    std::span<const order_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+    // TODO: Phase 2 - Implement with Buffer::Wrap for numeric arrays
+    // For now, use regular converter and wrap in ManagedRecordBatch
+    ARROW_ASSIGN_OR_RAISE(auto batch_result, orders_to_recordbatch(batch, schema));
+    return ManagedRecordBatch(batch_result, nullptr);
+}
+
+arrow::Result<ManagedRecordBatch>
+ZeroCopyConverter::customer_to_recordbatch_wrapped(
+    std::span<const customer_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+    // TODO: Phase 2
+    ARROW_ASSIGN_OR_RAISE(auto batch_result, customer_to_recordbatch(batch, schema));
+    return ManagedRecordBatch(batch_result, nullptr);
+}
+
+arrow::Result<ManagedRecordBatch>
+ZeroCopyConverter::part_to_recordbatch_wrapped(
+    std::span<const part_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+    // TODO: Phase 2
+    ARROW_ASSIGN_OR_RAISE(auto batch_result, part_to_recordbatch(batch, schema));
+    return ManagedRecordBatch(batch_result, nullptr);
+}
+
+arrow::Result<ManagedRecordBatch>
+ZeroCopyConverter::partsupp_to_recordbatch_wrapped(
+    std::span<const partsupp_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+    // TODO: Phase 2
+    ARROW_ASSIGN_OR_RAISE(auto batch_result, partsupp_to_recordbatch(batch, schema));
+    return ManagedRecordBatch(batch_result, nullptr);
+}
+
+arrow::Result<ManagedRecordBatch>
+ZeroCopyConverter::supplier_to_recordbatch_wrapped(
+    std::span<const supplier_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+    // TODO: Phase 2
+    ARROW_ASSIGN_OR_RAISE(auto batch_result, supplier_to_recordbatch(batch, schema));
+    return ManagedRecordBatch(batch_result, nullptr);
+}
+
+arrow::Result<ManagedRecordBatch>
+ZeroCopyConverter::nation_to_recordbatch_wrapped(
+    std::span<const code_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+    // TODO: Phase 2
+    ARROW_ASSIGN_OR_RAISE(auto batch_result, nation_to_recordbatch(batch, schema));
+    return ManagedRecordBatch(batch_result, nullptr);
+}
+
+arrow::Result<ManagedRecordBatch>
+ZeroCopyConverter::region_to_recordbatch_wrapped(
+    std::span<const code_t> batch,
+    const std::shared_ptr<arrow::Schema>& schema) {
+    // TODO: Phase 2
+    ARROW_ASSIGN_OR_RAISE(auto batch_result, region_to_recordbatch(batch, schema));
+    return ManagedRecordBatch(batch_result, nullptr);
 }
 
 } // namespace tpch
