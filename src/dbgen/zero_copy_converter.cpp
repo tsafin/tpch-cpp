@@ -830,69 +830,461 @@ ZeroCopyConverter::lineitem_to_recordbatch_wrapped(
     return ManagedRecordBatch(record_batch, lifetime_mgr);
 }
 
-// Placeholder implementations for remaining tables (to be completed in Phase 2)
+// ============================================================================
+// Phase 3: Wrapped Converters for Remaining Tables
+// ============================================================================
+
 arrow::Result<ManagedRecordBatch>
 ZeroCopyConverter::orders_to_recordbatch_wrapped(
     std::span<const order_t> batch,
     const std::shared_ptr<arrow::Schema>& schema) {
-    // TODO: Phase 2 - Implement with Buffer::Wrap for numeric arrays
-    // For now, use regular converter and wrap in ManagedRecordBatch
-    ARROW_ASSIGN_OR_RAISE(auto batch_result, orders_to_recordbatch(batch, schema));
-    return ManagedRecordBatch(batch_result, nullptr);
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        auto empty_batch = arrow::RecordBatch::Make(schema, 0, empty_arrays);
+        return ManagedRecordBatch(empty_batch, nullptr);
+    }
+
+    // Create lifetime manager
+    auto lifetime_mgr = std::make_shared<BufferLifetimeManager>();
+
+    // Create managed vectors for numeric fields
+    auto orderkeys = lifetime_mgr->create_int64_buffer(count);
+    auto custkeys = lifetime_mgr->create_int64_buffer(count);
+    auto totalprices = lifetime_mgr->create_double_buffer(count);
+    auto shippriorities = lifetime_mgr->create_int64_buffer(count);
+
+    // Create managed vectors for string fields
+    auto orderstatuses = lifetime_mgr->create_string_view_buffer(count);
+    auto orderdates = lifetime_mgr->create_string_view_buffer(count);
+    auto orderpriorities = lifetime_mgr->create_string_view_buffer(count);
+    auto clerks = lifetime_mgr->create_string_view_buffer(count);
+    auto comments = lifetime_mgr->create_string_view_buffer(count);
+
+    // Extract data into managed vectors
+    for (const order_t& order : batch) {
+        // Numeric fields
+        orderkeys->push_back(order.okey);
+        custkeys->push_back(order.custkey);
+        totalprices->push_back(static_cast<double>(order.totalprice) / 100.0);
+        shippriorities->push_back(order.spriority);
+
+        // String fields
+        orderstatuses->emplace_back(&order.orderstatus, 1);
+        orderdates->emplace_back(order.odate, strlen_fast(order.odate));
+        orderpriorities->emplace_back(order.opriority, strlen_fast(order.opriority));
+        clerks->emplace_back(order.clerk, strlen_fast(order.clerk));
+        comments->emplace_back(order.comment, order.clen);
+    }
+
+    // Build arrays using wrapped builders for numeric
+    ARROW_ASSIGN_OR_RAISE(auto orderkey_array, build_int64_array_wrapped(orderkeys));
+    ARROW_ASSIGN_OR_RAISE(auto custkey_array, build_int64_array_wrapped(custkeys));
+    ARROW_ASSIGN_OR_RAISE(auto totalprice_array, build_double_array_wrapped(totalprices));
+    ARROW_ASSIGN_OR_RAISE(auto shippriority_array, build_int64_array_wrapped(shippriorities));
+
+    // String arrays still use regular builder
+    ARROW_ASSIGN_OR_RAISE(auto orderstatus_array, build_string_array(*orderstatuses));
+    ARROW_ASSIGN_OR_RAISE(auto orderdate_array, build_string_array(*orderdates));
+    ARROW_ASSIGN_OR_RAISE(auto orderpriority_array, build_string_array(*orderpriorities));
+    ARROW_ASSIGN_OR_RAISE(auto clerk_array, build_string_array(*clerks));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        orderkey_array,
+        custkey_array,
+        orderstatus_array,
+        totalprice_array,
+        orderdate_array,
+        orderpriority_array,
+        clerk_array,
+        shippriority_array,
+        comment_array
+    };
+
+    auto record_batch = arrow::RecordBatch::Make(schema, count, arrays);
+    return ManagedRecordBatch(record_batch, lifetime_mgr);
 }
 
 arrow::Result<ManagedRecordBatch>
 ZeroCopyConverter::customer_to_recordbatch_wrapped(
     std::span<const customer_t> batch,
     const std::shared_ptr<arrow::Schema>& schema) {
-    // TODO: Phase 2
-    ARROW_ASSIGN_OR_RAISE(auto batch_result, customer_to_recordbatch(batch, schema));
-    return ManagedRecordBatch(batch_result, nullptr);
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        auto empty_batch = arrow::RecordBatch::Make(schema, 0, empty_arrays);
+        return ManagedRecordBatch(empty_batch, nullptr);
+    }
+
+    // Create lifetime manager
+    auto lifetime_mgr = std::make_shared<BufferLifetimeManager>();
+
+    // Create managed vectors for numeric fields
+    auto custkeys = lifetime_mgr->create_int64_buffer(count);
+    auto nationkeys = lifetime_mgr->create_int64_buffer(count);
+    auto acctbals = lifetime_mgr->create_double_buffer(count);
+
+    // Create managed vectors for string fields
+    auto names = lifetime_mgr->create_string_view_buffer(count);
+    auto addresses = lifetime_mgr->create_string_view_buffer(count);
+    auto phones = lifetime_mgr->create_string_view_buffer(count);
+    auto mktsegments = lifetime_mgr->create_string_view_buffer(count);
+    auto comments = lifetime_mgr->create_string_view_buffer(count);
+
+    // Extract data into managed vectors
+    for (const customer_t& cust : batch) {
+        // Numeric fields
+        custkeys->push_back(cust.custkey);
+        nationkeys->push_back(cust.nation_code);
+        acctbals->push_back(static_cast<double>(cust.acctbal) / 100.0);
+
+        // String fields
+        names->emplace_back(cust.name, strlen_fast(cust.name));
+        addresses->emplace_back(cust.address, cust.alen);
+        phones->emplace_back(cust.phone, strlen_fast(cust.phone));
+        mktsegments->emplace_back(cust.mktsegment, strlen_fast(cust.mktsegment));
+        comments->emplace_back(cust.comment, cust.clen);
+    }
+
+    // Build arrays using wrapped builders for numeric
+    ARROW_ASSIGN_OR_RAISE(auto custkey_array, build_int64_array_wrapped(custkeys));
+    ARROW_ASSIGN_OR_RAISE(auto nationkey_array, build_int64_array_wrapped(nationkeys));
+    ARROW_ASSIGN_OR_RAISE(auto acctbal_array, build_double_array_wrapped(acctbals));
+
+    // String arrays still use regular builder
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(*names));
+    ARROW_ASSIGN_OR_RAISE(auto address_array, build_string_array(*addresses));
+    ARROW_ASSIGN_OR_RAISE(auto phone_array, build_string_array(*phones));
+    ARROW_ASSIGN_OR_RAISE(auto mktsegment_array, build_string_array(*mktsegments));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        custkey_array,
+        name_array,
+        address_array,
+        nationkey_array,
+        phone_array,
+        acctbal_array,
+        mktsegment_array,
+        comment_array
+    };
+
+    auto record_batch = arrow::RecordBatch::Make(schema, count, arrays);
+    return ManagedRecordBatch(record_batch, lifetime_mgr);
 }
 
 arrow::Result<ManagedRecordBatch>
 ZeroCopyConverter::part_to_recordbatch_wrapped(
     std::span<const part_t> batch,
     const std::shared_ptr<arrow::Schema>& schema) {
-    // TODO: Phase 2
-    ARROW_ASSIGN_OR_RAISE(auto batch_result, part_to_recordbatch(batch, schema));
-    return ManagedRecordBatch(batch_result, nullptr);
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        auto empty_batch = arrow::RecordBatch::Make(schema, 0, empty_arrays);
+        return ManagedRecordBatch(empty_batch, nullptr);
+    }
+
+    // Create lifetime manager
+    auto lifetime_mgr = std::make_shared<BufferLifetimeManager>();
+
+    // Create managed vectors for numeric fields
+    auto partkeys = lifetime_mgr->create_int64_buffer(count);
+    auto sizes = lifetime_mgr->create_int64_buffer(count);
+    auto retailprices = lifetime_mgr->create_double_buffer(count);
+
+    // Create managed vectors for string fields
+    auto names = lifetime_mgr->create_string_view_buffer(count);
+    auto mfgrs = lifetime_mgr->create_string_view_buffer(count);
+    auto brands = lifetime_mgr->create_string_view_buffer(count);
+    auto types = lifetime_mgr->create_string_view_buffer(count);
+    auto containers = lifetime_mgr->create_string_view_buffer(count);
+    auto comments = lifetime_mgr->create_string_view_buffer(count);
+
+    // Extract data into managed vectors
+    for (const part_t& part : batch) {
+        // Numeric fields
+        partkeys->push_back(part.partkey);
+        sizes->push_back(part.size);
+        retailprices->push_back(static_cast<double>(part.retailprice) / 100.0);
+
+        // String fields
+        names->emplace_back(part.name, part.nlen);
+        mfgrs->emplace_back(part.mfgr, part.mlen);
+        brands->emplace_back(part.brand, part.blen);
+        types->emplace_back(part.type, part.tlen);
+        containers->emplace_back(part.container, part.cnlen);
+        comments->emplace_back(part.comment, part.clen);
+    }
+
+    // Build arrays using wrapped builders for numeric
+    ARROW_ASSIGN_OR_RAISE(auto partkey_array, build_int64_array_wrapped(partkeys));
+    ARROW_ASSIGN_OR_RAISE(auto size_array, build_int64_array_wrapped(sizes));
+    ARROW_ASSIGN_OR_RAISE(auto retailprice_array, build_double_array_wrapped(retailprices));
+
+    // String arrays still use regular builder
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(*names));
+    ARROW_ASSIGN_OR_RAISE(auto mfgr_array, build_string_array(*mfgrs));
+    ARROW_ASSIGN_OR_RAISE(auto brand_array, build_string_array(*brands));
+    ARROW_ASSIGN_OR_RAISE(auto type_array, build_string_array(*types));
+    ARROW_ASSIGN_OR_RAISE(auto container_array, build_string_array(*containers));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        partkey_array,
+        name_array,
+        mfgr_array,
+        brand_array,
+        type_array,
+        size_array,
+        container_array,
+        retailprice_array,
+        comment_array
+    };
+
+    auto record_batch = arrow::RecordBatch::Make(schema, count, arrays);
+    return ManagedRecordBatch(record_batch, lifetime_mgr);
 }
 
 arrow::Result<ManagedRecordBatch>
 ZeroCopyConverter::partsupp_to_recordbatch_wrapped(
     std::span<const partsupp_t> batch,
     const std::shared_ptr<arrow::Schema>& schema) {
-    // TODO: Phase 2
-    ARROW_ASSIGN_OR_RAISE(auto batch_result, partsupp_to_recordbatch(batch, schema));
-    return ManagedRecordBatch(batch_result, nullptr);
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        auto empty_batch = arrow::RecordBatch::Make(schema, 0, empty_arrays);
+        return ManagedRecordBatch(empty_batch, nullptr);
+    }
+
+    // Create lifetime manager
+    auto lifetime_mgr = std::make_shared<BufferLifetimeManager>();
+
+    // Create managed vectors for numeric fields
+    auto partkeys = lifetime_mgr->create_int64_buffer(count);
+    auto suppkeys = lifetime_mgr->create_int64_buffer(count);
+    auto availqtys = lifetime_mgr->create_int64_buffer(count);
+    auto supplycosts = lifetime_mgr->create_double_buffer(count);
+
+    // Create managed vectors for string fields
+    auto comments = lifetime_mgr->create_string_view_buffer(count);
+
+    // Extract data into managed vectors
+    for (const partsupp_t& ps : batch) {
+        // Numeric fields
+        partkeys->push_back(ps.partkey);
+        suppkeys->push_back(ps.suppkey);
+        availqtys->push_back(ps.qty);
+        supplycosts->push_back(static_cast<double>(ps.scost) / 100.0);
+
+        // String fields
+        comments->emplace_back(ps.comment, ps.clen);
+    }
+
+    // Build arrays using wrapped builders for numeric
+    ARROW_ASSIGN_OR_RAISE(auto partkey_array, build_int64_array_wrapped(partkeys));
+    ARROW_ASSIGN_OR_RAISE(auto suppkey_array, build_int64_array_wrapped(suppkeys));
+    ARROW_ASSIGN_OR_RAISE(auto availqty_array, build_int64_array_wrapped(availqtys));
+    ARROW_ASSIGN_OR_RAISE(auto supplycost_array, build_double_array_wrapped(supplycosts));
+
+    // String arrays still use regular builder
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        partkey_array,
+        suppkey_array,
+        availqty_array,
+        supplycost_array,
+        comment_array
+    };
+
+    auto record_batch = arrow::RecordBatch::Make(schema, count, arrays);
+    return ManagedRecordBatch(record_batch, lifetime_mgr);
 }
 
 arrow::Result<ManagedRecordBatch>
 ZeroCopyConverter::supplier_to_recordbatch_wrapped(
     std::span<const supplier_t> batch,
     const std::shared_ptr<arrow::Schema>& schema) {
-    // TODO: Phase 2
-    ARROW_ASSIGN_OR_RAISE(auto batch_result, supplier_to_recordbatch(batch, schema));
-    return ManagedRecordBatch(batch_result, nullptr);
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        auto empty_batch = arrow::RecordBatch::Make(schema, 0, empty_arrays);
+        return ManagedRecordBatch(empty_batch, nullptr);
+    }
+
+    // Create lifetime manager
+    auto lifetime_mgr = std::make_shared<BufferLifetimeManager>();
+
+    // Create managed vectors for numeric fields
+    auto suppkeys = lifetime_mgr->create_int64_buffer(count);
+    auto nationkeys = lifetime_mgr->create_int64_buffer(count);
+    auto acctbals = lifetime_mgr->create_double_buffer(count);
+
+    // Create managed vectors for string fields
+    auto names = lifetime_mgr->create_string_view_buffer(count);
+    auto addresses = lifetime_mgr->create_string_view_buffer(count);
+    auto phones = lifetime_mgr->create_string_view_buffer(count);
+    auto comments = lifetime_mgr->create_string_view_buffer(count);
+
+    // Extract data into managed vectors
+    for (const supplier_t& supp : batch) {
+        // Numeric fields
+        suppkeys->push_back(supp.suppkey);
+        nationkeys->push_back(supp.nation_code);
+        acctbals->push_back(static_cast<double>(supp.acctbal) / 100.0);
+
+        // String fields
+        names->emplace_back(supp.name, strlen_fast(supp.name));
+        addresses->emplace_back(supp.address, supp.alen);
+        phones->emplace_back(supp.phone, strlen_fast(supp.phone));
+        comments->emplace_back(supp.comment, supp.clen);
+    }
+
+    // Build arrays using wrapped builders for numeric
+    ARROW_ASSIGN_OR_RAISE(auto suppkey_array, build_int64_array_wrapped(suppkeys));
+    ARROW_ASSIGN_OR_RAISE(auto nationkey_array, build_int64_array_wrapped(nationkeys));
+    ARROW_ASSIGN_OR_RAISE(auto acctbal_array, build_double_array_wrapped(acctbals));
+
+    // String arrays still use regular builder
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(*names));
+    ARROW_ASSIGN_OR_RAISE(auto address_array, build_string_array(*addresses));
+    ARROW_ASSIGN_OR_RAISE(auto phone_array, build_string_array(*phones));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        suppkey_array,
+        name_array,
+        address_array,
+        nationkey_array,
+        phone_array,
+        acctbal_array,
+        comment_array
+    };
+
+    auto record_batch = arrow::RecordBatch::Make(schema, count, arrays);
+    return ManagedRecordBatch(record_batch, lifetime_mgr);
 }
 
 arrow::Result<ManagedRecordBatch>
 ZeroCopyConverter::nation_to_recordbatch_wrapped(
     std::span<const code_t> batch,
     const std::shared_ptr<arrow::Schema>& schema) {
-    // TODO: Phase 2
-    ARROW_ASSIGN_OR_RAISE(auto batch_result, nation_to_recordbatch(batch, schema));
-    return ManagedRecordBatch(batch_result, nullptr);
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        auto empty_batch = arrow::RecordBatch::Make(schema, 0, empty_arrays);
+        return ManagedRecordBatch(empty_batch, nullptr);
+    }
+
+    // Create lifetime manager
+    auto lifetime_mgr = std::make_shared<BufferLifetimeManager>();
+
+    // Create managed vectors for numeric fields
+    auto nationkeys = lifetime_mgr->create_int64_buffer(count);
+    auto regionkeys = lifetime_mgr->create_int64_buffer(count);
+
+    // Create managed vectors for string fields
+    auto names = lifetime_mgr->create_string_view_buffer(count);
+    auto comments = lifetime_mgr->create_string_view_buffer(count);
+
+    // Extract data into managed vectors
+    for (const code_t& nation : batch) {
+        // Numeric fields
+        nationkeys->push_back(nation.code);
+        regionkeys->push_back(nation.join);
+
+        // String fields
+        names->emplace_back(nation.text, strlen_fast(nation.text));
+        comments->emplace_back(nation.comment, nation.clen);
+    }
+
+    // Build arrays using wrapped builders for numeric
+    ARROW_ASSIGN_OR_RAISE(auto nationkey_array, build_int64_array_wrapped(nationkeys));
+    ARROW_ASSIGN_OR_RAISE(auto regionkey_array, build_int64_array_wrapped(regionkeys));
+
+    // String arrays still use regular builder
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(*names));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        nationkey_array,
+        name_array,
+        regionkey_array,
+        comment_array
+    };
+
+    auto record_batch = arrow::RecordBatch::Make(schema, count, arrays);
+    return ManagedRecordBatch(record_batch, lifetime_mgr);
 }
 
 arrow::Result<ManagedRecordBatch>
 ZeroCopyConverter::region_to_recordbatch_wrapped(
     std::span<const code_t> batch,
     const std::shared_ptr<arrow::Schema>& schema) {
-    // TODO: Phase 2
-    ARROW_ASSIGN_OR_RAISE(auto batch_result, region_to_recordbatch(batch, schema));
-    return ManagedRecordBatch(batch_result, nullptr);
+
+    const int64_t count = static_cast<int64_t>(batch.size());
+
+    if (count == 0) {
+        std::vector<std::shared_ptr<arrow::Array>> empty_arrays;
+        auto empty_batch = arrow::RecordBatch::Make(schema, 0, empty_arrays);
+        return ManagedRecordBatch(empty_batch, nullptr);
+    }
+
+    // Create lifetime manager
+    auto lifetime_mgr = std::make_shared<BufferLifetimeManager>();
+
+    // Create managed vectors for numeric fields
+    auto regionkeys = lifetime_mgr->create_int64_buffer(count);
+
+    // Create managed vectors for string fields
+    auto names = lifetime_mgr->create_string_view_buffer(count);
+    auto comments = lifetime_mgr->create_string_view_buffer(count);
+
+    // Extract data into managed vectors
+    for (const code_t& region : batch) {
+        // Numeric fields
+        regionkeys->push_back(region.code);
+
+        // String fields
+        names->emplace_back(region.text, strlen_fast(region.text));
+        comments->emplace_back(region.comment, region.clen);
+    }
+
+    // Build arrays using wrapped builders for numeric
+    ARROW_ASSIGN_OR_RAISE(auto regionkey_array, build_int64_array_wrapped(regionkeys));
+
+    // String arrays still use regular builder
+    ARROW_ASSIGN_OR_RAISE(auto name_array, build_string_array(*names));
+    ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
+
+    // Assemble RecordBatch
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        regionkey_array,
+        name_array,
+        comment_array
+    };
+
+    auto record_batch = arrow::RecordBatch::Make(schema, count, arrays);
+    return ManagedRecordBatch(record_batch, lifetime_mgr);
 }
 
 } // namespace tpch
