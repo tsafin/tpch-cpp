@@ -97,11 +97,18 @@ ZeroCopyConverter::build_int64_array_wrapped(std::shared_ptr<std::vector<int64_t
         return std::make_shared<arrow::Int64Array>(0, nullptr);
     }
 
-    // Wrap existing vector memory WITHOUT copying!
-    // vec_ptr is kept alive by BufferLifetimeManager, so memory is safe
-    auto buffer = arrow::Buffer::Wrap(vec_ptr->data(), count);
+    const int64_t size_bytes = count * sizeof(int64_t);
 
-    return std::make_shared<arrow::Int64Array>(count, buffer);
+    // Wrap existing vector memory WITHOUT copying!
+    // The BufferLifetimeManager (which holds vec_ptr via shared_ptr) ensures
+    // the vector stays alive until Arrow buffer is freed.
+    // Note: vec_ptr must be kept alive externally (via BufferLifetimeManager)
+    auto buffer = arrow::Buffer::Wrap(
+        reinterpret_cast<const uint8_t*>(vec_ptr->data()),
+        size_bytes
+    );
+
+    return std::make_shared<arrow::Int64Array>(count, std::move(buffer));
 }
 
 arrow::Result<std::shared_ptr<arrow::Array>>
@@ -112,11 +119,18 @@ ZeroCopyConverter::build_double_array_wrapped(std::shared_ptr<std::vector<double
         return std::make_shared<arrow::DoubleArray>(0, nullptr);
     }
 
-    // Wrap existing vector memory WITHOUT copying!
-    // vec_ptr is kept alive by BufferLifetimeManager, so memory is safe
-    auto buffer = arrow::Buffer::Wrap(vec_ptr->data(), count);
+    const int64_t size_bytes = count * sizeof(double);
 
-    return std::make_shared<arrow::DoubleArray>(count, buffer);
+    // Wrap existing vector memory WITHOUT copying!
+    // The BufferLifetimeManager (which holds vec_ptr via shared_ptr) ensures
+    // the vector stays alive until Arrow buffer is freed.
+    // Note: vec_ptr must be kept alive externally (via BufferLifetimeManager)
+    auto buffer = arrow::Buffer::Wrap(
+        reinterpret_cast<const uint8_t*>(vec_ptr->data()),
+        size_bytes
+    );
+
+    return std::make_shared<arrow::DoubleArray>(count, std::move(buffer));
 }
 
 arrow::Result<std::shared_ptr<arrow::RecordBatch>>

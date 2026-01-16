@@ -7,6 +7,7 @@
 #include <arrow/memory_pool.h>
 
 #include "writer_interface.hpp"
+#include "buffer_lifetime_manager.hpp"
 
 // Forward declarations
 namespace parquet {
@@ -52,6 +53,17 @@ public:
     void write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) override;
 
     /**
+     * Write a managed record batch (Phase 14.2.3: True zero-copy)
+     *
+     * For streaming mode: Writes batch immediately and lifetime manager is freed after write.
+     * For batch mode: Accumulates managed batch (including lifetime manager).
+     *
+     * @param managed_batch ManagedRecordBatch with lifetime manager
+     * @throws std::runtime_error if write fails or schema is inconsistent
+     */
+    void write_managed_batch(const ManagedRecordBatch& managed_batch);
+
+    /**
      * Finalize and close the output file.
      * If an async context is set, uses asynchronous I/O for writing.
      */
@@ -82,6 +94,7 @@ private:
     std::string filepath_;
     std::shared_ptr<arrow::RecordBatch> first_batch_;
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches_;
+    std::vector<ManagedRecordBatch> managed_batches_;  // Phase 14.2.3: For true zero-copy batches
     std::shared_ptr<AsyncIOContext> async_context_;
     std::shared_ptr<arrow::Buffer> async_buffer_;  // Keep buffer alive during async I/O
     int async_fd_ = -1;  // Track file descriptor for cleanup

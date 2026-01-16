@@ -102,6 +102,48 @@ void ParquetWriter::enable_streaming_write(bool use_threads) {
     use_threads_ = use_threads;
 }
 
+void ParquetWriter::write_managed_batch(const ManagedRecordBatch& managed_batch) {
+    if (closed_) {
+        throw std::runtime_error("Cannot write to a closed Parquet writer");
+    }
+
+    if (!managed_batch.batch) {
+        throw std::runtime_error("Cannot write null batch");
+    }
+
+    if (managed_batch.batch->num_rows() == 0) {
+        return;  // Skip empty batches
+    }
+
+    // Store the first batch to infer schema
+    if (!first_batch_) {
+        first_batch_ = managed_batch.batch;
+    }
+
+    if (streaming_mode_) {
+        // Streaming mode: Write batch immediately
+        // Lifetime manager is freed after this function returns (optimal memory usage)
+        if (!parquet_file_writer_) {
+            init_file_writer();
+        }
+
+        // Write batch immediately
+        auto status = parquet_file_writer_->WriteRecordBatch(*managed_batch.batch);
+        if (!status.ok()) {
+            throw std::runtime_error("Failed to write RecordBatch: " + status.message());
+        }
+
+        // After this function returns, managed_batch goes out of scope
+        // → lifetime_mgr refcount drops to 0
+        // → vectors freed automatically
+        // This is safe because Parquet encoding already completed!
+    } else {
+        // Batch accumulation mode: Store managed batch
+        // This keeps the lifetime manager alive until close() is called
+        managed_batches_.push_back(managed_batch);
+    }
+}
+
 void ParquetWriter::init_file_writer() {
     if (parquet_file_writer_) {
         return;  // Already initialized
@@ -211,6 +253,14 @@ void ParquetWriter::close() {
                     }
                 }
 
+                // Also write managed batches (Phase 14.2.3)
+                for (const auto& managed_batch : managed_batches_) {
+                    auto status = writer->WriteRecordBatch(*managed_batch.batch);
+                    if (!status.ok()) {
+                        throw std::runtime_error("Failed to write ManagedRecordBatch: " + status.message());
+                    }
+                }
+
                 // Close writer
                 auto close_status = writer->Close();
                 if (!close_status.ok()) {
@@ -300,6 +350,14 @@ void ParquetWriter::close() {
                 }
             }
 
+            // Also write managed batches (Phase 14.2.3)
+            for (const auto& managed_batch : managed_batches_) {
+                auto status = writer->WriteRecordBatch(*managed_batch.batch);
+                if (!status.ok()) {
+                    throw std::runtime_error("Failed to write ManagedRecordBatch: " + status.message());
+                }
+            }
+
             // Close writer
             auto close_status = writer->Close();
             if (!close_status.ok()) {
@@ -309,6 +367,7 @@ void ParquetWriter::close() {
 
         closed_ = true;
         batches_.clear();  // Free memory
+        managed_batches_.clear();  // Free managed batches and lifetime managers (Phase 14.2.3)
     } catch (const std::exception& e) {
         closed_ = true;
         throw;
