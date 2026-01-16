@@ -609,8 +609,8 @@ DBGenWrapper::LineitemBatchIterator::LineitemBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(std::min(max_rows,
-                         static_cast<size_t>(get_row_count(TableType::LINEITEM, wrapper_->scale_factor_))))
+    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::LINEITEM, wrapper_->scale_factor_))
+                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::LINEITEM, wrapper_->scale_factor_))))
     , current_order_(1) {
 
     // Initialize dbgen if needed
@@ -679,8 +679,8 @@ DBGenWrapper::OrdersBatchIterator::OrdersBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(std::min(max_rows,
-                         static_cast<size_t>(get_row_count(TableType::ORDERS, wrapper_->scale_factor_))))
+    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::ORDERS, wrapper_->scale_factor_))
+                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::ORDERS, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -736,8 +736,8 @@ DBGenWrapper::CustomerBatchIterator::CustomerBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(std::min(max_rows, 
-                         static_cast<size_t>(get_row_count(TableType::CUSTOMER, wrapper_->scale_factor_))))
+    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::CUSTOMER, wrapper_->scale_factor_))
+                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::CUSTOMER, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -791,8 +791,8 @@ DBGenWrapper::PartBatchIterator::PartBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(std::min(max_rows,
-                         static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_))))
+    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_))
+                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -848,8 +848,8 @@ DBGenWrapper::PartsuppBatchIterator::PartsuppBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(std::min(max_rows,
-                         static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_) * SUPP_PER_PART)))
+    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::PARTSUPP, wrapper_->scale_factor_))
+                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::PARTSUPP, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -915,8 +915,8 @@ DBGenWrapper::SupplierBatchIterator::SupplierBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(std::min(max_rows,
-                         static_cast<size_t>(get_row_count(TableType::SUPPLIER, wrapper_->scale_factor_))))
+    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::SUPPLIER, wrapper_->scale_factor_))
+                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::SUPPLIER, wrapper_->scale_factor_))))
     , current_row_(1) {
 
     if (!wrapper_->initialized_) {
@@ -972,7 +972,7 @@ DBGenWrapper::NationBatchIterator::NationBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(std::min(max_rows, size_t(25)))  // Nation table has exactly 25 rows
+    , remaining_(max_rows == 0 ? size_t(25) : std::min(max_rows, size_t(25)))  // Nation table has exactly 25 rows
     , current_row_(1) {  // Nation IDs are 1-indexed
 
     if (!wrapper_->initialized_) {
@@ -1028,7 +1028,7 @@ DBGenWrapper::RegionBatchIterator::RegionBatchIterator(
     size_t max_rows)
     : wrapper_(wrapper)
     , batch_size_(batch_size)
-    , remaining_(std::min(max_rows, size_t(5)))  // Region table has exactly 5 rows
+    , remaining_(max_rows == 0 ? size_t(5) : std::min(max_rows, size_t(5)))  // Region table has exactly 5 rows
     , current_row_(1) {  // Region IDs are 1-indexed
 
     if (!wrapper_->initialized_) {
