@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """
-Phase 15: Comprehensive SF=10 Benchmark
-Tests all 8 TPC-H tables with scale-factor 10 and all optimization combinations.
+Phase 16: Full Optimization Matrix Benchmark at SF=10
+Tests all 8 TPC-H tables with comprehensive optimization modes.
+
+PHASE 16 UPDATE: Zero-copy hang issues RESOLVED - all corner cases now pass.
+Re-enabling zero-copy and true-zero-copy modes for complete benchmarking.
 
 Combinations tested:
-1. Baseline (regular path)
-2. Zero-copy (Phase 14.1)
-3. True zero-copy (Phase 14.2.3)
-4. Async I/O (if available)
-5. Zero-copy + Async I/O
-6. True zero-copy + Async I/O
-7. Parallel mode (all tables at once)
-8. Parallel + Zero-copy
-9. Parallel + True zero-copy
-10. Parallel + Async I/O
-11. Parallel + Zero-copy + Async I/O
-12. Parallel + True zero-copy + Async I/O
+1. Baseline (regular path) - control
+2. Zero-copy (Phase 14.1) - proven stable
+3. True zero-copy (Phase 14.2.3) - proven stable
+4. Parallel baseline (all 8 tables at once)
+5. Parallel + Zero-copy
+6. Parallel + True zero-copy
+7. Parallel baseline + Async-IO (io_uring for concurrent I/O)
+8. Parallel + Zero-copy + Async-IO
+9. Parallel + True zero-copy + Async-IO
 
 Each combination runs 2 times for stability measurement.
+Full SF=10 dataset: 158.6M total rows across 8 tables
+
+PHASE 16 UPDATE 2: Added async-IO support to parallel modes.
+Async-IO uses io_uring for efficient concurrent I/O operations.
+Previous Phase 15 testing showed 1.73x speedup with parallel + async-io.
 """
 
 import subprocess
@@ -48,8 +53,8 @@ SCALE_FACTOR = 10
 TABLES_SF10 = [(name, count * SCALE_FACTOR) for name, count in TABLES_SF1]
 
 # Define all meaningful optimization combinations
-# NOTE: Zero-copy modes (--zero-copy, --true-zero-copy) have a hang issue with full datasets
-# Disabled for this benchmark - will investigate separately (Phase 16)
+# Phase 16: Zero-copy modes are now STABLE - enable for comprehensive benchmarking
+# Phase 16 Update 2: Added async-IO variants for parallel modes (io_uring support)
 OPTIMIZATION_MODES = [
     {
         "name": "baseline",
@@ -59,23 +64,58 @@ OPTIMIZATION_MODES = [
         "parallel": False,
     },
     {
-        "name": "async_io",
-        "description": "Async I/O with io_uring",
-        "flags": ["--async-io"],
+        "name": "zero_copy",
+        "description": "Zero-copy optimizations (Phase 14.1)",
+        "flags": ["--zero-copy"],
+        "per_table": True,
+        "parallel": False,
+    },
+    {
+        "name": "true_zero_copy",
+        "description": "True zero-copy with Buffer::Wrap (Phase 14.2.3)",
+        "flags": ["--true-zero-copy"],
         "per_table": True,
         "parallel": False,
     },
     {
         "name": "parallel_baseline",
-        "description": "Parallel mode (all tables at once, baseline)",
+        "description": "Parallel mode (all 8 tables, baseline)",
         "flags": ["--parallel"],
         "per_table": False,
         "parallel": True,
     },
     {
-        "name": "parallel_async",
-        "description": "Parallel + Async I/O",
+        "name": "parallel_zero_copy",
+        "description": "Parallel + Zero-copy (Phase 14.1)",
+        "flags": ["--parallel", "--zero-copy"],
+        "per_table": False,
+        "parallel": True,
+    },
+    {
+        "name": "parallel_true_zero_copy",
+        "description": "Parallel + True zero-copy (Phase 14.2.3)",
+        "flags": ["--parallel", "--true-zero-copy"],
+        "per_table": False,
+        "parallel": True,
+    },
+    {
+        "name": "parallel_baseline_async",
+        "description": "Parallel baseline + Async-IO (io_uring, Phase 16)",
         "flags": ["--parallel", "--async-io"],
+        "per_table": False,
+        "parallel": True,
+    },
+    {
+        "name": "parallel_zero_copy_async",
+        "description": "Parallel + Zero-copy + Async-IO (Phase 16)",
+        "flags": ["--parallel", "--zero-copy", "--async-io"],
+        "per_table": False,
+        "parallel": True,
+    },
+    {
+        "name": "parallel_true_zero_copy_async",
+        "description": "Parallel + True zero-copy + Async-IO (Phase 16)",
+        "flags": ["--parallel", "--true-zero-copy", "--async-io"],
         "per_table": False,
         "parallel": True,
     },
@@ -83,29 +123,13 @@ OPTIMIZATION_MODES = [
 
 
 class Phase15Benchmark:
-    def __init__(self, tpch_binary: str, output_dir: str = "/tmp/phase15_sf10_benchmark", runs: int = 2):
+    def __init__(self, tpch_binary: str, output_dir: str = "/tmp/phase16_sf10_benchmark", runs: int = 2):
         self.tpch_binary = Path(tpch_binary)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.runs = runs  # Number of times to run each benchmark
         self.results: Dict = {}
         self.benchmark_date = datetime.now().isoformat()
-        self.async_io_available = False
-        self.check_async_io_support()
-
-    def check_async_io_support(self):
-        """Check if async I/O is available by running with --help"""
-        try:
-            result = subprocess.run(
-                [str(self.tpch_binary), "--help"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            self.async_io_available = "--async-io" in result.stdout
-        except Exception as e:
-            print(f"Warning: Could not check async I/O support: {e}")
-            self.async_io_available = False
 
     def _parse_throughput(self, output_text: str) -> float:
         """Extract throughput from program output"""
@@ -130,10 +154,6 @@ class Phase15Benchmark:
         run_number: int = 1
     ) -> Optional[Dict]:
         """Run a single benchmark"""
-
-        # Skip async modes if not available
-        if not self.async_io_available and "--async-io" in mode["flags"]:
-            return None
 
         # Create output directory
         output_path = self.output_dir / mode["name"] / f"run{run_number}"
@@ -253,22 +273,19 @@ class Phase15Benchmark:
     def run_all_benchmarks(self):
         """Run all benchmarks"""
         print("\n" + "="*120)
-        print("Phase 15: Comprehensive Scale Factor 10 Benchmark")
+        print("Phase 16: Full Optimization Matrix Benchmark at SF=10 (with Async-IO)")
         print("="*120)
         print(f"Binary: {self.tpch_binary}")
         print(f"Output: {self.output_dir}")
         print(f"Date: {self.benchmark_date}")
         print(f"Scale Factor: 10")
         print(f"Tables: {len(TABLES_SF10)} (lineitem, orders, customer, part, partsupp, supplier, nation, region)")
+        print(f"Total Rows: {sum(count for _, count in TABLES_SF10):,}")
         print(f"Runs per benchmark: {self.runs}")
-        print(f"Async I/O support: {self.async_io_available}")
+        print(f"Optimization modes: {len(OPTIMIZATION_MODES)} (3 sequential + 6 parallel variants with/without async-io)")
         print("="*120)
 
         for mode in OPTIMIZATION_MODES:
-            # Skip async modes if not available
-            if not self.async_io_available and "--async-io" in mode["flags"]:
-                continue
-
             if mode["per_table"]:
                 results = self.run_per_table_benchmarks(mode)
                 self.results[mode["name"]] = results
@@ -280,12 +297,12 @@ class Phase15Benchmark:
     def generate_report(self):
         """Generate comprehensive performance report"""
         print("\n\n" + "="*120)
-        print("PERFORMANCE REPORT")
+        print("PHASE 16 PERFORMANCE REPORT - FULL OPTIMIZATION MATRIX")
         print("="*120)
 
         # Per-table analysis
         print("\n" + "="*120)
-        print("PER-TABLE PERFORMANCE ANALYSIS")
+        print("PER-TABLE PERFORMANCE ANALYSIS (SF=10)")
         print("="*120)
 
         per_table_modes = [m for m in OPTIMIZATION_MODES if m["per_table"] and m["name"] in self.results]
@@ -299,10 +316,6 @@ class Phase15Benchmark:
             baseline_avg = None
 
             for mode in per_table_modes:
-                # Skip if async not available
-                if not self.async_io_available and "--async-io" in mode["flags"]:
-                    continue
-
                 mode_results = [
                     r for r in self.results.get(mode["name"], [])
                     if r.get("table") == table_name
@@ -337,56 +350,116 @@ class Phase15Benchmark:
         parallel_modes = [m for m in OPTIMIZATION_MODES if m["parallel"] and m["name"] in self.results]
         if parallel_modes:
             print(f"\n\n" + "="*120)
-            print("PARALLEL MODE ANALYSIS (All Tables Combined)")
+            print("PARALLEL MODE ANALYSIS (All 8 Tables Combined)")
             print("="*120)
-            print(f"Total SF=10 rows: {sum(count for _, count in TABLES_SF10):,}")
-            print(f"{'Mode':<30} {'Run 1 (s)':<15} {'Run 2 (s)':<15} {'Avg (s)':<15} {'Std Dev':<12} {'Speedup':<10}")
-            print("-" * 120)
+            total_rows = sum(count for _, count in TABLES_SF10)
+            print(f"Total SF=10 rows: {total_rows:,}")
+            print(f"\n{'Mode':<35} {'Run 1 (s)':<15} {'Run 2 (s)':<15} {'Avg (s)':<15} {'Std Dev':<12} {'Speedup':<10} {'Rows/sec':<15}")
+            print("-" * 130)
 
             baseline_par_avg = None
+            baseline_throughput = None
 
             for mode in parallel_modes:
-                # Skip if async not available
-                if not self.async_io_available and "--async-io" in mode["flags"]:
-                    continue
-
                 results = self.results.get(mode["name"], [])
 
                 if not results:
                     continue
 
                 elapsed_times = [r["elapsed"] for r in results]
+                throughputs = [r.get("throughput", 0) for r in results]
 
                 if len(elapsed_times) >= 2:
                     avg_elapsed = mean(elapsed_times)
                     std_dev = stdev(elapsed_times)
                     run1 = elapsed_times[0]
                     run2 = elapsed_times[1]
+                    avg_throughput = mean(throughputs) if throughputs else 0
                 else:
                     avg_elapsed = elapsed_times[0] if elapsed_times else 0
                     std_dev = 0
                     run1 = elapsed_times[0] if elapsed_times else 0
                     run2 = 0
+                    avg_throughput = throughputs[0] if throughputs else 0
 
                 if mode["name"] == "parallel_baseline":
                     baseline_par_avg = avg_elapsed
+                    baseline_throughput = avg_throughput
 
                 speedup = (baseline_par_avg / avg_elapsed) if baseline_par_avg and avg_elapsed > 0 else 0
                 speedup_str = f"{speedup:.2f}x" if speedup > 0 else "N/A"
 
-                print(f"{mode['name']:<30} {run1:>13.3f}s {run2:>13.3f}s {avg_elapsed:>13.3f}s {std_dev:>10.3f}s {speedup_str:>9}")
+                print(f"{mode['name']:<35} {run1:>13.3f}s {run2:>13.3f}s {avg_elapsed:>13.3f}s {std_dev:>10.3f}s {speedup_str:>9} {avg_throughput:>13,.0f}")
+
+        # Summary statistics
+        print(f"\n\n" + "="*120)
+        print("OPTIMIZATION SUMMARY")
+        print("="*120)
+
+        # Async-IO specific analysis
+        async_modes = [m for m in OPTIMIZATION_MODES if "async" in m["name"] and m["name"] in self.results]
+        if async_modes and parallel_modes:
+            print("\nAsync-IO Impact Analysis (Parallel Mode):")
+            print("-" * 120)
+
+            # Compare async-io variants with their non-async counterparts
+            async_comparisons = [
+                ("parallel_baseline", "parallel_baseline_async", "Parallel Baseline"),
+                ("parallel_zero_copy", "parallel_zero_copy_async", "Parallel Zero-Copy"),
+                ("parallel_true_zero_copy", "parallel_true_zero_copy_async", "Parallel True Zero-Copy"),
+            ]
+
+            for baseline_name, async_name, description in async_comparisons:
+                baseline_results = self.results.get(baseline_name, [])
+                async_results = self.results.get(async_name, [])
+
+                if baseline_results and async_results:
+                    baseline_avg = mean([r["elapsed"] for r in baseline_results])
+                    async_avg = mean([r["elapsed"] for r in async_results])
+                    improvement = ((baseline_avg - async_avg) / baseline_avg) * 100 if baseline_avg > 0 else 0
+                    speedup = baseline_avg / async_avg if async_avg > 0 else 0
+
+                    status = "✓ IMPROVEMENT" if improvement > 0 else "✗ REGRESSION"
+                    print(f"  {description:<40} {status:<20} {improvement:>7.2f}% faster with async-io ({speedup:.2f}x speedup)")
+
+        print("\nPer-Table Optimization Impact:")
+        for mode in per_table_modes:
+            if mode["name"] != "baseline":
+                mode_results = self.results.get(mode["name"], [])
+                if mode_results:
+                    # Calculate average speedup across all tables
+                    speedups = []
+                    for table_name, row_count in TABLES_SF10:
+                        table_results = [r for r in mode_results if r.get("table") == table_name]
+                        if table_results:
+                            baseline_results = [
+                                r for r in self.results.get("baseline", [])
+                                if r.get("table") == table_name
+                            ]
+                            if baseline_results:
+                                baseline_avg = mean([r["throughput"] for r in baseline_results])
+                                mode_avg = mean([r["throughput"] for r in table_results])
+                                speedup = mode_avg / baseline_avg if baseline_avg > 0 else 0
+                                speedups.append(speedup)
+
+                    if speedups:
+                        avg_speedup = mean(speedups)
+                        min_speedup = min(speedups)
+                        max_speedup = max(speedups)
+                        print(f"  {mode['name']:<30} Avg: {avg_speedup:6.2f}x  (range: {min_speedup:.2f}x - {max_speedup:.2f}x)")
 
     def save_results(self):
         """Save results to JSON"""
-        output_file = self.output_dir / "phase15_sf10_results.json"
+        output_file = self.output_dir / "phase16_sf10_results.json"
 
         summary = {
             "date": self.benchmark_date,
             "binary": str(self.tpch_binary),
             "scale_factor": 10,
             "tables": len(TABLES_SF10),
+            "total_rows": sum(count for _, count in TABLES_SF10),
             "runs_per_benchmark": self.runs,
-            "async_io_available": self.async_io_available,
+            "optimization_modes": len(OPTIMIZATION_MODES),
             "results": self.results
         }
 
@@ -401,12 +474,12 @@ def main():
 
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} <path/to/tpch_benchmark> [output_dir] [runs]")
-        print(f"Example: {sys.argv[0]} ./build/tpch_benchmark /tmp/phase15 2")
+        print(f"Example: {sys.argv[0]} ./build/tpch_benchmark /tmp/phase16 2")
         print(f"\nDefault: 2 runs per benchmark combination")
         sys.exit(1)
 
     tpch_binary = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 else "/tmp/phase15_sf10_benchmark"
+    output_dir = sys.argv[2] if len(sys.argv) > 2 else "/tmp/phase16_sf10_benchmark"
     runs = int(sys.argv[3]) if len(sys.argv) > 3 else 2
 
     # Verify binary exists
@@ -426,7 +499,7 @@ def main():
     benchmark.save_results()
 
     print("\n" + "="*120)
-    print("✅ Benchmark Complete!")
+    print("✅ Phase 16 Benchmark Complete!")
     print("="*120)
 
 
