@@ -315,6 +315,12 @@ public:
                 row_start(DBGEN_SUPP);
             } else if constexpr (Traits::table == TableType::NATION) {
                 row_start(DBGEN_NATION);
+            } else if constexpr (Traits::table == TableType::LINEITEM) {
+                // Lineitem generation is driven by orders
+                row_start(DBGEN_LINE);
+            } else if constexpr (Traits::table == TableType::PARTSUPP) {
+                // Partsupp generation is driven by part rows
+                row_start(DBGEN_PSUPP);
             } else if constexpr (Traits::table == TableType::REGION) {
                 row_start(DBGEN_REGION);
             }
@@ -328,7 +334,16 @@ public:
 
             batch.rows.reserve(std::min(batch_size_, remaining_));
 
-            size_t total_rows = static_cast<size_t>(get_row_count(Traits::table, wrapper_->scale_factor_));
+            size_t total_rows;
+            if constexpr (Traits::table == TableType::LINEITEM) {
+                // LINEITEM rows are produced while iterating ORDERS
+                total_rows = static_cast<size_t>(get_row_count(TableType::ORDERS, wrapper_->scale_factor_));
+            } else if constexpr (Traits::table == TableType::PARTSUPP) {
+                // PARTSUPP rows are produced while iterating PART
+                total_rows = static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_));
+            } else {
+                total_rows = static_cast<size_t>(get_row_count(Traits::table, wrapper_->scale_factor_));
+            }
 
             while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= total_rows) {
                 Row r{};
@@ -344,10 +359,36 @@ public:
                     if (mk_nation(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
                 } else if constexpr (Traits::table == TableType::REGION) {
                     if (mk_region(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                } else if constexpr (Traits::table == TableType::LINEITEM) {
+                    // Generate next order and emit its lineitems
+                    order_t ord{};
+                    if (mk_order(static_cast<DSS_HUGE>(current_row_), &ord, 0) < 0) break;
+
+                    for (int j = 0; j < (int)ord.lines && j < O_LCNT_MAX; ++j) {
+                        if (batch.rows.size() >= batch_size_) break;
+                        batch.rows.push_back(ord.l[j]);
+                        remaining_--;
+                    }
+                    current_row_++;
+                    // continue to next iteration (we already pushed rows)
+                    if (batch.rows.size() >= batch_size_ || remaining_ == 0) break;
+                    else continue;
+                } else if constexpr (Traits::table == TableType::PARTSUPP) {
+                    // Generate next part and emit its partsupp rows
+                    part_t prt{};
+                    if (mk_part(static_cast<DSS_HUGE>(current_row_), &prt) < 0) break;
+
+                    for (int j = 0; j < SUPP_PER_PART; ++j) {
+                        if (batch.rows.size() >= batch_size_) break;
+                        batch.rows.push_back(prt.s[j]);
+                        remaining_--;
+                    }
+                    current_row_++;
+                    if (batch.rows.size() >= batch_size_ || remaining_ == 0) break;
+                    else continue;
                 } else {
                     static_assert(always_false<Traits>::value, "Unsupported batch iterator table");
                 }
-
                 batch.rows.push_back(r);
                 remaining_--;
                 current_row_++;
@@ -367,6 +408,10 @@ public:
                     row_stop(DBGEN_NATION);
                 } else if constexpr (Traits::table == TableType::REGION) {
                     row_stop(DBGEN_REGION);
+                } else if constexpr (Traits::table == TableType::LINEITEM) {
+                    row_stop(DBGEN_LINE);
+                } else if constexpr (Traits::table == TableType::PARTSUPP) {
+                    row_stop(DBGEN_PSUPP);
                 }
             }
 
@@ -396,22 +441,7 @@ public:
      * }
      * ```
      */
-    class LineitemBatchIterator {
-    public:
-        using Batch = DBGenBatch<line_t>;
-
-        LineitemBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
-
-        bool has_next() const { return remaining_ > 0; }
-        Batch next();
-
-    private:
-        DBGenWrapper* wrapper_;
-        size_t batch_size_;
-        size_t remaining_;
-        size_t current_order_;
-    };
-
+    using LineitemBatchIterator = BatchIteratorImpl<LineitemTraits>;
     /**
      * Create a batch iterator for lineitem generation
      *
@@ -442,23 +472,7 @@ public:
     /**
      * Batch iterator for partsupp rows (zero-copy friendly)
      */
-    // Partsupp is nested per-part; keep concrete iterator for now
-    class PartsuppBatchIterator {
-    public:
-        using Batch = DBGenBatch<partsupp_t>;
-
-        PartsuppBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
-
-        bool has_next() const { return remaining_ > 0; }
-        Batch next();
-
-    private:
-        DBGenWrapper* wrapper_;
-        size_t batch_size_;
-        size_t remaining_;
-        size_t current_row_;
-    };
-
+    using PartsuppBatchIterator = BatchIteratorImpl<PartsuppTraits>;
     PartsuppBatchIterator generate_partsupp_batches(size_t batch_size, size_t max_rows);
 
     /**
