@@ -88,6 +88,22 @@ void row_stop(int t) {
 
 extern unsigned long Seed[];
 
+/* Snapshot buffer and helpers to capture/restore Seed[] state */
+#include <string.h>
+static seed_t seed_snapshot[MAX_STREAM + 1];
+static int seed_snapshot_initialized = 0;
+
+void dbgen_capture_seed_snapshot(void) {
+    memcpy(seed_snapshot, Seed, sizeof(seed_snapshot));
+    seed_snapshot_initialized = 1;
+}
+
+void dbgen_restore_seed_snapshot(void) {
+    if (seed_snapshot_initialized) {
+        memcpy(Seed, seed_snapshot, sizeof(seed_snapshot));
+    }
+}
+
 void dbg_text(char *tgt, int min, int max, int sd)
 {
     /* Generate a simple deterministic comment based on seed and length */

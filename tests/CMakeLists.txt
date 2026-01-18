@@ -40,5 +40,23 @@ if(TPCH_BUILD_TESTS)
     # Register tests
     gtest_discover_tests(buffer_lifetime_manager_test)
 
+    # DBGen batch iterator tests
+    add_executable(dbgen_batch_iterator_test
+        dbgen_batch_iterator_test.cpp
+    )
+
+    target_link_libraries(dbgen_batch_iterator_test
+        PRIVATE
+            tpch_core
+            GTest::gtest_main
+    )
+
+    target_include_directories(dbgen_batch_iterator_test
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
+
+    gtest_discover_tests(dbgen_batch_iterator_test)
+
     message(STATUS "Test targets configured successfully")
 endif()

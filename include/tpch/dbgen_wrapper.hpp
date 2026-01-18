@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <mutex>
 #include <span>
+#include <iostream>
 
 #include <arrow/api.h>
 
@@ -298,13 +299,16 @@ public:
             // Determine total remaining rows
             size_t total = static_cast<size_t>(get_row_count(Traits::table, wrapper_->scale_factor_));
             remaining_ = (max_rows == 0) ? total : std::min(static_cast<size_t>(max_rows), total);
+            (void)total; (void)max_rows; (void)remaining_;
             current_row_ = 1;
 
             if (!wrapper_->initialized_) {
                 wrapper_->init_dbgen();
             }
 
-            dbgen_reset_seeds();
+                /* Restore captured seed snapshot so iterator starts from
+                    the same RNG state as the callback-based generator */
+                dbgen_restore_seed_snapshot();
             if constexpr (Traits::table == TableType::ORDERS) {
                 row_start(DBGEN_ORDER);
             } else if constexpr (Traits::table == TableType::CUSTOMER) {
@@ -316,10 +320,10 @@ public:
             } else if constexpr (Traits::table == TableType::NATION) {
                 row_start(DBGEN_NATION);
             } else if constexpr (Traits::table == TableType::LINEITEM) {
-                // Lineitem generation is driven by orders
+                // Match callback-based generation which uses DBGEN_LINE
                 row_start(DBGEN_LINE);
             } else if constexpr (Traits::table == TableType::PARTSUPP) {
-                // Partsupp generation is driven by part rows
+                // Match callback-based generation which uses DBGEN_PSUPP
                 row_start(DBGEN_PSUPP);
             } else if constexpr (Traits::table == TableType::REGION) {
                 row_start(DBGEN_REGION);
@@ -348,54 +352,128 @@ public:
             while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= total_rows) {
                 Row r{};
                 if constexpr (Traits::table == TableType::ORDERS) {
-                    if (mk_order(static_cast<DSS_HUGE>(current_row_), &r, 0) < 0) break;
+                        if (mk_order(static_cast<DSS_HUGE>(current_row_), &r, 0) < 0) { remaining_ = 0; break; }
+                        batch.rows.push_back(r);
+                        remaining_--;
+                        current_row_++;
                 } else if constexpr (Traits::table == TableType::CUSTOMER) {
-                    if (mk_cust(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                    if (mk_cust(static_cast<DSS_HUGE>(current_row_), &r) < 0) { remaining_ = 0; break; }
+                    batch.rows.push_back(r);
+                    remaining_--;
+                    current_row_++;
                 } else if constexpr (Traits::table == TableType::PART) {
-                    if (mk_part(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                    if (mk_part(static_cast<DSS_HUGE>(current_row_), &r) < 0) { remaining_ = 0; break; }
+                    batch.rows.push_back(r);
+                    remaining_--;
+                    current_row_++;
                 } else if constexpr (Traits::table == TableType::SUPPLIER) {
-                    if (mk_supp(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                    if (mk_supp(static_cast<DSS_HUGE>(current_row_), &r) < 0) { remaining_ = 0; break; }
+                    batch.rows.push_back(r);
+                    remaining_--;
+                    current_row_++;
                 } else if constexpr (Traits::table == TableType::NATION) {
-                    if (mk_nation(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                    if (mk_nation(static_cast<DSS_HUGE>(current_row_), &r) < 0) { remaining_ = 0; break; }
+                    batch.rows.push_back(r);
+                    remaining_--;
+                    current_row_++;
                 } else if constexpr (Traits::table == TableType::REGION) {
-                    if (mk_region(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                    if (mk_region(static_cast<DSS_HUGE>(current_row_), &r) < 0) { remaining_ = 0; break; }
+                    batch.rows.push_back(r);
+                    remaining_--;
+                    current_row_++;
                 } else if constexpr (Traits::table == TableType::LINEITEM) {
-                    // Generate next order and emit its lineitems
-                    order_t ord{};
-                    if (mk_order(static_cast<DSS_HUGE>(current_row_), &ord, 0) < 0) break;
-
-                    for (int j = 0; j < (int)ord.lines && j < O_LCNT_MAX; ++j) {
-                        if (batch.rows.size() >= batch_size_) break;
-                        batch.rows.push_back(ord.l[j]);
+                    // First, resume any pending children from a partially-emitted order
+                    while (pending_index_ < pending_children_.size() && batch.rows.size() < batch_size_ && remaining_ > 0) {
+                        batch.rows.push_back(pending_children_[pending_index_++]);
                         remaining_--;
                     }
-                    current_row_++;
-                    // continue to next iteration (we already pushed rows)
+
+                    if (pending_index_ == pending_children_.size() && !pending_children_.empty()) {
+                        // We finished emitting the pending order's children; advance to next order
+                        pending_children_.clear();
+                        pending_index_ = 0;
+                        current_row_++;
+                    }
+
+                    if (batch.rows.size() >= batch_size_ || remaining_ == 0) break;
+
+                    // No pending children (or we completed them) — generate the next order
+                    order_t ord{};
+                    if (mk_order(static_cast<DSS_HUGE>(current_row_), &ord, 0) < 0) { remaining_ = 0; break; }
+
+                    // Fill pending_children_ with this order's lineitems and emit as many as fit
+                    pending_children_.clear();
+                    pending_index_ = 0;
+                    for (int j = 0; j < (int)ord.lines && j < O_LCNT_MAX; ++j) {
+                        pending_children_.push_back(ord.l[j]);
+                    }
+
+                    // Emit from pending_children_ in this same loop iteration
+                    while (pending_index_ < pending_children_.size() && batch.rows.size() < batch_size_ && remaining_ > 0) {
+                        batch.rows.push_back(pending_children_[pending_index_++]);
+                        remaining_--;
+                    }
+
+                    // If we consumed all children, advance to next order now
+                    if (pending_index_ == pending_children_.size()) {
+                        pending_children_.clear();
+                        pending_index_ = 0;
+                        current_row_++;
+                    }
+
+                    // If batch is full or we're done, break; otherwise continue outer while
                     if (batch.rows.size() >= batch_size_ || remaining_ == 0) break;
                     else continue;
                 } else if constexpr (Traits::table == TableType::PARTSUPP) {
-                    // Generate next part and emit its partsupp rows
-                    part_t prt{};
-                    if (mk_part(static_cast<DSS_HUGE>(current_row_), &prt) < 0) break;
-
-                    for (int j = 0; j < SUPP_PER_PART; ++j) {
-                        if (batch.rows.size() >= batch_size_) break;
-                        batch.rows.push_back(prt.s[j]);
+                    // Resume any pending partsupp children
+                    while (pending_index_ < pending_children_.size() && batch.rows.size() < batch_size_ && remaining_ > 0) {
+                        batch.rows.push_back(pending_children_[pending_index_++]);
                         remaining_--;
                     }
-                    current_row_++;
+
+                    if (pending_index_ == pending_children_.size() && !pending_children_.empty()) {
+                        pending_children_.clear();
+                        pending_index_ = 0;
+                        current_row_++;
+                    }
+
+                    if (batch.rows.size() >= batch_size_ || remaining_ == 0) break;
+
+                    part_t prt{};
+                    if (mk_part(static_cast<DSS_HUGE>(current_row_), &prt) < 0) { remaining_ = 0; break; }
+
+                    pending_children_.clear();
+                    pending_index_ = 0;
+                    for (int j = 0; j < SUPP_PER_PART; ++j) {
+                        pending_children_.push_back(prt.s[j]);
+                    }
+
+                    while (pending_index_ < pending_children_.size() && batch.rows.size() < batch_size_) {
+                        batch.rows.push_back(pending_children_[pending_index_++]);
+                        remaining_--;
+                    }
+
+                    if (pending_index_ == pending_children_.size()) {
+                        pending_children_.clear();
+                        pending_index_ = 0;
+                        current_row_++;
+                    }
+
                     if (batch.rows.size() >= batch_size_ || remaining_ == 0) break;
                     else continue;
                 } else {
                     static_assert(always_false<Traits>::value, "Unsupported batch iterator table");
                 }
-                batch.rows.push_back(r);
-                remaining_--;
-                current_row_++;
             }
 
-            // Stop generation if complete
+            // Stop generation if complete. If we've advanced past the
+            // producer's total_rows but still have a non-zero `remaining_`,
+            // force termination so has_next() will return false and we
+            // won't emit an infinite stream of empty batches.
             if (remaining_ == 0 || current_row_ > total_rows) {
+                if (current_row_ > total_rows) {
+                    remaining_ = 0;
+                }
                 if constexpr (Traits::table == TableType::ORDERS) {
                     row_stop(DBGEN_ORDER);
                 } else if constexpr (Traits::table == TableType::CUSTOMER) {
@@ -423,6 +501,11 @@ public:
         size_t batch_size_;
         size_t remaining_;
         size_t current_row_;
+        // Buffer to hold child rows when an order/part's children are split
+        // across batch boundaries (LINEITEM, PARTSUPP). We keep them here
+        // and resume emitting on the next next() call.
+        std::vector<Row> pending_children_;
+        size_t pending_index_ = 0;
     };
 
     /**
