@@ -1,90 +1,67 @@
 #!/bin/bash
-# Build Apache Arrow from source on systems where dev packages are unavailable
+# Build and install Apache Arrow C++ from source.
 
 set -e
+set -x
 
-echo "=========================================="
-echo "Building Apache Arrow from source"
-echo "=========================================="
-echo ""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ARROW_DIR="${PROJECT_ROOT}/third_party/arrow"
+XSIMD_DIR="${PROJECT_ROOT}/third_party/xsimd"
+XSIMD_INSTALL_DIR="${PROJECT_ROOT}/build/xsimd_install"
 
-# Configuration
-ARROW_VERSION="13.0.0"
-ARROW_URL="https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_VERSION}/apache-arrow-${ARROW_VERSION}.tar.gz"
-INSTALL_PREFIX="${1:-.local}"  # Default to ~/.local, can be overridden
-BUILD_DIR="/tmp/arrow-build-$$"
-
-echo "Arrow Version: ${ARROW_VERSION}"
-echo "Install Prefix: ${INSTALL_PREFIX}"
-echo "Build Directory: ${BUILD_DIR}"
-echo ""
-
-# Step 1: Download Arrow source
-echo "Step 1: Downloading Arrow source..."
-mkdir -p "${BUILD_DIR}"
-cd "${BUILD_DIR}"
-wget -q "${ARROW_URL}"
-tar xzf "apache-arrow-${ARROW_VERSION}.tar.gz"
-cd "apache-arrow-${ARROW_VERSION}/cpp"
-echo "✓ Arrow source downloaded"
-echo ""
-
-# Step 2: Build Arrow
-echo "Step 2: Building Arrow (this may take 5-10 minutes)..."
-mkdir -p build
-cd build
-cmake \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
-    -DARROW_PARQUET=ON \
-    -DARROW_CSV=ON \
-    ..
-
-cmake --build . --config Release -j$(nproc)
-echo "✓ Arrow built successfully"
-echo ""
-
-# Step 3: Install Arrow
-echo "Step 3: Installing Arrow to ${INSTALL_PREFIX}..."
-cmake --install . --config Release
-echo "✓ Arrow installed successfully"
-echo ""
-
-# Step 4: Update CMake to find Arrow
-echo "Step 4: Updating environment..."
-export CMAKE_PREFIX_PATH="${INSTALL_PREFIX}:${CMAKE_PREFIX_PATH}"
-export PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}"
-export LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}"
-
-# Save to ~/.bashrc for future sessions
-echo ""
-echo "To use Arrow in future sessions, add to ~/.bashrc:"
-echo "  export CMAKE_PREFIX_PATH=\"${INSTALL_PREFIX}:\${CMAKE_PREFIX_PATH}\""
-echo "  export PKG_CONFIG_PATH=\"${INSTALL_PREFIX}/lib/pkgconfig:\${PKG_CONFIG_PATH}\""
-echo "  export LD_LIBRARY_PATH=\"${INSTALL_PREFIX}/lib:\${LD_LIBRARY_PATH}\""
-echo ""
-
-# Step 5: Test
-echo "Step 5: Verifying installation..."
-if pkg-config --cflags arrow > /dev/null 2>&1; then
-    echo "✓ Arrow installation verified"
-    echo ""
-    echo "=========================================="
-    echo "Arrow build complete!"
-    echo "=========================================="
-    echo ""
-    echo "Build TPC-H project:"
-    echo "  cd /home/tsafin/src/tpch-cpp"
-    echo "  cmake -B build -DCMAKE_BUILD_TYPE=Release"
-    echo "  cmake --build build"
-else
-    echo "⚠ Arrow installation verification failed"
-    echo "Try setting CMAKE_PREFIX_PATH manually:"
-    echo "  export CMAKE_PREFIX_PATH=\"${INSTALL_PREFIX}:\${CMAKE_PREFIX_PATH}\""
+# Check if Arrow source directory exists
+if [ ! -d "${ARROW_DIR}" ] || [ ! -f "${ARROW_DIR}/cpp/CMakeLists.txt" ]; then
+    echo "Arrow source not found in ${ARROW_DIR}."
+    echo "Please add the git submodule first:"
+    echo "git submodule add --depth 1 https://github.com/apache/arrow.git third_party/arrow"
+    exit 1
 fi
 
-# Cleanup
-echo ""
-echo "Cleaning up build directory..."
-rm -rf "${BUILD_DIR}"
-echo "✓ Cleanup complete"
+# Check if xsimd source directory exists
+if [ ! -d "${XSIMD_DIR}" ] || [ ! -f "${XSIMD_DIR}/CMakeLists.txt" ]; then
+    echo "xsimd source not found in ${XSIMD_DIR}."
+    echo "Please ensure the xsimd submodule is initialized:"
+    echo "git submodule update --init --recursive third_party/xsimd"
+    exit 1
+fi
+
+# Install build dependencies
+sudo apt-get update
+sudo apt-get install -y \
+    g++ cmake git libboost-all-dev rapidjson-dev \
+    libbrotli-dev libthrift-dev \
+    libsnappy-dev liblz4-dev libzstd-dev zlib1g-dev
+
+# 1. Build and install xsimd from the submodule to a local directory
+echo "Building and installing xsimd locally..."
+mkdir -p "${XSIMD_DIR}/build"
+cd "${XSIMD_DIR}/build"
+cmake .. -DCMAKE_INSTALL_PREFIX="${XSIMD_INSTALL_DIR}"
+make install
+
+# 2. Build and install Arrow C++, pointing to our local xsimd installation
+echo "Building and installing Apache Arrow..."
+mkdir -p "${ARROW_DIR}/cpp/build"
+cd "${ARROW_DIR}/cpp/build"
+
+cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_PREFIX_PATH="${XSIMD_INSTALL_DIR}" \
+    -DARROW_DEPENDENCY_SOURCE=SYSTEM \
+    -DARROW_ORC=OFF \
+    -DARROW_WITH_PROTOBUF=OFF \
+    -DARROW_BUILD_TESTS=OFF \
+    -DARROW_COMPUTE=ON \
+    -DARROW_FILESYSTEM=ON \
+    -DARROW_JEMALLOC=ON \
+    -DARROW_PARQUET=ON \
+    -DPARQUET_BUILD_PROTOBUF=OFF \
+    -DPARQUET_WITH_PROTOBUF=OFF \
+    -DPARQUET_MINIMAL_DEPENDENCY=ON \
+    -DARROW_CSV=ON
+
+make -j$(nproc)
+sudo make install
+
+echo "Apache Arrow C++ has been built and installed successfully."

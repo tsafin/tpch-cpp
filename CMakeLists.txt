@@ -88,7 +88,10 @@ set(re2Alt_FOUND TRUE)
 find_package(Thrift REQUIRED)
 set(ThriftAlt_FOUND TRUE)
 
-find_package(Protobuf REQUIRED)
+# Protobuf is needed for linking ORC (which was built with system protobuf embedded)
+# Arrow is built WITHOUT protobuf, so there's no conflict between Arrow and ORC's protobuf use
+find_package(Protobuf QUIET)
+
 find_package(Snappy QUIET)
 find_package(ZLIB QUIET)
 
@@ -116,9 +119,6 @@ message(STATUS "Parquet found: ${Parquet_LIBRARY}")
 if(TPCH_ENABLE_ORC)
     if(ORC_FOUND)
         message(STATUS "ORC found: ${ORC_LIBRARY}")
-        if(NOT Protobuf_FOUND)
-            message(WARNING "Protobuf not found - ORC may not link correctly")
-        endif()
     else()
         message(FATAL_ERROR "ORC requested (TPCH_ENABLE_ORC=ON) but not found - install with: sudo apt-get install liborc-dev")
     endif()
@@ -202,16 +202,20 @@ if(xsimd_FOUND)
 endif()
 
 # Link ORC if enabled and available
-# ORC references protobuf symbols, so we must link protobuf
+# Note: ORC was built with system protobuf embedded in the static library
+# Arrow was built WITHOUT protobuf, so no conflict
 if(TPCH_ENABLE_ORC AND ORC_FOUND)
     target_link_libraries(tpch_core PRIVATE ORC::orc)
 
-    if(TARGET protobuf::libprotobuf)
-        target_link_libraries(tpch_core PRIVATE protobuf::libprotobuf)
-    elseif(TARGET Protobuf::protobuf)
-        target_link_libraries(tpch_core PRIVATE Protobuf::protobuf)
-    else()
-        target_link_libraries(tpch_core PRIVATE ${Protobuf_LIBRARIES})
+    # Link protobuf for ORC (required since ORC is a static library built with protobuf)
+    if(Protobuf_FOUND)
+        if(TARGET protobuf::libprotobuf)
+            target_link_libraries(tpch_core PRIVATE protobuf::libprotobuf)
+        elseif(TARGET Protobuf::protobuf)
+            target_link_libraries(tpch_core PRIVATE Protobuf::protobuf)
+        elseif(Protobuf_LIBRARIES)
+            target_link_libraries(tpch_core PRIVATE ${Protobuf_LIBRARIES})
+        endif()
     endif()
 endif()
 
