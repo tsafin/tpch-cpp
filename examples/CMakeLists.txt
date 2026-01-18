@@ -15,24 +15,27 @@ if(TPCH_BUILD_EXAMPLES)
         Arrow::arrow
     )
 
-    # simple_orc - Demonstrates ORC writing (if ORC is enabled and available)
+    # simple_orc - Demonstrates ORC writing using ONLY ORC's native API
+    # (does NOT use Arrow to avoid protobuf descriptor conflicts)
+    # Example shows that ORC uses its own built-in protobuf without needing external dependencies
     if(TPCH_ENABLE_ORC AND ORC_FOUND)
         add_executable(simple_orc simple_orc.cpp)
-        # tpch_core already includes snappy via its dependency on arrow
-        # We just need to link in the right order
+        # Link only ORC and compression libraries - NO Arrow/Parquet
         target_link_libraries(simple_orc PRIVATE
-            tpch_core
-            Arrow::arrow
             ORC::orc
+            z snappy lz4 zstd
         )
 
-        find_package(Protobuf REQUIRED)
-        if(TARGET protobuf::libprotobuf)
-            target_link_libraries(simple_orc PRIVATE protobuf::libprotobuf)
-        elseif(TARGET Protobuf::protobuf)
-            target_link_libraries(simple_orc PRIVATE Protobuf::protobuf)
-        else()
-            target_link_libraries(simple_orc PRIVATE ${Protobuf_LIBRARIES})
+        # Link protobuf for ORC (required since ORC is a static library built with protobuf)
+        find_package(Protobuf QUIET)
+        if(Protobuf_FOUND)
+            if(TARGET protobuf::libprotobuf)
+                target_link_libraries(simple_orc PRIVATE protobuf::libprotobuf)
+            elseif(TARGET Protobuf::protobuf)
+                target_link_libraries(simple_orc PRIVATE Protobuf::protobuf)
+            elseif(Protobuf_LIBRARIES)
+                target_link_libraries(simple_orc PRIVATE ${Protobuf_LIBRARIES})
+            endif()
         endif()
     endif()
 
