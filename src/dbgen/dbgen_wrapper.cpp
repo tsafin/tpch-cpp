@@ -172,103 +172,22 @@ void tpch::DBGenWrapper::generate_lineitem(
 void tpch::DBGenWrapper::generate_orders(
     std::function<void(const void* row)> callback,
     long max_rows) {
-
-    if (!initialized_) {
-        init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_ORDER);
-
-    long rows_generated = 0;
-    long total_rows = get_row_count(TableType::ORDERS, scale_factor_);
-
-    order_t order;
-    for (DSS_HUGE i = 1; i <= total_rows; ++i) {
-        if (mk_order(i, &order, 0) < 0) {
-            break;
-        }
-
-        if (callback) {
-            callback(&order);
-        }
-        rows_generated++;
-
-        if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(DBGEN_ORDER);
-            return;
-        }
-    }
-
-    row_stop(DBGEN_ORDER);
+    // Forward to the generic implementation for Orders
+    generate_generic<OrdersTraits>(callback, max_rows);
 }
 
 void tpch::DBGenWrapper::generate_customer(
     std::function<void(const void* row)> callback,
     long max_rows) {
-
-    if (!initialized_) {
-        init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_CUST);
-
-    long rows_generated = 0;
-    long total_rows = get_row_count(TableType::CUSTOMER, scale_factor_);
-
-    customer_t customer;
-    for (DSS_HUGE i = 1; i <= total_rows; ++i) {
-        if (mk_cust(i, &customer) < 0) {
-            break;
-        }
-
-        if (callback) {
-            callback(&customer);
-        }
-        rows_generated++;
-
-        if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(DBGEN_CUST);
-            return;
-        }
-    }
-
-    row_stop(DBGEN_CUST);
+    // Forward to the generic implementation for Customer
+    generate_generic<CustomerTraits>(callback, max_rows);
 }
 
 void tpch::DBGenWrapper::generate_part(
     std::function<void(const void* row)> callback,
     long max_rows) {
-
-    if (!initialized_) {
-        init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_PART);
-
-    long rows_generated = 0;
-    long total_rows = get_row_count(TableType::PART, scale_factor_);
-
-    part_t part;
-    for (DSS_HUGE i = 1; i <= total_rows; ++i) {
-        if (mk_part(i, &part) < 0) {
-            break;
-        }
-
-        if (callback) {
-            callback(&part);
-        }
-        rows_generated++;
-
-        if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(DBGEN_PART);
-            return;
-        }
-    }
-
-    row_stop(DBGEN_PART);
+    // Forward to the generic implementation for Part
+    generate_generic<PartTraits>(callback, max_rows);
 }
 
 void tpch::DBGenWrapper::generate_partsupp(
@@ -311,83 +230,20 @@ void tpch::DBGenWrapper::generate_partsupp(
 void tpch::DBGenWrapper::generate_supplier(
     std::function<void(const void* row)> callback,
     long max_rows) {
-
-    if (!initialized_) {
-        init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_SUPP);
-
-    long rows_generated = 0;
-    long total_rows = get_row_count(TableType::SUPPLIER, scale_factor_);
-
-    supplier_t supplier;
-    for (DSS_HUGE i = 1; i <= total_rows; ++i) {
-        if (mk_supp(i, &supplier) < 0) {
-            break;
-        }
-
-        if (callback) {
-            callback(&supplier);
-        }
-        rows_generated++;
-
-        if (max_rows > 0 && rows_generated >= max_rows) {
-            row_stop(DBGEN_SUPP);
-            return;
-        }
-    }
-
-    row_stop(DBGEN_SUPP);
+    // Forward to the generic implementation for Supplier
+    generate_generic<SupplierTraits>(callback, max_rows);
 }
 
 void tpch::DBGenWrapper::generate_nation(
     std::function<void(const void* row)> callback) {
-
-    if (!initialized_) {
-        init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_NATION);
-
-    code_t nation;
-    for (DSS_HUGE i = 1; i <= 25; ++i) {
-        if (mk_nation(i, &nation) < 0) {
-            break;
-        }
-
-        if (callback) {
-            callback(&nation);
-        }
-    }
-
-    row_stop(DBGEN_NATION);
+    // Forward to the generic implementation for Nation
+    generate_generic<NationTraits>(callback);
 }
 
 void tpch::DBGenWrapper::generate_region(
     std::function<void(const void* row)> callback) {
-
-    if (!initialized_) {
-        init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_REGION);
-
-    code_t region;
-    for (DSS_HUGE i = 1; i <= 5; ++i) {
-        if (mk_region(i, &region) < 0) {
-            break;
-        }
-
-        if (callback) {
-            callback(&region);
-        }
-    }
-
-    row_stop(DBGEN_REGION);
+    // Forward to the generic implementation for Region
+    generate_generic<RegionTraits>(callback);
 }
 
 void tpch::DBGenWrapper::generate_all_tables(
@@ -669,170 +525,19 @@ DBGenWrapper::generate_lineitem_batches(size_t batch_size, size_t max_rows) {
     return LineitemBatchIterator(this, batch_size, max_rows);
 }
 
-// =======================================================================
-// Orders batch iterator
-// =======================================================================
-
-DBGenWrapper::OrdersBatchIterator::OrdersBatchIterator(
-    DBGenWrapper* wrapper,
-    size_t batch_size,
-    size_t max_rows)
-    : wrapper_(wrapper)
-    , batch_size_(batch_size)
-    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::ORDERS, wrapper_->scale_factor_))
-                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::ORDERS, wrapper_->scale_factor_))))
-    , current_row_(1) {
-
-    if (!wrapper_->initialized_) {
-        wrapper_->init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_ORDER);
-}
-
-DBGenWrapper::OrdersBatchIterator::Batch
-DBGenWrapper::OrdersBatchIterator::next() {
-    Batch batch;
-
-    if (remaining_ == 0) {
-        return batch;
-    }
-
-    batch.rows.reserve(std::min(batch_size_, remaining_));
-
-    long total_rows = get_row_count(TableType::ORDERS, wrapper_->scale_factor_);
-
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= static_cast<size_t>(total_rows)) {
-        order_t order;
-        if (mk_order(current_row_, &order, 0) < 0) {
-            break;
-        }
-
-        batch.rows.push_back(order);
-        remaining_--;
-        current_row_++;
-    }
-
-    if (remaining_ == 0 || current_row_ > static_cast<size_t>(total_rows)) {
-        row_stop(DBGEN_ORDER);
-    }
-
-    return batch;
-}
-
+// Orders batch iterator: implementation provided by BatchIteratorImpl in header
 DBGenWrapper::OrdersBatchIterator
 DBGenWrapper::generate_orders_batches(size_t batch_size, size_t max_rows) {
     return OrdersBatchIterator(this, batch_size, max_rows);
 }
 
-// =======================================================================
-// Customer batch iterator
-// =======================================================================
-
-DBGenWrapper::CustomerBatchIterator::CustomerBatchIterator(
-    DBGenWrapper* wrapper,
-    size_t batch_size,
-    size_t max_rows)
-    : wrapper_(wrapper)
-    , batch_size_(batch_size)
-    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::CUSTOMER, wrapper_->scale_factor_))
-                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::CUSTOMER, wrapper_->scale_factor_))))
-    , current_row_(1) {
-
-    if (!wrapper_->initialized_) {
-        wrapper_->init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_CUST);
-}
-
-DBGenWrapper::CustomerBatchIterator::Batch
-DBGenWrapper::CustomerBatchIterator::next() {
-    Batch batch;
-
-    if (remaining_ == 0) {
-        return batch;
-    }
-
-    batch.rows.reserve(std::min(batch_size_, remaining_));
-
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 ) {
-        customer_t cust;
-        if (mk_cust(current_row_, &cust) < 0) {
-            break;
-        }
-
-        batch.rows.push_back(cust);
-        remaining_--;
-        current_row_++;
-    }
-
-    if (remaining_ <= 0) {
-        row_stop(DBGEN_CUST);
-    }
-
-    return batch;
-}
-
+// Customer batch iterator: implementation provided by BatchIteratorImpl in header
 DBGenWrapper::CustomerBatchIterator
 DBGenWrapper::generate_customer_batches(size_t batch_size, size_t max_rows) {
     return CustomerBatchIterator(this, batch_size, max_rows);
 }
 
-// =======================================================================
-// Part batch iterator
-// =======================================================================
-
-DBGenWrapper::PartBatchIterator::PartBatchIterator(
-    DBGenWrapper* wrapper,
-    size_t batch_size,
-    size_t max_rows)
-    : wrapper_(wrapper)
-    , batch_size_(batch_size)
-    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_))
-                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::PART, wrapper_->scale_factor_))))
-    , current_row_(1) {
-
-    if (!wrapper_->initialized_) {
-        wrapper_->init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_PART);
-}
-
-DBGenWrapper::PartBatchIterator::Batch
-DBGenWrapper::PartBatchIterator::next() {
-    Batch batch;
-
-    if (remaining_ == 0) {
-        return batch;
-    }
-
-    batch.rows.reserve(std::min(batch_size_, remaining_));
-
-    long total_rows = get_row_count(TableType::PART, wrapper_->scale_factor_);
-
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= static_cast<size_t>(total_rows)) {
-        part_t part;
-        if (mk_part(current_row_, &part) < 0) {
-            break;
-        }
-
-        batch.rows.push_back(part);
-        remaining_--;
-        current_row_++;
-    }
-
-    if (remaining_ == 0 || current_row_ > static_cast<size_t>(total_rows)) {
-        row_stop(DBGEN_PART);
-    }
-
-    return batch;
-}
-
+// Part batch iterator: implementation provided by BatchIteratorImpl in header
 DBGenWrapper::PartBatchIterator
 DBGenWrapper::generate_part_batches(size_t batch_size, size_t max_rows) {
     return PartBatchIterator(this, batch_size, max_rows);
@@ -905,170 +610,19 @@ DBGenWrapper::generate_partsupp_batches(size_t batch_size, size_t max_rows) {
     return PartsuppBatchIterator(this, batch_size, max_rows);
 }
 
-// =======================================================================
-// Supplier batch iterator
-// =======================================================================
-
-DBGenWrapper::SupplierBatchIterator::SupplierBatchIterator(
-    DBGenWrapper* wrapper,
-    size_t batch_size,
-    size_t max_rows)
-    : wrapper_(wrapper)
-    , batch_size_(batch_size)
-    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::SUPPLIER, wrapper_->scale_factor_))
-                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::SUPPLIER, wrapper_->scale_factor_))))
-    , current_row_(1) {
-
-    if (!wrapper_->initialized_) {
-        wrapper_->init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_SUPP);
-}
-
-DBGenWrapper::SupplierBatchIterator::Batch
-DBGenWrapper::SupplierBatchIterator::next() {
-    Batch batch;
-
-    if (remaining_ == 0) {
-        return batch;
-    }
-
-    batch.rows.reserve(std::min(batch_size_, remaining_));
-
-    long total_rows = get_row_count(TableType::SUPPLIER, wrapper_->scale_factor_);
-
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= static_cast<size_t>(total_rows)) {
-        supplier_t supp;
-        if (mk_supp(current_row_, &supp) < 0) {
-            break;
-        }
-
-        batch.rows.push_back(supp);
-        remaining_--;
-        current_row_++;
-    }
-
-    if (remaining_ == 0 || current_row_ > static_cast<size_t>(total_rows)) {
-        row_stop(DBGEN_SUPP);
-    }
-
-    return batch;
-}
-
+// Supplier batch iterator: implementation provided by BatchIteratorImpl in header
 DBGenWrapper::SupplierBatchIterator
 DBGenWrapper::generate_supplier_batches(size_t batch_size, size_t max_rows) {
     return SupplierBatchIterator(this, batch_size, max_rows);
 }
 
-// =======================================================================
-// Nation batch iterator
-// =======================================================================
-
-DBGenWrapper::NationBatchIterator::NationBatchIterator(
-    DBGenWrapper* wrapper,
-    size_t batch_size,
-    size_t max_rows)
-    : wrapper_(wrapper)
-    , batch_size_(batch_size)
-    , remaining_(max_rows == 0 ? size_t(25) : std::min(max_rows, size_t(25)))  // Nation table has exactly 25 rows
-    , current_row_(1) {  // Nation IDs are 1-indexed
-
-    if (!wrapper_->initialized_) {
-        wrapper_->init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_NATION);
-}
-
-DBGenWrapper::NationBatchIterator::Batch
-DBGenWrapper::NationBatchIterator::next() {
-    Batch batch;
-
-    if (remaining_ == 0) {
-        return batch;
-    }
-
-    batch.rows.reserve(std::min(batch_size_, remaining_));
-
-    const long total_rows = 25;  // Nation table always has 25 rows
-
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= static_cast<size_t>(total_rows)) {
-        code_t nation;
-        if (mk_nation(current_row_, &nation) < 0) {
-            break;
-        }
-
-        batch.rows.push_back(nation);
-        remaining_--;
-        current_row_++;
-    }
-
-    if (remaining_ == 0 || current_row_ > static_cast<size_t>(total_rows)) {
-        row_stop(DBGEN_NATION);
-    }
-
-    return batch;
-}
-
+// Nation batch iterator: implementation provided by BatchIteratorImpl in header
 DBGenWrapper::NationBatchIterator
 DBGenWrapper::generate_nation_batches(size_t batch_size, size_t max_rows) {
     return NationBatchIterator(this, batch_size, max_rows);
 }
 
-// =======================================================================
-// Region batch iterator
-// =======================================================================
-
-DBGenWrapper::RegionBatchIterator::RegionBatchIterator(
-    DBGenWrapper* wrapper,
-    size_t batch_size,
-    size_t max_rows)
-    : wrapper_(wrapper)
-    , batch_size_(batch_size)
-    , remaining_(max_rows == 0 ? size_t(5) : std::min(max_rows, size_t(5)))  // Region table has exactly 5 rows
-    , current_row_(1) {  // Region IDs are 1-indexed
-
-    if (!wrapper_->initialized_) {
-        wrapper_->init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_REGION);
-}
-
-DBGenWrapper::RegionBatchIterator::Batch
-DBGenWrapper::RegionBatchIterator::next() {
-    Batch batch;
-
-    if (remaining_ == 0) {
-        return batch;
-    }
-
-    batch.rows.reserve(std::min(batch_size_, remaining_));
-
-    const long total_rows = 5;  // Region table always has 5 rows
-
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= static_cast<size_t>(total_rows)) {
-        code_t region;
-        if (mk_region(current_row_, &region) < 0) {
-            break;
-        }
-
-        batch.rows.push_back(region);
-        remaining_--;
-        current_row_++;
-    }
-
-    if (remaining_ == 0 || current_row_ > static_cast<size_t>(total_rows)) {
-        row_stop(DBGEN_REGION);
-    }
-
-    return batch;
-}
-
+// Region batch iterator: implementation provided by BatchIteratorImpl in header
 DBGenWrapper::RegionBatchIterator
 DBGenWrapper::generate_region_batches(size_t batch_size, size_t max_rows) {
     return RegionBatchIterator(this, batch_size, max_rows);

@@ -29,6 +29,66 @@ enum class TableType {
     COUNT_
 };
 
+// Forward declaration for RAII session helper
+class DBGenWrapper;
+
+/**
+ * RAII helper for DBGen generation sessions.
+ * Keeps basic session state together; concrete behavior is implemented
+ * in the .cpp file and this type is intentionally lightweight here
+ * so it can be introduced without touching existing generation logic.
+ */
+class DBGenSession {
+   public:
+    DBGenSession(DBGenWrapper* wrapper, int table_id, long start_row, long stop_row);
+    ~DBGenSession();
+
+    // Non-copyable
+    DBGenSession(const DBGenSession&) = delete;
+    DBGenSession& operator=(const DBGenSession&) = delete;
+
+   private:
+    DBGenWrapper* wrapper_;
+    int table_id_;
+    long start_row_;
+    long stop_row_;
+};
+
+// Lightweight per-table traits used for future generic generators.
+// They only expose the concrete row type and table identifier.
+struct OrdersTraits {
+    using Row = order_t;
+    static constexpr TableType table = TableType::ORDERS;
+};
+struct LineitemTraits {
+    using Row = line_t;
+    static constexpr TableType table = TableType::LINEITEM;
+};
+struct CustomerTraits {
+    using Row = customer_t;
+    static constexpr TableType table = TableType::CUSTOMER;
+};
+struct PartTraits {
+    using Row = part_t;
+    static constexpr TableType table = TableType::PART;
+};
+struct PartsuppTraits {
+    using Row = partsupp_t;
+    static constexpr TableType table = TableType::PARTSUPP;
+};
+struct SupplierTraits {
+    using Row = supplier_t;
+    static constexpr TableType table = TableType::SUPPLIER;
+};
+struct NationTraits {
+    using Row = code_t;
+    static constexpr TableType table = TableType::NATION;
+};
+struct RegionTraits {
+    using Row = code_t;
+    static constexpr TableType table = TableType::REGION;
+};
+
 /**
  * Get table name for display/debugging
  */
@@ -190,6 +250,15 @@ public:
         std::function<void(const void* row)> callback);
 
     /**
+     * Generic generator dispatcher that forwards to the table-specific
+     * generator implementation. This member template allows incremental
+     * migration of the per-table generate_* methods to a single generic
+     * entrypoint without changing external APIs.
+     */
+    template<typename Traits>
+    void generate_generic(std::function<void(const void* row)> callback, long max_rows = -1);
+
+    /**
      * Get scale factor
      */
     long scale_factor() const { return scale_factor_; }
@@ -210,6 +279,106 @@ public:
     // =======================================================================
     // Phase 13.4: Batch generation interfaces for zero-copy optimization
     // =======================================================================
+
+    // Helper used in static_assert for unreachable branches
+    template <typename>
+    struct always_false : std::false_type {};
+
+    // Generic batch iterator implementation used by simple tables.
+    // Defined as a nested template so it can access DBGenWrapper's
+    // initialization helpers and private members.
+    template<typename Traits>
+    class BatchIteratorImpl {
+    public:
+        using Row = typename Traits::Row;
+        using Batch = DBGenBatch<Row>;
+
+        BatchIteratorImpl(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows)
+            : wrapper_(wrapper), batch_size_(batch_size) {
+            // Determine total remaining rows
+            size_t total = static_cast<size_t>(get_row_count(Traits::table, wrapper_->scale_factor_));
+            remaining_ = (max_rows == 0) ? total : std::min(static_cast<size_t>(max_rows), total);
+            current_row_ = 1;
+
+            if (!wrapper_->initialized_) {
+                wrapper_->init_dbgen();
+            }
+
+            dbgen_reset_seeds();
+            if constexpr (Traits::table == TableType::ORDERS) {
+                row_start(DBGEN_ORDER);
+            } else if constexpr (Traits::table == TableType::CUSTOMER) {
+                row_start(DBGEN_CUST);
+            } else if constexpr (Traits::table == TableType::PART) {
+                row_start(DBGEN_PART);
+            } else if constexpr (Traits::table == TableType::SUPPLIER) {
+                row_start(DBGEN_SUPP);
+            } else if constexpr (Traits::table == TableType::NATION) {
+                row_start(DBGEN_NATION);
+            } else if constexpr (Traits::table == TableType::REGION) {
+                row_start(DBGEN_REGION);
+            }
+        }
+
+        bool has_next() const { return remaining_ > 0; }
+
+        Batch next() {
+            Batch batch;
+            if (remaining_ == 0) return batch;
+
+            batch.rows.reserve(std::min(batch_size_, remaining_));
+
+            size_t total_rows = static_cast<size_t>(get_row_count(Traits::table, wrapper_->scale_factor_));
+
+            while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= total_rows) {
+                Row r{};
+                if constexpr (Traits::table == TableType::ORDERS) {
+                    if (mk_order(static_cast<DSS_HUGE>(current_row_), &r, 0) < 0) break;
+                } else if constexpr (Traits::table == TableType::CUSTOMER) {
+                    if (mk_cust(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                } else if constexpr (Traits::table == TableType::PART) {
+                    if (mk_part(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                } else if constexpr (Traits::table == TableType::SUPPLIER) {
+                    if (mk_supp(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                } else if constexpr (Traits::table == TableType::NATION) {
+                    if (mk_nation(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                } else if constexpr (Traits::table == TableType::REGION) {
+                    if (mk_region(static_cast<DSS_HUGE>(current_row_), &r) < 0) break;
+                } else {
+                    static_assert(always_false<Traits>::value, "Unsupported batch iterator table");
+                }
+
+                batch.rows.push_back(r);
+                remaining_--;
+                current_row_++;
+            }
+
+            // Stop generation if complete
+            if (remaining_ == 0 || current_row_ > total_rows) {
+                if constexpr (Traits::table == TableType::ORDERS) {
+                    row_stop(DBGEN_ORDER);
+                } else if constexpr (Traits::table == TableType::CUSTOMER) {
+                    row_stop(DBGEN_CUST);
+                } else if constexpr (Traits::table == TableType::PART) {
+                    row_stop(DBGEN_PART);
+                } else if constexpr (Traits::table == TableType::SUPPLIER) {
+                    row_stop(DBGEN_SUPP);
+                } else if constexpr (Traits::table == TableType::NATION) {
+                    row_stop(DBGEN_NATION);
+                } else if constexpr (Traits::table == TableType::REGION) {
+                    row_stop(DBGEN_REGION);
+                }
+            }
+
+            return batch;
+        }
+
+    private:
+        DBGenWrapper* wrapper_;
+        size_t batch_size_;
+        size_t remaining_;
+        size_t current_row_;
+    };
 
     /**
      * Batch iterator for lineitem rows (zero-copy friendly)
@@ -255,69 +424,25 @@ public:
     /**
      * Batch iterator for orders rows (zero-copy friendly)
      */
-    class OrdersBatchIterator {
-    public:
-        using Batch = DBGenBatch<order_t>;
-
-        OrdersBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
-
-        bool has_next() const { return remaining_ > 0; }
-        Batch next();
-
-    private:
-        DBGenWrapper* wrapper_;
-        size_t batch_size_;
-        size_t remaining_;
-        size_t current_row_;
-    };
-
+    using OrdersBatchIterator = BatchIteratorImpl<OrdersTraits>;
     OrdersBatchIterator generate_orders_batches(size_t batch_size, size_t max_rows);
 
     /**
      * Batch iterator for customer rows (zero-copy friendly)
      */
-    class CustomerBatchIterator {
-    public:
-        using Batch = DBGenBatch<customer_t>;
-
-        CustomerBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
-
-        bool has_next() const { return remaining_ > 0; }
-        Batch next();
-
-    private:
-        DBGenWrapper* wrapper_;
-        size_t batch_size_;
-        size_t remaining_;
-        size_t current_row_;
-    };
-
+    using CustomerBatchIterator = BatchIteratorImpl<CustomerTraits>;
     CustomerBatchIterator generate_customer_batches(size_t batch_size, size_t max_rows);
 
     /**
      * Batch iterator for part rows (zero-copy friendly)
      */
-    class PartBatchIterator {
-    public:
-        using Batch = DBGenBatch<part_t>;
-
-        PartBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
-
-        bool has_next() const { return remaining_ > 0; }
-        Batch next();
-
-    private:
-        DBGenWrapper* wrapper_;
-        size_t batch_size_;
-        size_t remaining_;
-        size_t current_row_;
-    };
-
+    using PartBatchIterator = BatchIteratorImpl<PartTraits>;
     PartBatchIterator generate_part_batches(size_t batch_size, size_t max_rows);
 
     /**
      * Batch iterator for partsupp rows (zero-copy friendly)
      */
+    // Partsupp is nested per-part; keep concrete iterator for now
     class PartsuppBatchIterator {
     public:
         using Batch = DBGenBatch<partsupp_t>;
@@ -339,64 +464,19 @@ public:
     /**
      * Batch iterator for supplier rows (zero-copy friendly)
      */
-    class SupplierBatchIterator {
-    public:
-        using Batch = DBGenBatch<supplier_t>;
-
-        SupplierBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
-
-        bool has_next() const { return remaining_ > 0; }
-        Batch next();
-
-    private:
-        DBGenWrapper* wrapper_;
-        size_t batch_size_;
-        size_t remaining_;
-        size_t current_row_;
-    };
-
+    using SupplierBatchIterator = BatchIteratorImpl<SupplierTraits>;
     SupplierBatchIterator generate_supplier_batches(size_t batch_size, size_t max_rows);
 
     /**
      * Batch iterator for nation rows (zero-copy friendly)
      */
-    class NationBatchIterator {
-    public:
-        using Batch = DBGenBatch<code_t>;
-
-        NationBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
-
-        bool has_next() const { return remaining_ > 0; }
-        Batch next();
-
-    private:
-        DBGenWrapper* wrapper_;
-        size_t batch_size_;
-        size_t remaining_;
-        size_t current_row_;
-    };
-
+    using NationBatchIterator = BatchIteratorImpl<NationTraits>;
     NationBatchIterator generate_nation_batches(size_t batch_size, size_t max_rows);
 
     /**
      * Batch iterator for region rows (zero-copy friendly)
      */
-    class RegionBatchIterator {
-    public:
-        using Batch = DBGenBatch<code_t>;
-
-        RegionBatchIterator(DBGenWrapper* wrapper, size_t batch_size, size_t max_rows);
-
-        bool has_next() const { return remaining_ > 0; }
-        Batch next();
-
-    private:
-        DBGenWrapper* wrapper_;
-        size_t batch_size_;
-        size_t remaining_;
-        size_t current_row_;
-    };
-
+    using RegionBatchIterator = BatchIteratorImpl<RegionTraits>;
     RegionBatchIterator generate_region_batches(size_t batch_size, size_t max_rows);
 
 private:
@@ -436,6 +516,31 @@ private:
  * @param scale_factor TPC-H scale factor (1 = 1GB baseline)
  * @param verbose_flag Enable verbose debug output
  */
+
+
+template<typename Traits>
+void DBGenWrapper::generate_generic(std::function<void(const void* row)> callback, long max_rows) {
+    if constexpr (Traits::table == TableType::ORDERS) {
+        generate_orders(callback, max_rows);
+    } else if constexpr (Traits::table == TableType::CUSTOMER) {
+        generate_customer(callback, max_rows);
+    } else if constexpr (Traits::table == TableType::PART) {
+        generate_part(callback, max_rows);
+    } else if constexpr (Traits::table == TableType::PARTSUPP) {
+        generate_partsupp(callback, max_rows);
+    } else if constexpr (Traits::table == TableType::SUPPLIER) {
+        generate_supplier(callback, max_rows);
+    } else if constexpr (Traits::table == TableType::NATION) {
+        generate_nation(callback);
+    } else if constexpr (Traits::table == TableType::REGION) {
+        generate_region(callback);
+    } else if constexpr (Traits::table == TableType::LINEITEM) {
+        generate_lineitem(callback, max_rows);
+    } else {
+        static_assert(always_false<Traits>::value, "Unsupported table in generate_generic");
+    }
+}
+
 void dbgen_init_global(long scale_factor, bool verbose_flag);
 
 /**
