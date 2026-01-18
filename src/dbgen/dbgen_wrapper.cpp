@@ -139,6 +139,9 @@ void tpch::DBGenWrapper::generate_lineitem(
 
     // Reset RNG state before generating rows
     dbgen_reset_seeds();
+    /* Capture the initial RNG seed snapshot so other generators can restore it
+       and reproduce the same sequence */
+    dbgen_capture_seed_snapshot();
 
     row_start(DBGEN_LINE);
 
@@ -146,8 +149,8 @@ void tpch::DBGenWrapper::generate_lineitem(
 
     // LineItem rows are generated implicitly via order generation
     // Each order has between 1-7 line items
-    order_t order;
     for (DSS_HUGE i = 1; i <= get_row_count(TableType::ORDERS, scale_factor_); ++i) {
+        order_t order{};
         if (mk_order(i, &order, 0) < 0) {
             break;
         }
@@ -204,8 +207,8 @@ void tpch::DBGenWrapper::generate_partsupp(
     long rows_generated = 0;
     long total_rows_part = get_row_count(TableType::PART, scale_factor_);
 
-    part_t part;
     for (DSS_HUGE i = 1; i <= total_rows_part; ++i) {
+        part_t part{};
         if (mk_part(i, &part) < 0) {
             break;
         }
