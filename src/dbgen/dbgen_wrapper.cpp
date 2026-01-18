@@ -459,67 +459,6 @@ bool dbgen_is_initialized() {
 // Phase 13.4: Batch generation implementation for zero-copy optimizations
 // ============================================================================
 
-DBGenWrapper::LineitemBatchIterator::LineitemBatchIterator(
-    DBGenWrapper* wrapper,
-    size_t batch_size,
-    size_t max_rows)
-    : wrapper_(wrapper)
-    , batch_size_(batch_size)
-    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::LINEITEM, wrapper_->scale_factor_))
-                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::LINEITEM, wrapper_->scale_factor_))))
-    , current_order_(1) {
-
-    // Initialize dbgen if needed
-    if (!wrapper_->initialized_) {
-        wrapper_->init_dbgen();
-    }
-
-    // Reset RNG state before generating rows
-    dbgen_reset_seeds();
-    row_start(DBGEN_LINE);
-}
-
-DBGenWrapper::LineitemBatchIterator::Batch
-DBGenWrapper::LineitemBatchIterator::next() {
-    Batch batch;
-
-    if (remaining_ == 0) {
-        return batch;  // Empty batch
-    }
-
-    // Pre-allocate space for batch
-    batch.rows.reserve(std::min(batch_size_, remaining_));
-
-    // Generate orders and extract lineitem rows until we fill the batch
-    order_t order;
-    long total_orders = get_row_count(TableType::ORDERS, wrapper_->scale_factor_);
-
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_order_ <= total_orders) {
-        if (mk_order(current_order_, &order, 0) < 0) {
-            break;
-        }
-
-        // Extract each lineitem from the order
-        for (int j = 0; j < (int)order.lines && j < O_LCNT_MAX; ++j) {
-            batch.rows.push_back(order.l[j]);
-            remaining_--;
-
-            if (batch.rows.size() >= batch_size_ || remaining_ == 0) {
-                break;
-            }
-        }
-
-        current_order_++;
-    }
-
-    // If we're done, stop the row generation
-    if (remaining_ == 0 || current_order_ > total_orders) {
-        row_stop(DBGEN_LINE);
-    }
-
-    return batch;
-}
-
 DBGenWrapper::LineitemBatchIterator
 DBGenWrapper::generate_lineitem_batches(size_t batch_size, size_t max_rows) {
     return LineitemBatchIterator(this, batch_size, max_rows);
@@ -541,68 +480,6 @@ DBGenWrapper::generate_customer_batches(size_t batch_size, size_t max_rows) {
 DBGenWrapper::PartBatchIterator
 DBGenWrapper::generate_part_batches(size_t batch_size, size_t max_rows) {
     return PartBatchIterator(this, batch_size, max_rows);
-}
-
-// =======================================================================
-// Partsupp batch iterator
-// =======================================================================
-
-DBGenWrapper::PartsuppBatchIterator::PartsuppBatchIterator(
-    DBGenWrapper* wrapper,
-    size_t batch_size,
-    size_t max_rows)
-    : wrapper_(wrapper)
-    , batch_size_(batch_size)
-    , remaining_(max_rows == 0 ? static_cast<size_t>(get_row_count(TableType::PARTSUPP, wrapper_->scale_factor_))
-                               : std::min(max_rows, static_cast<size_t>(get_row_count(TableType::PARTSUPP, wrapper_->scale_factor_))))
-    , current_row_(1) {
-
-    if (!wrapper_->initialized_) {
-        wrapper_->init_dbgen();
-    }
-
-    dbgen_reset_seeds();
-    row_start(DBGEN_PSUPP);
-}
-
-DBGenWrapper::PartsuppBatchIterator::Batch
-DBGenWrapper::PartsuppBatchIterator::next() {
-    Batch batch;
-
-    if (remaining_ == 0) {
-        return batch;
-    }
-
-    batch.rows.reserve(std::min(batch_size_, remaining_));
-
-    long total_parts = get_row_count(TableType::PART, wrapper_->scale_factor_);
-
-    // Partsupp rows are generated as part of part generation
-    // Each part has SUPP_PER_PART (4) partsupps
-    while (batch.rows.size() < batch_size_ && remaining_ > 0 && current_row_ <= static_cast<size_t>(total_parts)) {
-        part_t part;
-        if (mk_part(current_row_, &part) < 0) {
-            break;
-        }
-
-        // Extract each partsupp from the part
-        for (int j = 0; j < SUPP_PER_PART; ++j) {
-            batch.rows.push_back(part.s[j]);
-            remaining_--;
-
-            if (batch.rows.size() >= batch_size_ || remaining_ == 0) {
-                break;
-            }
-        }
-
-        current_row_++;
-    }
-
-    if (remaining_ == 0 || current_row_ > static_cast<size_t>(total_parts)) {
-        row_stop(DBGEN_PSUPP);
-    }
-
-    return batch;
 }
 
 DBGenWrapper::PartsuppBatchIterator
