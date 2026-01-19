@@ -45,9 +45,11 @@ private:
     std::shared_ptr<arrow::RecordBatch> first_batch_;
     bool schema_locked_ = false;
 
-    // Opaque ORC writer implementation (void* to avoid exposing ORC headers)
-    // In the implementation file, this will be cast to orc::Writer*
-    void* orc_writer_;
+    // Opaque ORC implementations (void* to avoid exposing ORC headers)
+    // In the implementation file, these are cast to their actual types
+    void* orc_writer_;           // orc::Writer*
+    void* orc_output_stream_;    // unique_ptr<OrcFile::OutStream>
+    void* orc_type_;             // unique_ptr<orc::Type>
 };
 
 }  // namespace tpch
