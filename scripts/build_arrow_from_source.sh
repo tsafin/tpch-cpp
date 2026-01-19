@@ -29,9 +29,11 @@ fi
 # Install build dependencies
 sudo apt-get update
 sudo apt-get install -y \
-    g++ cmake git libboost-all-dev rapidjson-dev \
-    libbrotli-dev libthrift-dev \
-    libsnappy-dev liblz4-dev libzstd-dev zlib1g-dev
+    g++ cmake git \
+    libboost-all-dev rapidjson-dev \
+    libbrotli-dev libthrift-dev protobuf-compiler libprotobuf-dev \
+    libsnappy-dev liblz4-dev libzstd-dev zlib1g-dev \
+    pkg-config
 
 # 1. Build and install xsimd from the submodule to a local directory
 echo "Building and installing xsimd locally..."
@@ -49,33 +51,17 @@ export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
 
 cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_MODULE_PATH="${ARROW_DIR}/cpp/cmake_modules" \
     -DCMAKE_PREFIX_PATH="${XSIMD_INSTALL_DIR};/usr/local" \
-    -DARROW_DEPENDENCY_SOURCE=SYSTEM \
-    -DARROW_ORC=ON \
-    -DORC_HOME=/usr/local \
-    -DARROW_WITH_PROTOBUF=ON \
-    -DARROW_WITH_THRIFT=ON \
     -DARROW_WITH_SNAPPY=ON \
     -DARROW_WITH_ZSTD=ON \
     -DARROW_WITH_LZ4=ON \
     -DARROW_WITH_ZLIB=ON \
+    -DARROW_PARQUET=ON \
     -DARROW_BUILD_TESTS=OFF \
     -DARROW_COMPUTE=ON \
     -DARROW_FILESYSTEM=ON \
-    -DARROW_JEMALLOC=ON \
-    -DARROW_PARQUET=ON \
-    -DPARQUET_REQUIRE_ENCRYPTION=OFF \
-    -DPARQUET_WITH_PROTOBUF=ON \
-    -DPARQUET_WITH_SNAPPY=ON \
-    -DPARQUET_WITH_ZSTD=ON \
-    -DPARQUET_WITH_LZ4=ON \
-    -DPARQUET_WITH_ZLIB=ON \
-    -DPARQUET_MINIMAL_DEPENDENCY=OFF \
-    -DARROW_CSV=ON \
-    -DZSTD_LIB=/usr/lib/x86_64-linux-gnu/libzstd.so \
-    -DZSTD_INCLUDE_DIR=/usr/include \
-    -DLZ4_LIB=/usr/lib/x86_64-linux-gnu/liblz4.so \
-    -DLZ4_INCLUDE_DIR=/usr/include
+    -DARROW_CSV=ON
 
 make -j$(nproc)
 sudo make install
