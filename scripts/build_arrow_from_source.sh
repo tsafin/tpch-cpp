@@ -71,7 +71,11 @@ cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DPARQUET_WITH_LZ4=ON \
     -DPARQUET_WITH_ZLIB=ON \
     -DPARQUET_MINIMAL_DEPENDENCY=OFF \
-    -DARROW_CSV=ON
+    -DARROW_CSV=ON \
+    -DZSTD_LIB=/usr/lib/x86_64-linux-gnu/libzstd.so \
+    -DZSTD_INCLUDE_DIR=/usr/include \
+    -DLZ4_LIB=/usr/lib/x86_64-linux-gnu/liblz4.so \
+    -DLZ4_INCLUDE_DIR=/usr/include
 
 make -j$(nproc)
 sudo make install
