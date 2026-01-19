@@ -1104,6 +1104,35 @@ int generate_all_tables_parallel_v2(const Options& opts) {
     std::cout << "Total time (including init): " << std::fixed << std::setprecision(3)
               << (duration + init_duration) << "s\n";
 
+    // Calculate total rows across all tables
+    long total_rows_all_tables = 0;
+    for (const auto& table_name : tables) {
+        // Skip failed tables
+        if (table_status.count(table_name) && table_status[table_name] != 0) {
+            continue;
+        }
+        // Get expected row count for this table
+        tpch::TableType table_type;
+        if (table_name == "lineitem") table_type = tpch::TableType::LINEITEM;
+        else if (table_name == "orders") table_type = tpch::TableType::ORDERS;
+        else if (table_name == "customer") table_type = tpch::TableType::CUSTOMER;
+        else if (table_name == "part") table_type = tpch::TableType::PART;
+        else if (table_name == "partsupp") table_type = tpch::TableType::PARTSUPP;
+        else if (table_name == "supplier") table_type = tpch::TableType::SUPPLIER;
+        else if (table_name == "nation") table_type = tpch::TableType::NATION;
+        else if (table_name == "region") table_type = tpch::TableType::REGION;
+        else continue;
+
+        total_rows_all_tables += tpch::get_row_count(table_type, opts.scale_factor);
+    }
+
+    // Output throughput for all successfully generated tables
+    if (total_rows_all_tables > 0 && duration > 0) {
+        double throughput = static_cast<double>(total_rows_all_tables) / duration;
+        std::cout << "Throughput: " << std::fixed << std::setprecision(0)
+                  << throughput << " rows/sec\n";
+    }
+
     if (failed > 0) {
         std::cout << "Failed tables: " << failed << "/" << tables.size() << "\n";
         return 1;
