@@ -239,14 +239,24 @@ void tpch::DBGenWrapper::generate_supplier(
 
 void tpch::DBGenWrapper::generate_nation(
     std::function<void(const void* row)> callback) {
-    // Forward to the generic implementation for Nation
-    generate_generic<NationTraits>(callback);
+    auto batch_iter = generate_nation_batches(1024, -1);
+    while (batch_iter.has_next()) {
+        auto batch = batch_iter.next();
+        for (size_t i = 0; i < batch.size(); ++i) {
+            callback(&batch.rows[i]);
+        }
+    }
 }
 
 void tpch::DBGenWrapper::generate_region(
     std::function<void(const void* row)> callback) {
-    // Forward to the generic implementation for Region
-    generate_generic<RegionTraits>(callback);
+    auto batch_iter = generate_region_batches(1024, -1);
+    while (batch_iter.has_next()) {
+        auto batch = batch_iter.next();
+        for (size_t i = 0; i < batch.size(); ++i) {
+            callback(&batch.rows[i]);
+        }
+    }
 }
 
 void tpch::DBGenWrapper::generate_all_tables(
