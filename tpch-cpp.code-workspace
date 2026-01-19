@@ -5,6 +5,14 @@
 		}
 	],
 	"settings": {
-		"java.compile.nullAnalysis.mode": "disabled"
+		"java.compile.nullAnalysis.mode": "disabled",
+		"chat.tools.terminal.autoApprove": {
+			"/home/tsafin/src/tpch-cpp/build/tpch_benchmark": true,
+			"md5sum": true,
+			"ctest": true,
+			"./build/tests/dbgen_batch_iterator_test": true,
+			"mkdir": true,
+			"./build/tpch_benchmark": true
+		}
 	}
 }

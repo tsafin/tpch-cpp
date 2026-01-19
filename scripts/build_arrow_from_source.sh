@@ -45,21 +45,28 @@ echo "Building and installing Apache Arrow..."
 mkdir -p "${ARROW_DIR}/cpp/build"
 cd "${ARROW_DIR}/cpp/build"
 
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+
 cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_INSTALL_PREFIX=/usr/local \
-    -DCMAKE_PREFIX_PATH="${XSIMD_INSTALL_DIR}" \
+    -DCMAKE_PREFIX_PATH="${XSIMD_INSTALL_DIR};/usr/local" \
     -DARROW_DEPENDENCY_SOURCE=SYSTEM \
-    -DARROW_ORC=OFF \
-    -DARROW_WITH_PROTOBUF=OFF \
+    -DARROW_ORC=ON \
+    -DORC_HOME=/usr/local \
+    -DARROW_WITH_PROTOBUF=ON \
+    -DARROW_WITH_THRIFT=ON \
     -DARROW_BUILD_TESTS=OFF \
     -DARROW_COMPUTE=ON \
     -DARROW_FILESYSTEM=ON \
     -DARROW_JEMALLOC=ON \
     -DARROW_PARQUET=ON \
+    -DPARQUET_REQUIRE_ENCRYPTION=OFF \
     -DPARQUET_BUILD_PROTOBUF=OFF \
-    -DPARQUET_WITH_PROTOBUF=OFF \
+    -DPARQUET_WITH_PROTOBUF=ON \
     -DPARQUET_MINIMAL_DEPENDENCY=ON \
-    -DARROW_CSV=ON
+    -DARROW_CSV=ON \
+    -DZSTD_LIB=/usr/lib/x86_64-linux-gnu/libzstd.so \
+    -DZSTD_INCLUDE_DIR=/usr/include
 
 make -j$(nproc)
 sudo make install

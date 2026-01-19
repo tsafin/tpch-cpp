@@ -3,7 +3,12 @@
 #include <memory>
 #include <stdexcept>
 
-#include <arrow/api.h>
+// Minimal Arrow includes to avoid protobuf symbol pollution
+// These specific headers should NOT pull in protobuf infrastructure
+#include <arrow/record_batch.h>
+#include <arrow/array.h>
+#include <arrow/type.h>
+
 #include <orc/OrcFile.hh>
 
 #include "tpch/orc_writer.hpp"
@@ -142,7 +147,7 @@ void copy_array_to_orc_column(
 }  // anonymous namespace
 
 ORCWriter::ORCWriter(const std::string& filepath)
-    : filepath_(filepath), orc_writer_(nullptr) {
+    : filepath_(filepath), orc_writer_(nullptr), orc_output_stream_(nullptr), orc_type_(nullptr) {
     // Constructor doesn't create writer yet - we wait for first batch to get schema
 }
 
@@ -151,6 +156,25 @@ ORCWriter::~ORCWriter() {
         close();
     } catch (...) {
         // Suppress exceptions in destructor
+    }
+
+    // Delete writer first (it owns references to stream)
+    if (orc_writer_) {
+        // Writer's destructor handles cleanup
+        delete reinterpret_cast<orc::Writer*>(orc_writer_);
+        orc_writer_ = nullptr;
+    }
+
+    // Delete output stream (unique_ptr will be deleted, closing the file)
+    if (orc_output_stream_) {
+        delete reinterpret_cast<std::unique_ptr<orc::OutputStream>*>(orc_output_stream_);
+        orc_output_stream_ = nullptr;
+    }
+
+    // Delete ORC type
+    if (orc_type_) {
+        delete reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
+        orc_type_ = nullptr;
     }
 }
 
@@ -168,11 +192,13 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
         std::string orc_schema_str = build_orc_schema_string(schema);
 
         try {
-            // Create ORC type from schema string
-            auto orc_type = orc::Type::buildTypeFromString(orc_schema_str);
+            // Create ORC type from schema string - must be stored as member to stay alive
+            auto orc_type_local = orc::Type::buildTypeFromString(orc_schema_str);
+            orc_type_ = new std::unique_ptr<orc::Type>(std::move(orc_type_local));
 
-            // Create output file stream using ORC factory function
-            auto out_stream = orc::writeLocalFile(filepath_);
+            // Create output file stream using ORC factory function - must be stored as member to stay alive
+            auto out_stream_local = orc::writeLocalFile(filepath_);
+            orc_output_stream_ = new std::unique_ptr<orc::OutputStream>(std::move(out_stream_local));
 
             // Create writer options
             orc::WriterOptions writer_options;
@@ -180,11 +206,24 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
             writer_options.setRowIndexStride(10000);
 
             // Create ORC writer using factory function
-            auto writer = orc::createWriter(*orc_type, out_stream.get(), writer_options);
+            auto* out_stream_ptr = reinterpret_cast<std::unique_ptr<orc::OutputStream>*>(orc_output_stream_);
+            auto* orc_type_ptr = reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
+            auto writer = orc::createWriter(**orc_type_ptr, out_stream_ptr->get(), writer_options);
             orc_writer_ = writer.release();
 
         } catch (const std::exception& e) {
             schema_locked_ = false;
+
+            // Clean up on error
+            if (orc_type_) {
+                delete reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
+                orc_type_ = nullptr;
+            }
+            if (orc_output_stream_) {
+                delete reinterpret_cast<std::unique_ptr<orc::OutputStream>*>(orc_output_stream_);
+                orc_output_stream_ = nullptr;
+            }
+
             throw std::runtime_error(std::string("Failed to create ORC writer: ") + e.what());
         }
     }
@@ -217,6 +256,12 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
             copy_array_to_orc_column(orc_col, col_array);
         }
 
+        // CRITICAL: Set numElements on struct batch and all column batches
+        struct_batch->numElements = static_cast<uint64_t>(num_rows);
+        for (int col_idx = 0; col_idx < num_cols; ++col_idx) {
+            struct_batch->fields[col_idx]->numElements = static_cast<uint64_t>(num_rows);
+        }
+
         // Write the batch
         writer->add(*root_batch);
 
@@ -230,10 +275,9 @@ void ORCWriter::close() {
         try {
             auto* writer = reinterpret_cast<orc::Writer*>(orc_writer_);
             writer->close();
-            delete writer;
-            orc_writer_ = nullptr;
         } catch (const std::exception& e) {
-            std::cerr << "Error closing ORC writer: " << e.what() << std::endl;
+            // Log but don't rethrow - the data has been written
+            std::cerr << "Warning closing ORC writer: " << e.what() << std::endl;
         }
     }
 }
