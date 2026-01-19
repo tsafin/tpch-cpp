@@ -175,22 +175,43 @@ void tpch::DBGenWrapper::generate_lineitem(
 void tpch::DBGenWrapper::generate_orders(
     std::function<void(const void* row)> callback,
     long max_rows) {
-    // Forward to the generic implementation for Orders
-    generate_generic<OrdersTraits>(callback, max_rows);
+    auto batch_iter = generate_orders_batches(10000, max_rows);
+    while (batch_iter.has_next()) {
+        auto batch = batch_iter.next();
+        for (size_t i = 0; i < batch.size(); ++i) {
+            if (callback) {
+                callback(&batch.rows[i]);
+            }
+        }
+    }
 }
 
 void tpch::DBGenWrapper::generate_customer(
     std::function<void(const void* row)> callback,
     long max_rows) {
-    // Forward to the generic implementation for Customer
-    generate_generic<CustomerTraits>(callback, max_rows);
+    auto batch_iter = generate_customer_batches(10000, max_rows);
+    while (batch_iter.has_next()) {
+        auto batch = batch_iter.next();
+        for (size_t i = 0; i < batch.size(); ++i) {
+            if (callback) {
+                callback(&batch.rows[i]);
+            }
+        }
+    }
 }
 
 void tpch::DBGenWrapper::generate_part(
     std::function<void(const void* row)> callback,
     long max_rows) {
-    // Forward to the generic implementation for Part
-    generate_generic<PartTraits>(callback, max_rows);
+    auto batch_iter = generate_part_batches(10000, max_rows);
+    while (batch_iter.has_next()) {
+        auto batch = batch_iter.next();
+        for (size_t i = 0; i < batch.size(); ++i) {
+            if (callback) {
+                callback(&batch.rows[i]);
+            }
+        }
+    }
 }
 
 void tpch::DBGenWrapper::generate_partsupp(
@@ -233,8 +254,15 @@ void tpch::DBGenWrapper::generate_partsupp(
 void tpch::DBGenWrapper::generate_supplier(
     std::function<void(const void* row)> callback,
     long max_rows) {
-    // Forward to the generic implementation for Supplier
-    generate_generic<SupplierTraits>(callback, max_rows);
+    auto batch_iter = generate_supplier_batches(10000, max_rows);
+    while (batch_iter.has_next()) {
+        auto batch = batch_iter.next();
+        for (size_t i = 0; i < batch.size(); ++i) {
+            if (callback) {
+                callback(&batch.rows[i]);
+            }
+        }
+    }
 }
 
 void tpch::DBGenWrapper::generate_nation(
