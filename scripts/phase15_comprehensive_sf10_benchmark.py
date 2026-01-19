@@ -52,6 +52,9 @@ TABLES_SF1 = [
 SCALE_FACTOR = 10
 TABLES_SF10 = [(name, count * SCALE_FACTOR) for name, count in TABLES_SF1]
 
+# File formats to benchmark
+FORMATS = ["orc", "parquet"]
+
 # Define all meaningful optimization combinations
 # Phase 16: Zero-copy modes are now STABLE - enable for comprehensive benchmarking
 # Phase 16 Update 2: Added async-IO variants for parallel modes (io_uring support)
@@ -149,6 +152,7 @@ class Phase15Benchmark:
     def run_benchmark(
         self,
         mode: Dict,
+        format_type: str = "parquet",
         table_name: Optional[str] = None,
         row_count: Optional[int] = None,
         run_number: int = 1
@@ -156,7 +160,7 @@ class Phase15Benchmark:
         """Run a single benchmark"""
 
         # Create output directory
-        output_path = self.output_dir / mode["name"] / f"run{run_number}"
+        output_path = self.output_dir / format_type / mode["name"] / f"run{run_number}"
         if table_name:
             output_path = output_path / table_name
         output_path.mkdir(parents=True, exist_ok=True)
@@ -167,7 +171,7 @@ class Phase15Benchmark:
             "--use-dbgen",
             "--scale-factor", str(SCALE_FACTOR),
             "--max-rows", "0",  # 0 = generate ALL rows for the scale factor
-            "--format", "parquet",
+            "--format", format_type,
             "--output-dir", str(output_path)
         ]
 
@@ -196,6 +200,7 @@ class Phase15Benchmark:
             return {
                 "table": table_name,
                 "rows": row_count,
+                "format": format_type,
                 "mode": mode["name"],
                 "run": run_number,
                 "elapsed": elapsed,
@@ -208,12 +213,12 @@ class Phase15Benchmark:
         except Exception as e:
             return None
 
-    def run_per_table_benchmarks(self, mode: Dict) -> List[Dict]:
+    def run_per_table_benchmarks(self, mode: Dict, format_type: str = "parquet") -> List[Dict]:
         """Run benchmarks for each table individually"""
         results = []
 
         print(f"\n{'='*120}")
-        print(f"Mode: {mode['description']}")
+        print(f"Format: {format_type.upper()} | Mode: {mode['description']}")
         print(f"{'='*120}")
         print(f"{'Table':<15} {'Rows':<12} {'Run':<4} {'Throughput':>15} {'Time':>10} {'Status':<10}")
         print("-" * 120)
@@ -222,7 +227,7 @@ class Phase15Benchmark:
             for run_num in range(1, self.runs + 1):
                 print(f"{table_name:<15} {row_count:<12} {run_num:<4} ", end="", flush=True)
 
-                result = self.run_benchmark(mode, table_name, row_count, run_num)
+                result = self.run_benchmark(mode, format_type, table_name, row_count, run_num)
 
                 if result:
                     print(f"{result['throughput']:>15,.0f} {result['elapsed']:>10.3f}s OK")
@@ -232,10 +237,10 @@ class Phase15Benchmark:
 
         return results
 
-    def run_parallel_benchmark(self, mode: Dict) -> Optional[Dict]:
+    def run_parallel_benchmark(self, mode: Dict, format_type: str = "parquet") -> Optional[Dict]:
         """Run parallel benchmark (all tables at once)"""
         print(f"\n{'='*120}")
-        print(f"Mode: {mode['description']} (Parallel - All Tables)")
+        print(f"Format: {format_type.upper()} | Mode: {mode['description']} (Parallel - All Tables)")
         print(f"{'='*120}")
         print(f"{'Run':<4} {'Total Rows':<15} {'Elapsed':>10} {'Throughput':>15} {'Status':<10}")
         print("-" * 120)
@@ -248,7 +253,7 @@ class Phase15Benchmark:
 
             # For parallel mode, we need to generate all tables
             # This is handled by the --parallel flag in the binary
-            result = self.run_benchmark(mode, run_number=run_num)
+            result = self.run_benchmark(mode, format_type, run_number=run_num)
 
             if result:
                 print(f"{result['elapsed']:>10.3f}s {result['throughput']:>15,.0f} OK")
@@ -273,180 +278,213 @@ class Phase15Benchmark:
     def run_all_benchmarks(self):
         """Run all benchmarks"""
         print("\n" + "="*120)
-        print("Phase 16: Full Optimization Matrix Benchmark at SF=10 (with Async-IO)")
+        print("Phase 16+: Full Optimization Matrix Benchmark at SF=10 (ORC + Parquet, with Async-IO)")
         print("="*120)
         print(f"Binary: {self.tpch_binary}")
         print(f"Output: {self.output_dir}")
         print(f"Date: {self.benchmark_date}")
         print(f"Scale Factor: 10")
+        print(f"Formats: {', '.join(FORMATS)}")
         print(f"Tables: {len(TABLES_SF10)} (lineitem, orders, customer, part, partsupp, supplier, nation, region)")
         print(f"Total Rows: {sum(count for _, count in TABLES_SF10):,}")
         print(f"Runs per benchmark: {self.runs}")
         print(f"Optimization modes: {len(OPTIMIZATION_MODES)} (3 sequential + 6 parallel variants with/without async-io)")
         print("="*120)
 
-        for mode in OPTIMIZATION_MODES:
-            if mode["per_table"]:
-                results = self.run_per_table_benchmarks(mode)
-                self.results[mode["name"]] = results
-            else:
-                result = self.run_parallel_benchmark(mode)
-                if result:
-                    self.results[mode["name"]] = result["results"]
+        for format_type in FORMATS:
+            print(f"\n{'='*120}")
+            print(f"Testing format: {format_type.upper()}")
+            print(f"{'='*120}")
+
+            for mode in OPTIMIZATION_MODES:
+                result_key = f"{format_type}_{mode['name']}"
+                if mode["per_table"]:
+                    results = self.run_per_table_benchmarks(mode, format_type)
+                    self.results[result_key] = results
+                else:
+                    result = self.run_parallel_benchmark(mode, format_type)
+                    if result:
+                        self.results[result_key] = result["results"]
 
     def generate_report(self):
         """Generate comprehensive performance report"""
         print("\n\n" + "="*120)
-        print("PHASE 16 PERFORMANCE REPORT - FULL OPTIMIZATION MATRIX")
+        print("PHASE 16+ PERFORMANCE REPORT - ORC vs PARQUET with FULL OPTIMIZATION MATRIX")
         print("="*120)
 
-        # Per-table analysis
+        # Per-table analysis by format
         print("\n" + "="*120)
         print("PER-TABLE PERFORMANCE ANALYSIS (SF=10)")
         print("="*120)
 
-        per_table_modes = [m for m in OPTIMIZATION_MODES if m["per_table"] and m["name"] in self.results]
+        for format_type in FORMATS:
+            print(f"\n\n{'='*120}")
+            print(f"FORMAT: {format_type.upper()}")
+            print(f"{'='*120}")
 
-        for table_name, row_count in TABLES_SF10:
-            print(f"\n{table_name.upper()} (SF=10: {row_count:,} rows)")
-            print("-" * 120)
-            print(f"{'Mode':<30} {'Run 1 (r/s)':<18} {'Run 2 (r/s)':<18} {'Avg (r/s)':<18} {'Std Dev':<12} {'Speedup':<10}")
-            print("-" * 120)
+            per_table_modes = [m for m in OPTIMIZATION_MODES if m["per_table"]]
 
-            baseline_avg = None
+            for table_name, row_count in TABLES_SF10:
+                print(f"\n{table_name.upper()} (SF=10: {row_count:,} rows)")
+                print("-" * 120)
+                print(f"{'Mode':<30} {'Run 1 (r/s)':<18} {'Run 2 (r/s)':<18} {'Avg (r/s)':<18} {'Std Dev':<12} {'Speedup':<10}")
+                print("-" * 120)
 
-            for mode in per_table_modes:
-                mode_results = [
-                    r for r in self.results.get(mode["name"], [])
-                    if r.get("table") == table_name
-                ]
+                baseline_avg = None
 
-                if not mode_results:
-                    continue
+                for mode in per_table_modes:
+                    result_key = f"{format_type}_{mode['name']}"
+                    mode_results = [
+                        r for r in self.results.get(result_key, [])
+                        if r.get("table") == table_name
+                    ]
 
-                throughputs = [r["throughput"] for r in mode_results]
+                    if not mode_results:
+                        continue
 
-                if len(throughputs) >= 2:
-                    avg_throughput = mean(throughputs)
-                    std_dev = stdev(throughputs)
-                    run1 = throughputs[0]
-                    run2 = throughputs[1]
-                else:
-                    avg_throughput = throughputs[0] if throughputs else 0
-                    std_dev = 0
-                    run1 = throughputs[0] if throughputs else 0
-                    run2 = 0
+                    throughputs = [r["throughput"] for r in mode_results]
 
-                if mode["name"] == "baseline":
-                    baseline_avg = avg_throughput
+                    if len(throughputs) >= 2:
+                        avg_throughput = mean(throughputs)
+                        std_dev = stdev(throughputs)
+                        run1 = throughputs[0]
+                        run2 = throughputs[1]
+                    else:
+                        avg_throughput = throughputs[0] if throughputs else 0
+                        std_dev = 0
+                        run1 = throughputs[0] if throughputs else 0
+                        run2 = 0
 
-                speedup = (avg_throughput / baseline_avg) if baseline_avg and baseline_avg > 0 else 0
+                    if mode["name"] == "baseline":
+                        baseline_avg = avg_throughput
 
-                speedup_str = f"{speedup:.2f}x" if speedup > 0 else "N/A"
+                    speedup = (avg_throughput / baseline_avg) if baseline_avg and baseline_avg > 0 else 0
 
-                print(f"{mode['name']:<30} {run1:>16,.0f} {run2:>16,.0f} {avg_throughput:>16,.0f} {std_dev:>10,.0f} {speedup_str:>9}")
+                    speedup_str = f"{speedup:.2f}x" if speedup > 0 else "N/A"
 
-        # Parallel analysis
-        parallel_modes = [m for m in OPTIMIZATION_MODES if m["parallel"] and m["name"] in self.results]
-        if parallel_modes:
-            print(f"\n\n" + "="*120)
-            print("PARALLEL MODE ANALYSIS (All 8 Tables Combined)")
-            print("="*120)
-            total_rows = sum(count for _, count in TABLES_SF10)
-            print(f"Total SF=10 rows: {total_rows:,}")
-            print(f"\n{'Mode':<35} {'Run 1 (s)':<15} {'Run 2 (s)':<15} {'Avg (s)':<15} {'Std Dev':<12} {'Speedup':<10} {'Rows/sec':<15}")
-            print("-" * 130)
+                    print(f"{mode['name']:<30} {run1:>16,.0f} {run2:>16,.0f} {avg_throughput:>16,.0f} {std_dev:>10,.0f} {speedup_str:>9}")
 
-            baseline_par_avg = None
-            baseline_throughput = None
+        # Parallel analysis by format
+        for format_type in FORMATS:
+            parallel_modes = [m for m in OPTIMIZATION_MODES if m["parallel"]]
+            parallel_result_keys = [f"{format_type}_{m['name']}" for m in parallel_modes]
+            has_parallel = any(k in self.results for k in parallel_result_keys)
 
-            for mode in parallel_modes:
-                results = self.results.get(mode["name"], [])
+            if has_parallel:
+                print(f"\n\n" + "="*120)
+                print(f"PARALLEL MODE ANALYSIS - {format_type.upper()} (All 8 Tables Combined)")
+                print("="*120)
+                total_rows = sum(count for _, count in TABLES_SF10)
+                print(f"Total SF=10 rows: {total_rows:,}")
+                print(f"\n{'Mode':<35} {'Run 1 (s)':<15} {'Run 2 (s)':<15} {'Avg (s)':<15} {'Std Dev':<12} {'Speedup':<10} {'Rows/sec':<15}")
+                print("-" * 130)
 
-                if not results:
-                    continue
+                baseline_par_avg = None
+                baseline_throughput = None
 
-                elapsed_times = [r["elapsed"] for r in results]
-                throughputs = [r.get("throughput", 0) for r in results]
+                for mode in parallel_modes:
+                    result_key = f"{format_type}_{mode['name']}"
+                    results = self.results.get(result_key, [])
 
-                if len(elapsed_times) >= 2:
-                    avg_elapsed = mean(elapsed_times)
-                    std_dev = stdev(elapsed_times)
-                    run1 = elapsed_times[0]
-                    run2 = elapsed_times[1]
-                    avg_throughput = mean(throughputs) if throughputs else 0
-                else:
-                    avg_elapsed = elapsed_times[0] if elapsed_times else 0
-                    std_dev = 0
-                    run1 = elapsed_times[0] if elapsed_times else 0
-                    run2 = 0
-                    avg_throughput = throughputs[0] if throughputs else 0
+                    if not results:
+                        continue
 
-                if mode["name"] == "parallel_baseline":
-                    baseline_par_avg = avg_elapsed
-                    baseline_throughput = avg_throughput
+                    elapsed_times = [r["elapsed"] for r in results]
+                    throughputs = [r.get("throughput", 0) for r in results]
 
-                speedup = (baseline_par_avg / avg_elapsed) if baseline_par_avg and avg_elapsed > 0 else 0
-                speedup_str = f"{speedup:.2f}x" if speedup > 0 else "N/A"
+                    if len(elapsed_times) >= 2:
+                        avg_elapsed = mean(elapsed_times)
+                        std_dev = stdev(elapsed_times)
+                        run1 = elapsed_times[0]
+                        run2 = elapsed_times[1]
+                        avg_throughput = mean(throughputs) if throughputs else 0
+                    else:
+                        avg_elapsed = elapsed_times[0] if elapsed_times else 0
+                        std_dev = 0
+                        run1 = elapsed_times[0] if elapsed_times else 0
+                        run2 = 0
+                        avg_throughput = throughputs[0] if throughputs else 0
 
-                print(f"{mode['name']:<35} {run1:>13.3f}s {run2:>13.3f}s {avg_elapsed:>13.3f}s {std_dev:>10.3f}s {speedup_str:>9} {avg_throughput:>13,.0f}")
+                    if mode["name"] == "parallel_baseline":
+                        baseline_par_avg = avg_elapsed
+                        baseline_throughput = avg_throughput
+
+                    speedup = (baseline_par_avg / avg_elapsed) if baseline_par_avg and avg_elapsed > 0 else 0
+                    speedup_str = f"{speedup:.2f}x" if speedup > 0 else "N/A"
+
+                    print(f"{mode['name']:<35} {run1:>13.3f}s {run2:>13.3f}s {avg_elapsed:>13.3f}s {std_dev:>10.3f}s {speedup_str:>9} {avg_throughput:>13,.0f}")
 
         # Summary statistics
         print(f"\n\n" + "="*120)
         print("OPTIMIZATION SUMMARY")
         print("="*120)
 
-        # Async-IO specific analysis
-        async_modes = [m for m in OPTIMIZATION_MODES if "async" in m["name"] and m["name"] in self.results]
-        if async_modes and parallel_modes:
-            print("\nAsync-IO Impact Analysis (Parallel Mode):")
-            print("-" * 120)
+        # Async-IO specific analysis per format
+        for format_type in FORMATS:
+            async_modes = [m for m in OPTIMIZATION_MODES if "async" in m["name"]]
+            parallel_modes = [m for m in OPTIMIZATION_MODES if m["parallel"]]
 
-            # Compare async-io variants with their non-async counterparts
-            async_comparisons = [
-                ("parallel_baseline", "parallel_baseline_async", "Parallel Baseline"),
-                ("parallel_zero_copy", "parallel_zero_copy_async", "Parallel Zero-Copy"),
-                ("parallel_true_zero_copy", "parallel_true_zero_copy_async", "Parallel True Zero-Copy"),
-            ]
+            async_result_keys = [f"{format_type}_{m['name']}" for m in async_modes]
+            parallel_result_keys = [f"{format_type}_{m['name']}" for m in parallel_modes]
+            has_async = any(k in self.results for k in async_result_keys)
+            has_parallel = any(k in self.results for k in parallel_result_keys)
 
-            for baseline_name, async_name, description in async_comparisons:
-                baseline_results = self.results.get(baseline_name, [])
-                async_results = self.results.get(async_name, [])
+            if has_async and has_parallel:
+                print(f"\nAsync-IO Impact Analysis - {format_type.upper()} (Parallel Mode):")
+                print("-" * 120)
 
-                if baseline_results and async_results:
-                    baseline_avg = mean([r["elapsed"] for r in baseline_results])
-                    async_avg = mean([r["elapsed"] for r in async_results])
-                    improvement = ((baseline_avg - async_avg) / baseline_avg) * 100 if baseline_avg > 0 else 0
-                    speedup = baseline_avg / async_avg if async_avg > 0 else 0
+                # Compare async-io variants with their non-async counterparts
+                async_comparisons = [
+                    ("parallel_baseline", "parallel_baseline_async", "Parallel Baseline"),
+                    ("parallel_zero_copy", "parallel_zero_copy_async", "Parallel Zero-Copy"),
+                    ("parallel_true_zero_copy", "parallel_true_zero_copy_async", "Parallel True Zero-Copy"),
+                ]
 
-                    status = "✓ IMPROVEMENT" if improvement > 0 else "✗ REGRESSION"
-                    print(f"  {description:<40} {status:<20} {improvement:>7.2f}% faster with async-io ({speedup:.2f}x speedup)")
+                for baseline_name, async_name, description in async_comparisons:
+                    baseline_key = f"{format_type}_{baseline_name}"
+                    async_key = f"{format_type}_{async_name}"
+                    baseline_results = self.results.get(baseline_key, [])
+                    async_results = self.results.get(async_key, [])
 
-        print("\nPer-Table Optimization Impact:")
-        for mode in per_table_modes:
-            if mode["name"] != "baseline":
-                mode_results = self.results.get(mode["name"], [])
-                if mode_results:
-                    # Calculate average speedup across all tables
-                    speedups = []
-                    for table_name, row_count in TABLES_SF10:
-                        table_results = [r for r in mode_results if r.get("table") == table_name]
-                        if table_results:
-                            baseline_results = [
-                                r for r in self.results.get("baseline", [])
-                                if r.get("table") == table_name
-                            ]
-                            if baseline_results:
-                                baseline_avg = mean([r["throughput"] for r in baseline_results])
-                                mode_avg = mean([r["throughput"] for r in table_results])
-                                speedup = mode_avg / baseline_avg if baseline_avg > 0 else 0
-                                speedups.append(speedup)
+                    if baseline_results and async_results:
+                        baseline_avg = mean([r["elapsed"] for r in baseline_results])
+                        async_avg = mean([r["elapsed"] for r in async_results])
+                        improvement = ((baseline_avg - async_avg) / baseline_avg) * 100 if baseline_avg > 0 else 0
+                        speedup = baseline_avg / async_avg if async_avg > 0 else 0
 
-                    if speedups:
-                        avg_speedup = mean(speedups)
-                        min_speedup = min(speedups)
-                        max_speedup = max(speedups)
-                        print(f"  {mode['name']:<30} Avg: {avg_speedup:6.2f}x  (range: {min_speedup:.2f}x - {max_speedup:.2f}x)")
+                        status = "✓ IMPROVEMENT" if improvement > 0 else "✗ REGRESSION"
+                        print(f"  {description:<40} {status:<20} {improvement:>7.2f}% faster with async-io ({speedup:.2f}x speedup)")
+
+        # Per-table optimization impact by format
+        for format_type in FORMATS:
+            print(f"\nPer-Table Optimization Impact - {format_type.upper()}:")
+            per_table_modes = [m for m in OPTIMIZATION_MODES if m["per_table"]]
+            for mode in per_table_modes:
+                if mode["name"] != "baseline":
+                    result_key = f"{format_type}_{mode['name']}"
+                    mode_results = self.results.get(result_key, [])
+                    if mode_results:
+                        # Calculate average speedup across all tables
+                        speedups = []
+                        for table_name, row_count in TABLES_SF10:
+                            table_results = [r for r in mode_results if r.get("table") == table_name]
+                            if table_results:
+                                baseline_key = f"{format_type}_baseline"
+                                baseline_results = [
+                                    r for r in self.results.get(baseline_key, [])
+                                    if r.get("table") == table_name
+                                ]
+                                if baseline_results:
+                                    baseline_avg = mean([r["throughput"] for r in baseline_results])
+                                    mode_avg = mean([r["throughput"] for r in table_results])
+                                    speedup = mode_avg / baseline_avg if baseline_avg > 0 else 0
+                                    speedups.append(speedup)
+
+                        if speedups:
+                            avg_speedup = mean(speedups)
+                            min_speedup = min(speedups)
+                            max_speedup = max(speedups)
+                            print(f"  {mode['name']:<30} Avg: {avg_speedup:6.2f}x  (range: {min_speedup:.2f}x - {max_speedup:.2f}x)")
 
     def save_results(self):
         """Save results to JSON"""
