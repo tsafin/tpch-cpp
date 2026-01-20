@@ -1,0 +1,1595 @@
+{
+  "date": "2026-01-20T18:17:12.116910",
+  "binary": "build/tpch_benchmark",
+  "scale_factor": 10,
+  "tables": 8,
+  "total_rows": 158600300,
+  "runs_per_benchmark": 2,
+  "optimization_modes": 6,
+  "results": {
+    "orc_baseline": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 83.51859951019287,
+        "throughput": 719024.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run1/lineitem/lineitem.orc\nRows written: 59986052\nFile size: 1261015668 bytes\nTime elapsed: 83.427 seconds\nThroughput: 719024 rows/sec\nWrite rate: 14.41 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 84.03129005432129,
+        "throughput": 713958.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run2/lineitem/lineitem.orc\nRows written: 59986052\nFile size: 1260758158 bytes\nTime elapsed: 84.019 seconds\nThroughput: 713958 rows/sec\nWrite rate: 14.31 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 25.813312292099,
+        "throughput": 581373.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run1/orders/orders.orc\nRows written: 15000000\nFile size: 206358826 bytes\nTime elapsed: 25.801 seconds\nThroughput: 581373 rows/sec\nWrite rate: 7.63 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 25.721022605895996,
+        "throughput": 583476.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run2/orders/orders.orc\nRows written: 15000000\nFile size: 206602014 bytes\nTime elapsed: 25.708 seconds\nThroughput: 583476 rows/sec\nWrite rate: 7.66 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 1.7255268096923828,
+        "throughput": 874126.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run1/customer/customer.orc\nRows written: 1500000\nFile size: 20505676 bytes\nTime elapsed: 1.716 seconds\nThroughput: 874126 rows/sec\nWrite rate: 11.40 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 1.6941652297973633,
+        "throughput": 890208.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run2/customer/customer.orc\nRows written: 1500000\nFile size: 20459449 bytes\nTime elapsed: 1.685 seconds\nThroughput: 890208 rows/sec\nWrite rate: 11.58 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 5.198555946350098,
+        "throughput": 385431.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run1/part/part.orc\nRows written: 2000000\nFile size: 18396586 bytes\nTime elapsed: 5.189 seconds\nThroughput: 385431 rows/sec\nWrite rate: 3.38 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 5.199665069580078,
+        "throughput": 385356.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run2/part/part.orc\nRows written: 2000000\nFile size: 18387922 bytes\nTime elapsed: 5.190 seconds\nThroughput: 385356 rows/sec\nWrite rate: 3.38 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 6.757533550262451,
+        "throughput": 1185712.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run1/partsupp/partsupp.orc\nRows written: 8000000\nFile size: 112688086 bytes\nTime elapsed: 6.747 seconds\nThroughput: 1185712 rows/sec\nWrite rate: 15.93 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 6.756705045700073,
+        "throughput": 1186064.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run2/partsupp/partsupp.orc\nRows written: 8000000\nFile size: 112659173 bytes\nTime elapsed: 6.745 seconds\nThroughput: 1186064 rows/sec\nWrite rate: 15.93 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.11577796936035156,
+        "throughput": 925926.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run1/supplier/supplier.orc\nRows written: 100000\nFile size: 1224522 bytes\nTime elapsed: 0.108 seconds\nThroughput: 925926 rows/sec\nWrite rate: 10.81 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.12278246879577637,
+        "throughput": 877193.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run2/supplier/supplier.orc\nRows written: 100000\nFile size: 1223360 bytes\nTime elapsed: 0.114 seconds\nThroughput: 877193 rows/sec\nWrite rate: 10.23 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.008823156356811523,
+        "throughput": 25000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run1/nation/nation.orc\nRows written: 25\nFile size: 1611 bytes\nTime elapsed: 0.001 seconds\nThroughput: 25000 rows/sec\nWrite rate: 1.54 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.008409976959228516,
+        "throughput": 25000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run2/nation/nation.orc\nRows written: 25\nFile size: 1591 bytes\nTime elapsed: 0.001 seconds\nThroughput: 25000 rows/sec\nWrite rate: 1.52 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.008284807205200195,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run1/region/region.orc\nRows written: 5\nFile size: 760 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 0.72 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "orc",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.00867772102355957,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/baseline/run2/region/region.orc\nRows written: 5\nFile size: 841 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 0.80 MB/sec\n"
+      }
+    ],
+    "orc_zero_copy": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 58.19321060180664,
+        "throughput": 1031042.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run1/lineitem/lineitem.orc\nRows written: 59986052\nFile size: 1260253543 bytes\nTime elapsed: 58.180 seconds\nThroughput: 1031042 rows/sec\nWrite rate: 20.66 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 58.25956845283508,
+        "throughput": 1029857.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run2/lineitem/lineitem.orc\nRows written: 59986052\nFile size: 1259988707 bytes\nTime elapsed: 58.247 seconds\nThroughput: 1029857 rows/sec\nWrite rate: 20.63 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 23.59767174720764,
+        "throughput": 635997.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run1/orders/orders.orc\nRows written: 15000000\nFile size: 206876737 bytes\nTime elapsed: 23.585 seconds\nThroughput: 635997 rows/sec\nWrite rate: 8.37 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 22.539966583251953,
+        "throughput": 665838.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run2/orders/orders.orc\nRows written: 15000000\nFile size: 206977136 bytes\nTime elapsed: 22.528 seconds\nThroughput: 665838 rows/sec\nWrite rate: 8.76 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 1.4426419734954834,
+        "throughput": 1046025.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run1/customer/customer.orc\nRows written: 1500000\nFile size: 20607487 bytes\nTime elapsed: 1.434 seconds\nThroughput: 1046025 rows/sec\nWrite rate: 13.70 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 1.3805348873138428,
+        "throughput": 1094092.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run2/customer/customer.orc\nRows written: 1500000\nFile size: 20693043 bytes\nTime elapsed: 1.371 seconds\nThroughput: 1094092 rows/sec\nWrite rate: 14.39 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 4.655725717544556,
+        "throughput": 430756.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run1/part/part.orc\nRows written: 2000000\nFile size: 18461566 bytes\nTime elapsed: 4.643 seconds\nThroughput: 430756 rows/sec\nWrite rate: 3.79 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 4.707998514175415,
+        "throughput": 425622.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run2/part/part.orc\nRows written: 2000000\nFile size: 18444186 bytes\nTime elapsed: 4.699 seconds\nThroughput: 425622 rows/sec\nWrite rate: 3.74 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 5.664809226989746,
+        "throughput": 1415178.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run1/partsupp/partsupp.orc\nRows written: 8000000\nFile size: 112918337 bytes\nTime elapsed: 5.653 seconds\nThroughput: 1415178 rows/sec\nWrite rate: 19.05 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 5.6892335414886475,
+        "throughput": 1408947.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run2/partsupp/partsupp.orc\nRows written: 8000000\nFile size: 112745120 bytes\nTime elapsed: 5.678 seconds\nThroughput: 1408947 rows/sec\nWrite rate: 18.94 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.09652924537658691,
+        "throughput": 1123596.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run1/supplier/supplier.orc\nRows written: 100000\nFile size: 1240744 bytes\nTime elapsed: 0.089 seconds\nThroughput: 1123596 rows/sec\nWrite rate: 13.30 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.09794497489929199,
+        "throughput": 1111111.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run2/supplier/supplier.orc\nRows written: 100000\nFile size: 1241910 bytes\nTime elapsed: 0.090 seconds\nThroughput: 1111111 rows/sec\nWrite rate: 13.16 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.008269071578979492,
+        "throughput": 25000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run1/nation/nation.orc\nRows written: 25\nFile size: 1476 bytes\nTime elapsed: 0.001 seconds\nThroughput: 25000 rows/sec\nWrite rate: 1.41 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.008679866790771484,
+        "throughput": 25000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run2/nation/nation.orc\nRows written: 25\nFile size: 1622 bytes\nTime elapsed: 0.001 seconds\nThroughput: 25000 rows/sec\nWrite rate: 1.55 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.009190559387207031,
+        "throughput": 2500.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run1/region/region.orc\nRows written: 5\nFile size: 760 bytes\nTime elapsed: 0.002 seconds\nThroughput: 2500 rows/sec\nWrite rate: 0.36 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "orc",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.008631706237792969,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/zero_copy/run2/region/region.orc\nRows written: 5\nFile size: 760 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 0.72 MB/sec\n"
+      }
+    ],
+    "orc_true_zero_copy": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 56.30608510971069,
+        "throughput": 1065623.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run1/lineitem/lineitem.orc\nRows written: 59986052\nFile size: 1260166092 bytes\nTime elapsed: 56.292 seconds\nThroughput: 1065623 rows/sec\nWrite rate: 21.35 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 56.989015340805054,
+        "throughput": 1052830.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run2/lineitem/lineitem.orc\nRows written: 59986052\nFile size: 1260026451 bytes\nTime elapsed: 56.976 seconds\nThroughput: 1052830 rows/sec\nWrite rate: 21.09 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 24.400220155715942,
+        "throughput": 615057.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run1/orders/orders.orc\nRows written: 15000000\nFile size: 206830628 bytes\nTime elapsed: 24.388 seconds\nThroughput: 615057 rows/sec\nWrite rate: 8.09 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 24.312047719955444,
+        "throughput": 617309.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run2/orders/orders.orc\nRows written: 15000000\nFile size: 206968214 bytes\nTime elapsed: 24.299 seconds\nThroughput: 617309 rows/sec\nWrite rate: 8.12 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 1.5040295124053955,
+        "throughput": 1004016.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run1/customer/customer.orc\nRows written: 1500000\nFile size: 20645137 bytes\nTime elapsed: 1.494 seconds\nThroughput: 1004016 rows/sec\nWrite rate: 13.18 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 1.4690074920654297,
+        "throughput": 1028101.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run2/customer/customer.orc\nRows written: 1500000\nFile size: 20648543 bytes\nTime elapsed: 1.459 seconds\nThroughput: 1028101 rows/sec\nWrite rate: 13.50 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 4.975834846496582,
+        "throughput": 402739.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run1/part/part.orc\nRows written: 2000000\nFile size: 18424001 bytes\nTime elapsed: 4.966 seconds\nThroughput: 402739 rows/sec\nWrite rate: 3.54 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 4.89143967628479,
+        "throughput": 409668.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run2/part/part.orc\nRows written: 2000000\nFile size: 18458640 bytes\nTime elapsed: 4.882 seconds\nThroughput: 409668 rows/sec\nWrite rate: 3.61 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 6.2159507274627686,
+        "throughput": 1289491.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run1/partsupp/partsupp.orc\nRows written: 8000000\nFile size: 112826925 bytes\nTime elapsed: 6.204 seconds\nThroughput: 1289491 rows/sec\nWrite rate: 17.34 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 6.128731727600098,
+        "throughput": 1307831.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run2/partsupp/partsupp.orc\nRows written: 8000000\nFile size: 112859024 bytes\nTime elapsed: 6.117 seconds\nThroughput: 1307831 rows/sec\nWrite rate: 17.60 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.11045002937316895,
+        "throughput": 980392.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run1/supplier/supplier.orc\nRows written: 100000\nFile size: 1247991 bytes\nTime elapsed: 0.102 seconds\nThroughput: 980392 rows/sec\nWrite rate: 11.67 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.10202813148498535,
+        "throughput": 1075269.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run2/supplier/supplier.orc\nRows written: 100000\nFile size: 1238133 bytes\nTime elapsed: 0.093 seconds\nThroughput: 1075269 rows/sec\nWrite rate: 12.70 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.008099079132080078,
+        "throughput": 25000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run1/nation/nation.orc\nRows written: 25\nFile size: 1679 bytes\nTime elapsed: 0.001 seconds\nThroughput: 25000 rows/sec\nWrite rate: 1.60 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.008534908294677734,
+        "throughput": 25000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run2/nation/nation.orc\nRows written: 25\nFile size: 1476 bytes\nTime elapsed: 0.001 seconds\nThroughput: 25000 rows/sec\nWrite rate: 1.41 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.008257150650024414,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run1/region/region.orc\nRows written: 5\nFile size: 841 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 0.80 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "orc",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.008627653121948242,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: orc\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/orc/true_zero_copy/run2/region/region.orc\nRows written: 5\nFile size: 760 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 0.72 MB/sec\n"
+      }
+    ],
+    "orc_parallel_baseline": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 86.91325616836548,
+        "throughput": 996472.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 85.48195815086365,
+        "throughput": 1013163.0
+      }
+    ],
+    "orc_parallel_zero_copy": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 85.99543642997742,
+        "throughput": 1007113.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 85.70435833930969,
+        "throughput": 1010532.0
+      }
+    ],
+    "orc_parallel_true_zero_copy": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 86.18651986122131,
+        "throughput": 1007718.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 87.58188724517822,
+        "throughput": 988874.0
+      }
+    ],
+    "parquet_baseline": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 97.41278076171875,
+        "throughput": 618872.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run1/lineitem/lineitem.parquet\nRows written: 59986052\nFile size: 3233079110 bytes\nTime elapsed: 96.928 seconds\nThroughput: 618872 rows/sec\nWrite rate: 31.81 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 105.39948558807373,
+        "throughput": 584768.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run2/lineitem/lineitem.parquet\nRows written: 59986052\nFile size: 3233079110 bytes\nTime elapsed: 102.581 seconds\nThroughput: 584768 rows/sec\nWrite rate: 30.06 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 31.464643478393555,
+        "throughput": 508733.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run1/orders/orders.parquet\nRows written: 15000000\nFile size: 1082406933 bytes\nTime elapsed: 29.485 seconds\nThroughput: 508733 rows/sec\nWrite rate: 35.01 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 26.16507601737976,
+        "throughput": 575816.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run2/orders/orders.parquet\nRows written: 15000000\nFile size: 1082406933 bytes\nTime elapsed: 26.050 seconds\nThroughput: 575816 rows/sec\nWrite rate: 39.63 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 1.7682242393493652,
+        "throughput": 865052.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run1/customer/customer.parquet\nRows written: 1500000\nFile size: 200532423 bytes\nTime elapsed: 1.734 seconds\nThroughput: 865052 rows/sec\nWrite rate: 110.29 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 1.7437031269073486,
+        "throughput": 875657.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run2/customer/customer.parquet\nRows written: 1500000\nFile size: 200532423 bytes\nTime elapsed: 1.713 seconds\nThroughput: 875657 rows/sec\nWrite rate: 111.64 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 8.947524070739746,
+        "throughput": 224417.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run1/part/part.parquet\nRows written: 2000000\nFile size: 79406067 bytes\nTime elapsed: 8.912 seconds\nThroughput: 224417 rows/sec\nWrite rate: 8.50 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 5.201918601989746,
+        "throughput": 386997.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run2/part/part.parquet\nRows written: 2000000\nFile size: 79406067 bytes\nTime elapsed: 5.168 seconds\nThroughput: 386997 rows/sec\nWrite rate: 14.65 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 7.905264377593994,
+        "throughput": 1020538.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run1/partsupp/partsupp.parquet\nRows written: 8000000\nFile size: 909894892 bytes\nTime elapsed: 7.839 seconds\nThroughput: 1020538 rows/sec\nWrite rate: 110.70 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 8.016092777252197,
+        "throughput": 1006036.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run2/partsupp/partsupp.parquet\nRows written: 8000000\nFile size: 909894892 bytes\nTime elapsed: 7.952 seconds\nThroughput: 1006036 rows/sec\nWrite rate: 109.12 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.31534337997436523,
+        "throughput": 333333.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run1/supplier/supplier.parquet\nRows written: 100000\nFile size: 12897517 bytes\nTime elapsed: 0.300 seconds\nThroughput: 333333 rows/sec\nWrite rate: 41.00 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.13973236083984375,
+        "throughput": 787402.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run2/supplier/supplier.parquet\nRows written: 100000\nFile size: 12897517 bytes\nTime elapsed: 0.127 seconds\nThroughput: 787402 rows/sec\nWrite rate: 96.85 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.009514331817626953,
+        "throughput": 12500.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run1/nation/nation.parquet\nRows written: 25\nFile size: 3696 bytes\nTime elapsed: 0.002 seconds\nThroughput: 12500 rows/sec\nWrite rate: 1.76 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.008773565292358398,
+        "throughput": 12500.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run2/nation/nation.parquet\nRows written: 25\nFile size: 3696 bytes\nTime elapsed: 0.002 seconds\nThroughput: 12500 rows/sec\nWrite rate: 1.76 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.008155107498168945,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run1/region/region.parquet\nRows written: 5\nFile size: 1188 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 1.13 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "parquet",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.009104013442993164,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/baseline/run2/region/region.parquet\nRows written: 5\nFile size: 1188 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 1.13 MB/sec\n"
+      }
+    ],
+    "parquet_zero_copy": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 52.26260948181152,
+        "throughput": 1156536.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run1/lineitem/lineitem.parquet\nRows written: 59986052\nFile size: 3233079110 bytes\nTime elapsed: 51.867 seconds\nThroughput: 1156536 rows/sec\nWrite rate: 59.45 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 53.75559878349304,
+        "throughput": 1124008.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run2/lineitem/lineitem.parquet\nRows written: 59986052\nFile size: 3233079110 bytes\nTime elapsed: 53.368 seconds\nThroughput: 1124008 rows/sec\nWrite rate: 57.77 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 24.150003671646118,
+        "throughput": 623597.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run1/orders/orders.parquet\nRows written: 15000000\nFile size: 1082406933 bytes\nTime elapsed: 24.054 seconds\nThroughput: 623597 rows/sec\nWrite rate: 42.91 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 22.199479341506958,
+        "throughput": 678487.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run2/orders/orders.parquet\nRows written: 15000000\nFile size: 1082406933 bytes\nTime elapsed: 22.108 seconds\nThroughput: 678487 rows/sec\nWrite rate: 46.69 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 1.4658567905426025,
+        "throughput": 1044568.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run1/customer/customer.parquet\nRows written: 1500000\nFile size: 200532423 bytes\nTime elapsed: 1.436 seconds\nThroughput: 1044568 rows/sec\nWrite rate: 133.18 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 1.426243543624878,
+        "throughput": 1072961.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run2/customer/customer.parquet\nRows written: 1500000\nFile size: 200532423 bytes\nTime elapsed: 1.398 seconds\nThroughput: 1072961 rows/sec\nWrite rate: 136.80 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 4.334977388381958,
+        "throughput": 464360.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run1/part/part.parquet\nRows written: 2000000\nFile size: 79406067 bytes\nTime elapsed: 4.307 seconds\nThroughput: 464360 rows/sec\nWrite rate: 17.58 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 4.393263578414917,
+        "throughput": 458190.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run2/part/part.parquet\nRows written: 2000000\nFile size: 79406067 bytes\nTime elapsed: 4.365 seconds\nThroughput: 458190 rows/sec\nWrite rate: 17.35 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 6.983466863632202,
+        "throughput": 1154568.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run1/partsupp/partsupp.parquet\nRows written: 8000000\nFile size: 909894892 bytes\nTime elapsed: 6.929 seconds\nThroughput: 1154568 rows/sec\nWrite rate: 125.23 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 6.3291521072387695,
+        "throughput": 1274494.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run2/partsupp/partsupp.parquet\nRows written: 8000000\nFile size: 909894892 bytes\nTime elapsed: 6.277 seconds\nThroughput: 1274494 rows/sec\nWrite rate: 138.24 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.12031698226928711,
+        "throughput": 925926.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run1/supplier/supplier.parquet\nRows written: 100000\nFile size: 12897517 bytes\nTime elapsed: 0.108 seconds\nThroughput: 925926 rows/sec\nWrite rate: 113.89 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.11932587623596191,
+        "throughput": 943396.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run2/supplier/supplier.parquet\nRows written: 100000\nFile size: 12897517 bytes\nTime elapsed: 0.106 seconds\nThroughput: 943396 rows/sec\nWrite rate: 116.04 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.009264469146728516,
+        "throughput": 12500.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run1/nation/nation.parquet\nRows written: 25\nFile size: 3696 bytes\nTime elapsed: 0.002 seconds\nThroughput: 12500 rows/sec\nWrite rate: 1.76 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.008858442306518555,
+        "throughput": 25000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run2/nation/nation.parquet\nRows written: 25\nFile size: 3696 bytes\nTime elapsed: 0.001 seconds\nThroughput: 25000 rows/sec\nWrite rate: 3.52 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.008244991302490234,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run1/region/region.parquet\nRows written: 5\nFile size: 1188 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 1.13 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "parquet",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.011400699615478516,
+        "throughput": 2500.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/zero_copy/run2/region/region.parquet\nRows written: 5\nFile size: 1188 bytes\nTime elapsed: 0.002 seconds\nThroughput: 2500 rows/sec\nWrite rate: 0.57 MB/sec\n"
+      }
+    ],
+    "parquet_true_zero_copy": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 36.49116802215576,
+        "throughput": 1645166.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run1/lineitem/lineitem.parquet\nRows written: 59986052\nFile size: 3233079110 bytes\nTime elapsed: 36.462 seconds\nThroughput: 1645166 rows/sec\nWrite rate: 84.56 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 37.467233419418335,
+        "throughput": 1602063.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run2/lineitem/lineitem.parquet\nRows written: 59986052\nFile size: 3233079110 bytes\nTime elapsed: 37.443 seconds\nThroughput: 1602063 rows/sec\nWrite rate: 82.35 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 22.215368270874023,
+        "throughput": 675828.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run1/orders/orders.parquet\nRows written: 15000000\nFile size: 1082406933 bytes\nTime elapsed: 22.195 seconds\nThroughput: 675828 rows/sec\nWrite rate: 46.51 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 22.839529275894165,
+        "throughput": 657289.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run2/orders/orders.parquet\nRows written: 15000000\nFile size: 1082406933 bytes\nTime elapsed: 22.821 seconds\nThroughput: 657289 rows/sec\nWrite rate: 45.23 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 1.4056310653686523,
+        "throughput": 1079137.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run1/customer/customer.parquet\nRows written: 1500000\nFile size: 200532423 bytes\nTime elapsed: 1.390 seconds\nThroughput: 1079137 rows/sec\nWrite rate: 137.58 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 1.428962230682373,
+        "throughput": 1061571.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run2/customer/customer.parquet\nRows written: 1500000\nFile size: 200532423 bytes\nTime elapsed: 1.413 seconds\nThroughput: 1061571 rows/sec\nWrite rate: 135.35 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 4.400290012359619,
+        "throughput": 456204.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run1/part/part.parquet\nRows written: 2000000\nFile size: 79406067 bytes\nTime elapsed: 4.384 seconds\nThroughput: 456204 rows/sec\nWrite rate: 17.27 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 4.413923263549805,
+        "throughput": 454649.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run2/part/part.parquet\nRows written: 2000000\nFile size: 79406067 bytes\nTime elapsed: 4.399 seconds\nThroughput: 454649 rows/sec\nWrite rate: 17.21 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 6.476412296295166,
+        "throughput": 1238007.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run1/partsupp/partsupp.parquet\nRows written: 8000000\nFile size: 909894892 bytes\nTime elapsed: 6.462 seconds\nThroughput: 1238007 rows/sec\nWrite rate: 134.28 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 6.6575658321380615,
+        "throughput": 1203913.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run2/partsupp/partsupp.parquet\nRows written: 8000000\nFile size: 909894892 bytes\nTime elapsed: 6.645 seconds\nThroughput: 1203913 rows/sec\nWrite rate: 130.59 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.11800408363342285,
+        "throughput": 943396.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run1/supplier/supplier.parquet\nRows written: 100000\nFile size: 12897517 bytes\nTime elapsed: 0.106 seconds\nThroughput: 943396 rows/sec\nWrite rate: 116.04 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.12010741233825684,
+        "throughput": 943396.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run2/supplier/supplier.parquet\nRows written: 100000\nFile size: 12897517 bytes\nTime elapsed: 0.106 seconds\nThroughput: 943396 rows/sec\nWrite rate: 116.04 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.008644819259643555,
+        "throughput": 12500.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run1/nation/nation.parquet\nRows written: 25\nFile size: 3696 bytes\nTime elapsed: 0.002 seconds\nThroughput: 12500 rows/sec\nWrite rate: 1.76 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.009726285934448242,
+        "throughput": 12500.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run2/nation/nation.parquet\nRows written: 25\nFile size: 3696 bytes\nTime elapsed: 0.002 seconds\nThroughput: 12500 rows/sec\nWrite rate: 1.76 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.010303020477294922,
+        "throughput": 2500.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run1/region/region.parquet\nRows written: 5\nFile size: 1188 bytes\nTime elapsed: 0.002 seconds\nThroughput: 2500 rows/sec\nWrite rate: 0.57 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "parquet",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.011396169662475586,
+        "throughput": 5000.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: parquet\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/parquet/true_zero_copy/run2/region/region.parquet\nRows written: 5\nFile size: 1188 bytes\nTime elapsed: 0.001 seconds\nThroughput: 5000 rows/sec\nWrite rate: 1.13 MB/sec\n"
+      }
+    ],
+    "parquet_parallel_baseline": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 84.64530372619629,
+        "throughput": 1023186.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 91.0721595287323,
+        "throughput": 961688.0
+      }
+    ],
+    "parquet_parallel_zero_copy": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 93.28695583343506,
+        "throughput": 928418.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 90.95784735679626,
+        "throughput": 952178.0
+      }
+    ],
+    "parquet_parallel_true_zero_copy": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 95.06736183166504,
+        "throughput": 911003.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 96.79371571540833,
+        "throughput": 894785.0
+      }
+    ],
+    "csv_baseline": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 178.16143679618835,
+        "throughput": 336711.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run1/lineitem/lineitem.csv\nRows written: 59986052\nFile size: 7798810180 bytes\nTime elapsed: 178.153 seconds\nThroughput: 336711 rows/sec\nWrite rate: 41.75 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 171.8128674030304,
+        "throughput": 349154.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run2/lineitem/lineitem.csv\nRows written: 59986052\nFile size: 7798810180 bytes\nTime elapsed: 171.804 seconds\nThroughput: 349154 rows/sec\nWrite rate: 43.29 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 46.33022141456604,
+        "throughput": 323862.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run1/orders/orders.csv\nRows written: 15000000\nFile size: 1724964081 bytes\nTime elapsed: 46.316 seconds\nThroughput: 323862 rows/sec\nWrite rate: 35.52 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 46.37952280044556,
+        "throughput": 323478.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run2/orders/orders.csv\nRows written: 15000000\nFile size: 1724964081 bytes\nTime elapsed: 46.371 seconds\nThroughput: 323478 rows/sec\nWrite rate: 35.48 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 4.843394041061401,
+        "throughput": 310366.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run1/customer/customer.csv\nRows written: 1500000\nFile size: 247586629 bytes\nTime elapsed: 4.833 seconds\nThroughput: 310366 rows/sec\nWrite rate: 48.86 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 4.888139247894287,
+        "throughput": 307440.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run2/customer/customer.csv\nRows written: 1500000\nFile size: 247586629 bytes\nTime elapsed: 4.879 seconds\nThroughput: 307440 rows/sec\nWrite rate: 48.39 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 8.226141452789307,
+        "throughput": 243339.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run1/part/part.csv\nRows written: 2000000\nFile size: 242758334 bytes\nTime elapsed: 8.219 seconds\nThroughput: 243339 rows/sec\nWrite rate: 28.17 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 8.273491144180298,
+        "throughput": 241984.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run2/part/part.csv\nRows written: 2000000\nFile size: 242758334 bytes\nTime elapsed: 8.265 seconds\nThroughput: 241984 rows/sec\nWrite rate: 28.01 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 20.97122025489807,
+        "throughput": 381625.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run1/partsupp/partsupp.csv\nRows written: 8000000\nFile size: 1034108102 bytes\nTime elapsed: 20.963 seconds\nThroughput: 381625 rows/sec\nWrite rate: 47.04 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 21.135019302368164,
+        "throughput": 378698.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run2/partsupp/partsupp.csv\nRows written: 8000000\nFile size: 1034108102 bytes\nTime elapsed: 21.125 seconds\nThroughput: 378698 rows/sec\nWrite rate: 46.68 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.3474552631378174,
+        "throughput": 295858.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run1/supplier/supplier.csv\nRows written: 100000\nFile size: 14341579 bytes\nTime elapsed: 0.338 seconds\nThroughput: 295858 rows/sec\nWrite rate: 40.47 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.3407707214355469,
+        "throughput": 301205.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run2/supplier/supplier.csv\nRows written: 100000\nFile size: 14341579 bytes\nTime elapsed: 0.332 seconds\nThroughput: 301205 rows/sec\nWrite rate: 41.20 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.010889530181884766,
+        "throughput": 6250.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run1/nation/nation.csv\nRows written: 25\nFile size: 2351 bytes\nTime elapsed: 0.004 seconds\nThroughput: 6250 rows/sec\nWrite rate: 0.56 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.01079702377319336,
+        "throughput": 6250.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run2/nation/nation.csv\nRows written: 25\nFile size: 2351 bytes\nTime elapsed: 0.004 seconds\nThroughput: 6250 rows/sec\nWrite rate: 0.56 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 1,
+        "elapsed": 0.0334162712097168,
+        "throughput": 833.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run1/region/region.csv\nRows written: 5\nFile size: 306 bytes\nTime elapsed: 0.006 seconds\nThroughput: 833 rows/sec\nWrite rate: 0.05 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "csv",
+        "mode": "baseline",
+        "run": 2,
+        "elapsed": 0.011883020401000977,
+        "throughput": 1250.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/baseline/run2/region/region.csv\nRows written: 5\nFile size: 306 bytes\nTime elapsed: 0.004 seconds\nThroughput: 1250 rows/sec\nWrite rate: 0.07 MB/sec\n"
+      }
+    ],
+    "csv_zero_copy": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 151.38716459274292,
+        "throughput": 396264.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run1/lineitem/lineitem.csv\nRows written: 59986052\nFile size: 7798810180 bytes\nTime elapsed: 151.379 seconds\nThroughput: 396264 rows/sec\nWrite rate: 49.13 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 153.92015051841736,
+        "throughput": 389740.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run2/lineitem/lineitem.csv\nRows written: 59986052\nFile size: 7798810180 bytes\nTime elapsed: 153.913 seconds\nThroughput: 389740 rows/sec\nWrite rate: 48.32 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 44.38222360610962,
+        "throughput": 338043.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run1/orders/orders.csv\nRows written: 15000000\nFile size: 1724964081 bytes\nTime elapsed: 44.373 seconds\nThroughput: 338043 rows/sec\nWrite rate: 37.07 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 46.1699914932251,
+        "throughput": 324943.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run2/orders/orders.csv\nRows written: 15000000\nFile size: 1724964081 bytes\nTime elapsed: 46.162 seconds\nThroughput: 324943 rows/sec\nWrite rate: 35.64 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 5.212122678756714,
+        "throughput": 288295.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run1/customer/customer.csv\nRows written: 1500000\nFile size: 247586629 bytes\nTime elapsed: 5.203 seconds\nThroughput: 288295 rows/sec\nWrite rate: 45.38 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 5.20974326133728,
+        "throughput": 288351.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run2/customer/customer.csv\nRows written: 1500000\nFile size: 247586629 bytes\nTime elapsed: 5.202 seconds\nThroughput: 288351 rows/sec\nWrite rate: 45.39 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 8.39023733139038,
+        "throughput": 239923.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run1/part/part.csv\nRows written: 2000000\nFile size: 242758334 bytes\nTime elapsed: 8.336 seconds\nThroughput: 239923 rows/sec\nWrite rate: 27.77 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 8.424578189849854,
+        "throughput": 237614.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run2/part/part.csv\nRows written: 2000000\nFile size: 242758334 bytes\nTime elapsed: 8.417 seconds\nThroughput: 237614 rows/sec\nWrite rate: 27.51 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 22.1111102104187,
+        "throughput": 361925.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run1/partsupp/partsupp.csv\nRows written: 8000000\nFile size: 1034108102 bytes\nTime elapsed: 22.104 seconds\nThroughput: 361925 rows/sec\nWrite rate: 44.62 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 22.304412364959717,
+        "throughput": 358793.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run2/partsupp/partsupp.csv\nRows written: 8000000\nFile size: 1034108102 bytes\nTime elapsed: 22.297 seconds\nThroughput: 358793 rows/sec\nWrite rate: 44.23 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.4054391384124756,
+        "throughput": 251256.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run1/supplier/supplier.csv\nRows written: 100000\nFile size: 14341579 bytes\nTime elapsed: 0.398 seconds\nThroughput: 251256 rows/sec\nWrite rate: 34.36 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.30464601516723633,
+        "throughput": 336700.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run2/supplier/supplier.csv\nRows written: 100000\nFile size: 14341579 bytes\nTime elapsed: 0.297 seconds\nThroughput: 336700 rows/sec\nWrite rate: 46.05 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.01082468032836914,
+        "throughput": 8333.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run1/nation/nation.csv\nRows written: 25\nFile size: 2351 bytes\nTime elapsed: 0.003 seconds\nThroughput: 8333 rows/sec\nWrite rate: 0.75 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.010027170181274414,
+        "throughput": 8333.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run2/nation/nation.csv\nRows written: 25\nFile size: 2351 bytes\nTime elapsed: 0.003 seconds\nThroughput: 8333 rows/sec\nWrite rate: 0.75 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 1,
+        "elapsed": 0.010167837142944336,
+        "throughput": 1667.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run1/region/region.csv\nRows written: 5\nFile size: 306 bytes\nTime elapsed: 0.003 seconds\nThroughput: 1667 rows/sec\nWrite rate: 0.10 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "csv",
+        "mode": "zero_copy",
+        "run": 2,
+        "elapsed": 0.010334014892578125,
+        "throughput": 1250.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/zero_copy/run2/region/region.csv\nRows written: 5\nFile size: 306 bytes\nTime elapsed: 0.004 seconds\nThroughput: 1250 rows/sec\nWrite rate: 0.07 MB/sec\n"
+      }
+    ],
+    "csv_true_zero_copy": [
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 159.6404812335968,
+        "throughput": 375775.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run1/lineitem/lineitem.csv\nRows written: 59986052\nFile size: 7798810180 bytes\nTime elapsed: 159.633 seconds\nThroughput: 375775 rows/sec\nWrite rate: 46.59 MB/sec\n"
+      },
+      {
+        "table": "lineitem",
+        "rows": 60000000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 171.1477072238922,
+        "throughput": 350511.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run2/lineitem/lineitem.csv\nRows written: 59986052\nFile size: 7798810180 bytes\nTime elapsed: 171.139 seconds\nThroughput: 350511 rows/sec\nWrite rate: 43.46 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 46.26722311973572,
+        "throughput": 324268.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run1/orders/orders.csv\nRows written: 15000000\nFile size: 1724964081 bytes\nTime elapsed: 46.258 seconds\nThroughput: 324268 rows/sec\nWrite rate: 35.56 MB/sec\n"
+      },
+      {
+        "table": "orders",
+        "rows": 15000000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 47.341662883758545,
+        "throughput": 316904.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run2/orders/orders.csv\nRows written: 15000000\nFile size: 1724964081 bytes\nTime elapsed: 47.333 seconds\nThroughput: 316904 rows/sec\nWrite rate: 34.75 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 5.046685695648193,
+        "throughput": 297737.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run1/customer/customer.csv\nRows written: 1500000\nFile size: 247586629 bytes\nTime elapsed: 5.038 seconds\nThroughput: 297737 rows/sec\nWrite rate: 46.87 MB/sec\n"
+      },
+      {
+        "table": "customer",
+        "rows": 1500000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 4.969231843948364,
+        "throughput": 302297.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run2/customer/customer.csv\nRows written: 1500000\nFile size: 247586629 bytes\nTime elapsed: 4.962 seconds\nThroughput: 302297 rows/sec\nWrite rate: 47.59 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 8.296266317367554,
+        "throughput": 241313.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run1/part/part.csv\nRows written: 2000000\nFile size: 242758334 bytes\nTime elapsed: 8.288 seconds\nThroughput: 241313 rows/sec\nWrite rate: 27.93 MB/sec\n"
+      },
+      {
+        "table": "part",
+        "rows": 2000000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 8.283509969711304,
+        "throughput": 241692.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run2/part/part.csv\nRows written: 2000000\nFile size: 242758334 bytes\nTime elapsed: 8.275 seconds\nThroughput: 241692 rows/sec\nWrite rate: 27.98 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 22.9052791595459,
+        "throughput": 349391.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run1/partsupp/partsupp.csv\nRows written: 8000000\nFile size: 1034108102 bytes\nTime elapsed: 22.897 seconds\nThroughput: 349391 rows/sec\nWrite rate: 43.07 MB/sec\n"
+      },
+      {
+        "table": "partsupp",
+        "rows": 80000000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 22.967426776885986,
+        "throughput": 348447.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run2/partsupp/partsupp.csv\nRows written: 8000000\nFile size: 1034108102 bytes\nTime elapsed: 22.959 seconds\nThroughput: 348447 rows/sec\nWrite rate: 42.95 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.3629570007324219,
+        "throughput": 281690.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run1/supplier/supplier.csv\nRows written: 100000\nFile size: 14341579 bytes\nTime elapsed: 0.355 seconds\nThroughput: 281690 rows/sec\nWrite rate: 38.53 MB/sec\n"
+      },
+      {
+        "table": "supplier",
+        "rows": 100000,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.32090020179748535,
+        "throughput": 319489.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run2/supplier/supplier.csv\nRows written: 100000\nFile size: 14341579 bytes\nTime elapsed: 0.313 seconds\nThroughput: 319489 rows/sec\nWrite rate: 43.70 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.01160287857055664,
+        "throughput": 6250.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run1/nation/nation.csv\nRows written: 25\nFile size: 2351 bytes\nTime elapsed: 0.004 seconds\nThroughput: 6250 rows/sec\nWrite rate: 0.56 MB/sec\n"
+      },
+      {
+        "table": "nation",
+        "rows": 250,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.01106882095336914,
+        "throughput": 8333.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run2/nation/nation.csv\nRows written: 25\nFile size: 2351 bytes\nTime elapsed: 0.003 seconds\nThroughput: 8333 rows/sec\nWrite rate: 0.75 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 1,
+        "elapsed": 0.012308835983276367,
+        "throughput": 1667.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run1/region/region.csv\nRows written: 5\nFile size: 306 bytes\nTime elapsed: 0.003 seconds\nThroughput: 1667 rows/sec\nWrite rate: 0.10 MB/sec\n"
+      },
+      {
+        "table": "region",
+        "rows": 50,
+        "format": "csv",
+        "mode": "true_zero_copy",
+        "run": 2,
+        "elapsed": 0.011532783508300781,
+        "throughput": 1667.0,
+        "output": "\n=== TPC-H Data Generation Complete ===\nData source: Official TPC-H dbgen\nFormat: csv\nOutput file: /tmp/phase16_sf10_async_enabled_benchmark/csv/true_zero_copy/run2/region/region.csv\nRows written: 5\nFile size: 306 bytes\nTime elapsed: 0.003 seconds\nThroughput: 1667 rows/sec\nWrite rate: 0.10 MB/sec\n"
+      }
+    ],
+    "csv_parallel_baseline": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 192.249365568161,
+        "throughput": 450481.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 201.8499150276184,
+        "throughput": 429051.0
+      }
+    ],
+    "csv_parallel_zero_copy": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 198.96721172332764,
+        "throughput": 435265.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 201.94952297210693,
+        "throughput": 428835.0
+      }
+    ],
+    "csv_parallel_true_zero_copy": [
+      {
+        "run": 1,
+        "total_rows": 158600300,
+        "elapsed": 206.73858976364136,
+        "throughput": 418901.0
+      },
+      {
+        "run": 2,
+        "total_rows": 158600300,
+        "elapsed": 188.61411929130554,
+        "throughput": 459161.0
+      }
+    ]
+  }
+}
