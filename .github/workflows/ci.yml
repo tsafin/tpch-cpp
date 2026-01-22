@@ -1,0 +1,255 @@
+name: CI - Build & Benchmark
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build-matrix:
+    name: Build (${{ matrix.artifact_name }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - orc: ON
+            async_io: ON
+            artifact_name: build-orc-async
+          - orc: ON
+            async_io: OFF
+            artifact_name: build-orc-only
+          - orc: OFF
+            async_io: ON
+            artifact_name: build-async-only
+          - orc: OFF
+            async_io: OFF
+            artifact_name: build-baseline
+
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: bash scripts/ci_install_deps.sh
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DTPCH_ENABLE_ORC=${{ matrix.orc }} \
+            -DTPCH_ENABLE_ASYNC_IO=${{ matrix.async_io }} \
+            -DTPCH_ENABLE_ASAN=OFF \
+            -DTPCH_BUILD_TESTS=OFF
+
+      - name: Build project
+        run: cmake --build build -j$(nproc)
+
+      - name: Verify executable
+        run: test -f build/tpch_benchmark && echo "✓ Executable created successfully"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: build/tpch_benchmark
+          retention-days: 1
+          if-no-files-found: error
+
+  benchmark-suite:
+    name: Benchmark Suite
+    runs-on: ubuntu-22.04
+    needs: build-matrix
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [csv, parquet, orc]
+        table: [lineitem, orders, customer, part, partsupp, supplier, nation, region]
+        exclude:
+          # ORC benchmarks only if we have ORC support
+          - format: orc
+            table: orders
+          - format: orc
+            table: customer
+          - format: orc
+            table: part
+          - format: orc
+            table: partsupp
+          - format: orc
+            table: supplier
+          - format: orc
+            table: nation
+          - format: orc
+            table: region
+
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-orc-async
+          path: .
+
+      - name: Setup benchmark executable
+        run: |
+          chmod +x tpch_benchmark
+          mkdir -p benchmark-results
+
+      - name: Run format coverage benchmark
+        continue-on-error: true
+        run: |
+          timeout 600 ./tpch_benchmark \
+            --use-dbgen \
+            --scale-factor 1 \
+            --format ${{ matrix.format }} \
+            --table ${{ matrix.table }} \
+            --output-dir benchmark-results/ \
+            --verbose 2>&1 | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log" || true
+
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-logs-${{ matrix.format }}-${{ matrix.table }}
+          path: benchmark-results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  optimization-benchmarks:
+    name: Optimization Benchmarks (${{ matrix.mode }})
+    runs-on: ubuntu-22.04
+    needs: build-matrix
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, zero-copy, true-zero-copy]
+        table: [lineitem, orders, part]
+
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-orc-async
+          path: .
+
+      - name: Setup benchmark executable
+        run: |
+          chmod +x tpch_benchmark
+          mkdir -p benchmark-results
+
+      - name: Run optimization benchmark
+        continue-on-error: true
+        run: |
+          MODE_FLAGS=""
+          if [ "${{ matrix.mode }}" = "zero-copy" ]; then
+            MODE_FLAGS="--zero-copy"
+          elif [ "${{ matrix.mode }}" = "true-zero-copy" ]; then
+            MODE_FLAGS="--true-zero-copy"
+          fi
+
+          timeout 600 ./tpch_benchmark \
+            --use-dbgen \
+            --scale-factor 1 \
+            --format parquet \
+            --table ${{ matrix.table }} \
+            --output-dir benchmark-results/ \
+            $MODE_FLAGS \
+            --verbose 2>&1 | tee "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log" || true
+
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-logs-opt-${{ matrix.mode }}-${{ matrix.table }}
+          path: benchmark-results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  results-aggregation:
+    name: Aggregate Results
+    runs-on: ubuntu-22.04
+    needs: [benchmark-suite, optimization-benchmarks]
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all benchmark artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results
+
+      - name: Prepare benchmark results directory
+        run: |
+          mkdir -p benchmark-results
+          find all-results -name "*.log" -exec cp {} benchmark-results/ \;
+
+      - name: Generate summary report
+        run: |
+          python3 scripts/parse_benchmark_logs.py benchmark-results > benchmark-results/ci_summary.json || true
+
+      - name: Upload aggregated results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Print summary
+        if: always()
+        run: |
+          if [ -f benchmark-results/ci_summary.json ]; then
+            echo "=== Benchmark Summary ==="
+            python3 -m json.tool benchmark-results/ci_summary.json || cat benchmark-results/ci_summary.json
+          else
+            echo "No summary generated (logs may not exist yet)"
+          fi
+
+  status-check:
+    name: Status Check
+    runs-on: ubuntu-22.04
+    needs: [build-matrix]
+    if: always()
+
+    steps:
+      - name: Check build status
+        run: |
+          if [ "${{ needs.build-matrix.result }}" = "success" ]; then
+            echo "✓ All builds passed"
+            exit 0
+          else
+            echo "✗ Some builds failed"
+            exit 1
+          fi
