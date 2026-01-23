@@ -78,11 +78,13 @@ jobs:
         table: [lineitem, orders, customer, part, partsupp, supplier, nation, region]
 
     steps:
-      - name: Checkout code with submodules
+      - name: Checkout code (for dists.dss and scripts)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 1
+
+      - name: Checkout tpch submodule (for dists.dss)
+        run: git submodule update --init --depth 1 -- third_party/tpch
 
       - name: Install dependencies
         run: bash scripts/ci_install_deps.sh
@@ -148,11 +150,13 @@ jobs:
         table: [lineitem, orders, part]
 
     steps:
-      - name: Checkout code with submodules
+      - name: Checkout code (for dists.dss and scripts)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 1
+
+      - name: Checkout tpch submodule (for dists.dss)
+        run: git submodule update --init --depth 1 -- third_party/tpch
 
       - name: Install dependencies
         run: bash scripts/ci_install_deps.sh
