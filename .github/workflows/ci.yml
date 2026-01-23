@@ -94,9 +94,14 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
-          # Update library cache and set library paths
+          # Find and configure Arrow/Parquet library paths
+          ARROW_LIB_PATH=$(find /usr -name "libparquet.so*" -type f 2>/dev/null | head -1 | xargs dirname)
+          if [ -n "$ARROW_LIB_PATH" ]; then
+            echo "Found Arrow/Parquet libraries in: $ARROW_LIB_PATH"
+            echo "LD_LIBRARY_PATH=$ARROW_LIB_PATH:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          fi
+          # Update library cache
           sudo ldconfig
-          echo "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Run format coverage benchmark
         continue-on-error: true
@@ -147,9 +152,14 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
-          # Update library cache and set library paths
+          # Find and configure Arrow/Parquet library paths
+          ARROW_LIB_PATH=$(find /usr -name "libparquet.so*" -type f 2>/dev/null | head -1 | xargs dirname)
+          if [ -n "$ARROW_LIB_PATH" ]; then
+            echo "Found Arrow/Parquet libraries in: $ARROW_LIB_PATH"
+            echo "LD_LIBRARY_PATH=$ARROW_LIB_PATH:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          fi
+          # Update library cache
           sudo ldconfig
-          echo "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Run optimization benchmark
         continue-on-error: true
