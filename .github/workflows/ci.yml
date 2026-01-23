@@ -112,6 +112,21 @@ jobs:
             fi
           fi
 
+      - name: Verify library installation
+        run: |
+          echo "=== Installed Arrow/Parquet packages ==="
+          dpkg -l | grep -E "arrow|parquet" || echo "No arrow/parquet packages found"
+          echo ""
+          echo "=== Libraries found in ldconfig ==="
+          ldconfig -p | grep -E "libparquet|libarrow" || echo "No Arrow/Parquet in ldconfig cache"
+          echo ""
+          echo "=== Current LD_LIBRARY_PATH ==="
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+          echo ""
+          echo "=== Searching filesystem for libparquet ==="
+          find /usr -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found in /usr"
+          find /lib -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found in /lib"
+
       - name: Run format coverage benchmark
         continue-on-error: true
         run: |
@@ -178,6 +193,21 @@ jobs:
               echo "LD_LIBRARY_PATH=$LDCONFIG_PATH:$LD_LIBRARY_PATH" >> $GITHUB_ENV
             fi
           fi
+
+      - name: Verify library installation
+        run: |
+          echo "=== Installed Arrow/Parquet packages ==="
+          dpkg -l | grep -E "arrow|parquet" || echo "No arrow/parquet packages found"
+          echo ""
+          echo "=== Libraries found in ldconfig ==="
+          ldconfig -p | grep -E "libparquet|libarrow" || echo "No Arrow/Parquet in ldconfig cache"
+          echo ""
+          echo "=== Current LD_LIBRARY_PATH ==="
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+          echo ""
+          echo "=== Searching filesystem for libparquet ==="
+          find /usr -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found in /usr"
+          find /lib -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found in /lib"
 
       - name: Run optimization benchmark
         continue-on-error: true
