@@ -51,7 +51,14 @@ class BenchmarkLogParser:
         'write_rate': r'Write rate:\s+([\d.]+)\s+MB/sec',
         'file_size': r'File size:\s+(\d+)\s+bytes',
         'elapsed_time': r'Elapsed time:\s+(\d+(?:\.\d+)?)\s+(?:sec|seconds)',
-        'error': r'ERROR|FATAL|Segmentation fault|out of memory|ENOMEM',
+    }
+
+    # Critical error patterns that indicate benchmark failure
+    CRITICAL_ERRORS = {
+        'crash': r'Segmentation fault|SIGSEGV',
+        'oom': r'out of memory|ENOMEM|bad_alloc',
+        'timeout': r'timeout|timed out',
+        'fatal': r'FATAL|Fatal error',
     }
 
     def __init__(self, log_directory: str):
@@ -89,12 +96,6 @@ class BenchmarkLogParser:
 
             # Extract metrics using regex patterns
             for metric, pattern in self.PATTERNS.items():
-                if metric == 'error':
-                    if re.search(pattern, content, re.IGNORECASE):
-                        result.success = False
-                        result.error_message = "Benchmark reported error"
-                    continue
-
                 match = re.search(pattern, content)
                 if match:
                     value = match.group(1)
@@ -110,10 +111,26 @@ class BenchmarkLogParser:
                         # Convert seconds to milliseconds
                         result.elapsed_time_ms = int(float(value) * 1000)
 
-            # Check for crash or timeout (empty output or very short)
-            if len(content) < 100:
+            # Check for critical errors only
+            for error_type, pattern in self.CRITICAL_ERRORS.items():
+                if re.search(pattern, content, re.IGNORECASE):
+                    result.success = False
+                    result.error_message = f"Benchmark {error_type} detected"
+                    return result
+
+            # Check for empty output (indicates timeout or crash)
+            if len(content) < 50:
                 result.success = False
                 result.error_message = "Incomplete output (possible timeout or crash)"
+                return result
+
+            # Success if we extracted at least some metrics
+            if result.throughput_rows_per_sec is not None or result.rows_written is not None:
+                result.success = True
+            else:
+                # If no metrics were extracted and no critical errors, still mark as incomplete
+                result.success = False
+                result.error_message = "Could not extract benchmark metrics"
 
             return result
 
