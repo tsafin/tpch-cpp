@@ -58,3 +58,7 @@ data/
 # Generated files
 __pycache__/
 *.pyc
+
+# Package manager artifacts (should not be committed)
+*.deb
+*.rpm
