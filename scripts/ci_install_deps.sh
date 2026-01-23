@@ -80,8 +80,7 @@ sudo apt-get install -y -qq \
 # Python (for benchmark log parsing)
 echo "[INFO] Installing Python..."
 sudo apt-get install -y -qq \
-    python3 \
-    python3-json-tool
+    python3
 
 # Verify critical packages
 echo ""
