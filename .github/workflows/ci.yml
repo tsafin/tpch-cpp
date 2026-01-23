@@ -84,6 +84,9 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Install dependencies
+        run: bash scripts/ci_install_deps.sh
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -94,23 +97,8 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
-          # Update library cache first
+          # Update library cache to register installed libraries
           sudo ldconfig
-          # Find and configure Arrow/Parquet library paths
-          ARROW_LIB=$(find /usr -name "libparquet.so*" -type f 2>/dev/null | head -1)
-          if [ -n "$ARROW_LIB" ]; then
-            ARROW_LIB_PATH=$(dirname "$ARROW_LIB")
-            echo "Found Arrow/Parquet libraries in: $ARROW_LIB_PATH"
-            echo "LD_LIBRARY_PATH=$ARROW_LIB_PATH:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          else
-            echo "WARNING: libparquet.so not found, trying with ldconfig paths"
-            # Let ldconfig handle library discovery
-            LDCONFIG_PATH=$(ldconfig -p | grep libparquet | head -1 | awk '{print $NF}' | xargs dirname)
-            if [ -n "$LDCONFIG_PATH" ]; then
-              echo "Found via ldconfig: $LDCONFIG_PATH"
-              echo "LD_LIBRARY_PATH=$LDCONFIG_PATH:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-            fi
-          fi
 
       - name: Verify library installation
         run: |
@@ -166,6 +154,9 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Install dependencies
+        run: bash scripts/ci_install_deps.sh
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -176,23 +167,8 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
-          # Update library cache first
+          # Update library cache to register installed libraries
           sudo ldconfig
-          # Find and configure Arrow/Parquet library paths
-          ARROW_LIB=$(find /usr -name "libparquet.so*" -type f 2>/dev/null | head -1)
-          if [ -n "$ARROW_LIB" ]; then
-            ARROW_LIB_PATH=$(dirname "$ARROW_LIB")
-            echo "Found Arrow/Parquet libraries in: $ARROW_LIB_PATH"
-            echo "LD_LIBRARY_PATH=$ARROW_LIB_PATH:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          else
-            echo "WARNING: libparquet.so not found, trying with ldconfig paths"
-            # Let ldconfig handle library discovery
-            LDCONFIG_PATH=$(ldconfig -p | grep libparquet | head -1 | awk '{print $NF}' | xargs dirname)
-            if [ -n "$LDCONFIG_PATH" ]; then
-              echo "Found via ldconfig: $LDCONFIG_PATH"
-              echo "LD_LIBRARY_PATH=$LDCONFIG_PATH:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-            fi
-          fi
 
       - name: Verify library installation
         run: |
