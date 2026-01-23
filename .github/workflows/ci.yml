@@ -94,6 +94,9 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
+          # Update library cache and set library paths
+          sudo ldconfig
+          echo "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Run format coverage benchmark
         continue-on-error: true
@@ -144,6 +147,9 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
+          # Update library cache and set library paths
+          sudo ldconfig
+          echo "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Run optimization benchmark
         continue-on-error: true
