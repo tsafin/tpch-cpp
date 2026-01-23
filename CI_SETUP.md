@@ -63,28 +63,29 @@ No scheduled runs configured (can be added later if needed).
 
 ## Build Configurations
 
-The workflow builds 4 configurations to ensure all feature combinations work:
+The workflow builds 2 configurations to validate core functionality:
 
-| Configuration | ORC | Async-IO | Purpose |
-|---------------|-----|----------|---------|
-| `build-orc-async` | ON | ON | Full features |
-| `build-orc-only` | ON | OFF | ORC without async |
-| `build-async-only` | OFF | ON | Async without ORC |
-| `build-baseline` | OFF | OFF | Minimal features |
+| Configuration | Async-IO | Purpose |
+|---------------|----------|---------|
+| `build-async-only` | ON | Async I/O enabled |
+| `build-baseline` | OFF | Minimal features |
 
-All build with `CMAKE_BUILD_TYPE=RelWithDebInfo` (optimized code with debug symbols).
+**Note on ORC:** Apache ORC format support (`TPCH_ENABLE_ORC=ON`) is not tested in CI because Apache ORC is not available in Ubuntu 22.04's default or Apache Arrow APT repositories. Building ORC from source would significantly increase CI runtime. ORC support can still be built locally or in custom CI jobs; use `scripts/build_orc_from_source.sh` for source builds.
+
+All builds use `CMAKE_BUILD_TYPE=RelWithDebInfo` (optimized code with debug symbols).
 
 ## Benchmark Matrix
 
-### Format Coverage Tests (24 total)
+### Format Coverage Tests (16 total)
 
-Tests all 3 formats across all 8 TPC-H tables at baseline optimization:
+Tests CSV and Parquet formats across all 8 TPC-H tables at baseline optimization:
 
 | Format | Tables |
 |--------|--------|
 | **CSV** | lineitem, orders, customer, part, partsupp, supplier, nation, region |
 | **Parquet** | lineitem, orders, customer, part, partsupp, supplier, nation, region |
-| **ORC** | lineitem (only; others excluded to reduce matrix size) |
+
+**Note:** ORC format tests are not run because ORC support is not built in CI (see Build Configurations section).
 
 **Scale Factor:** 1 (lineitem = 6M rows, orders = 1.5M rows)
 **Optimization Mode:** baseline (no --zero-copy or --true-zero-copy flags)

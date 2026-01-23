@@ -53,10 +53,9 @@ sudo apt-get install -y -qq \
     libarrow-dev \
     libparquet-dev
 
-# ORC development libraries
-echo "[INFO] Installing ORC library..."
+# Protobuf (for potential future use with Apache ORC)
+echo "[INFO] Installing Protobuf..."
 sudo apt-get install -y -qq \
-    liborc-dev \
     libprotobuf-dev
 
 # Async I/O support (io_uring)
@@ -89,7 +88,6 @@ echo "[INFO] Verifying installed packages..."
 packages_to_verify=(
     "libarrow-dev"
     "libparquet-dev"
-    "liborc-dev"
     "liburing-dev"
     "libzstd-dev"
 )

@@ -25,12 +25,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - orc: ON
-            async_io: ON
-            artifact_name: build-orc-async
-          - orc: ON
-            async_io: OFF
-            artifact_name: build-orc-only
           - orc: OFF
             async_io: ON
             artifact_name: build-async-only
@@ -80,24 +74,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        format: [csv, parquet, orc]
+        format: [csv, parquet]
         table: [lineitem, orders, customer, part, partsupp, supplier, nation, region]
-        exclude:
-          # ORC benchmarks only if we have ORC support
-          - format: orc
-            table: orders
-          - format: orc
-            table: customer
-          - format: orc
-            table: part
-          - format: orc
-            table: partsupp
-          - format: orc
-            table: supplier
-          - format: orc
-            table: nation
-          - format: orc
-            table: region
 
     steps:
       - name: Checkout code with submodules
@@ -109,7 +87,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: build-orc-async
+          name: build-async-only
           path: .
 
       - name: Setup benchmark executable
@@ -159,7 +137,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: build-orc-async
+          name: build-async-only
           path: .
 
       - name: Setup benchmark executable
