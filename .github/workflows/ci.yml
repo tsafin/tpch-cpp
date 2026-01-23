@@ -107,7 +107,7 @@ jobs:
             --format ${{ matrix.format }} \
             --table ${{ matrix.table }} \
             --output-dir benchmark-results/ \
-            --verbose 2>&1 | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log" || true
+            --verbose 2>&1 | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"
 
       - name: Upload benchmark logs
         if: always()
@@ -168,7 +168,7 @@ jobs:
             --table ${{ matrix.table }} \
             --output-dir benchmark-results/ \
             $MODE_FLAGS \
-            --verbose 2>&1 | tee "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log" || true
+            --verbose 2>&1 | tee "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log"
 
       - name: Upload benchmark logs
         if: always()
