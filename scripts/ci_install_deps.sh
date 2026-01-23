@@ -42,7 +42,7 @@ sudo apt-get install -y -qq \
 # Add Apache Arrow APT repository (required for libarrow-dev and libparquet-dev)
 echo "[INFO] Adding Apache Arrow APT repository..."
 ARROW_DEB="apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb"
-wget -q "https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/$ARROW_DEB"
+wget "https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/$ARROW_DEB"
 sudo apt-get install -y -qq "./$ARROW_DEB"
 rm "$ARROW_DEB"
 sudo apt-get update -qq
