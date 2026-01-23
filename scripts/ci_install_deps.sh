@@ -36,10 +36,17 @@ sudo apt-get install -y -qq \
     cmake \
     build-essential \
     git \
-    pkg-config
+    pkg-config \
+    wget
+
+# Add Apache Arrow APT repository (required for libarrow-dev and libparquet-dev)
+echo "[INFO] Adding Apache Arrow APT repository..."
+wget -q https://apache.jfrog.io/artifactory/arrow/ubuntu/apache-arrow-apt-source-latest.deb
+sudo apt-get install -y -qq ./apache-arrow-apt-source-latest.deb
+rm apache-arrow-apt-source-latest.deb
+sudo apt-get update -qq
 
 # Arrow + Parquet development libraries
-# Ubuntu 22.04 has Arrow 6.0+ and Parquet 1.5+ available via official packages
 echo "[INFO] Installing Arrow and Parquet libraries..."
 sudo apt-get install -y -qq \
     libarrow-dev \
