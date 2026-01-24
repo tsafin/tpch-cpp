@@ -241,6 +241,15 @@ jobs:
         run: |
           python3 scripts/parse_benchmark_logs.py benchmark-results > benchmark-results/ci_summary.json || true
 
+      - name: Generate HTML visualization
+        if: always()
+        run: |
+          if [ -f benchmark-results/ci_summary.json ]; then
+            python3 scripts/visualize_benchmark_results.py benchmark-results/ci_summary.json benchmark-results/report.html
+          else
+            echo "No summary JSON found, skipping visualization"
+          fi
+
       - name: Upload aggregated results
         uses: actions/upload-artifact@v4
         with:
