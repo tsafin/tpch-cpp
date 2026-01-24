@@ -254,7 +254,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: benchmark-results/
+          path: |
+            benchmark-results/*.log
+            benchmark-results/*.json
+            benchmark-results/*.html
           retention-days: 30
           if-no-files-found: ignore
 
