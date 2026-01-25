@@ -1,5 +1,9 @@
 #!/bin/bash
-# Build and install Apache ORC C++ from source using system dependencies.
+# Build and install Apache ORC C++ from source as static library.
+#
+# ORC is built as a STATIC library to be linked into the executable.
+# This encapsulates ORC's protobuf definitions and avoids conflicts
+# with Arrow (which is built without protobuf support).
 
 set -e
 set -x
@@ -26,16 +30,18 @@ cd "${ORC_DIR}"
 # Clean submodule to ensure no vendored artifacts remain from previous attempts
 git clean -xfd
 
-# Build and install
-# We explicitly disable building tools/tests and force usage of system libraries
-# to ensure ABI compatibility with Arrow.
+# Build and install ORC as STATIC library
+# - Static library encapsulates protobuf definitions
+# - Protobuf is embedded statically within liborc.a
+# - System libraries (zlib, zstd, lz4, snappy) are dynamic dependencies
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DBUILD_SHARED_LIBS=OFF \
     -DBUILD_JAVA=OFF \
     -DBUILD_LIBHDFSPP=OFF \
     -DBUILD_CPP_TESTS=OFF \
     -DBUILD_TOOLS=OFF \
-    -DORC_PREFER_STATIC_PROTOBUF=OFF \
+    -DORC_PREFER_STATIC_PROTOBUF=ON \
     -DPROTOBUF_HOME=/usr \
     -DORC_PREFER_STATIC_ZLIB=OFF \
     -DZLIB_HOME=/usr \

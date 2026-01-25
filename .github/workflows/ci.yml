@@ -25,15 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - orc: ON
-            async_io: ON
-            artifact_name: build-orc-async
-          - orc: OFF
-            async_io: ON
-            artifact_name: build-async-only
-          - orc: OFF
-            async_io: OFF
-            artifact_name: build-baseline
+          - artifact_name: tpch-benchmark-orc-async
 
     steps:
       - name: Checkout code with submodules
@@ -45,18 +37,28 @@ jobs:
       - name: Install dependencies
         run: bash scripts/ci_install_deps.sh
 
-      - name: Build ORC from source (if enabled)
-        if: matrix.orc == 'ON'
-        run: |
-          sudo apt-get install -y libtool
-          bash scripts/build_orc_from_source.sh
+      - name: Restore Arrow and ORC cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/local
+          key: arrow-orc-cache-${{ github.sha }}
+          restore-keys: arrow-orc-cache-
+
+      - name: Build Arrow and ORC from source
+        run: bash scripts/ci_build_arrow_and_orc.sh ON
+
+      - name: Cache Arrow and ORC libraries
+        uses: actions/cache@v4
+        with:
+          path: /usr/local
+          key: arrow-orc-cache-${{ github.sha }}
 
       - name: Configure CMake
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DTPCH_ENABLE_ORC=${{ matrix.orc }} \
-            -DTPCH_ENABLE_ASYNC_IO=${{ matrix.async_io }} \
+            -DTPCH_ENABLE_ORC=ON \
+            -DTPCH_ENABLE_ASYNC_IO=ON \
             -DTPCH_ENABLE_ASAN=OFF \
             -DTPCH_BUILD_TESTS=OFF
 
@@ -131,10 +133,17 @@ jobs:
       - name: Install dependencies
         run: bash scripts/ci_install_deps.sh
 
+      - name: Restore Arrow and ORC cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/local
+          key: arrow-orc-cache-${{ github.sha }}
+          restore-keys: arrow-orc-cache-
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: build-orc-async
+          name: tpch-benchmark-orc-async
           path: .
 
       - name: Setup benchmark executable
@@ -173,6 +182,12 @@ jobs:
             --output-dir benchmark-results/ \
             --verbose 2>&1 | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"
 
+          # Fail if process dumped core
+          if grep -q "dumped core" "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"; then
+            echo "ERROR: Benchmark crashed with core dump"
+            exit 1
+          fi
+
       - name: Upload benchmark logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -206,10 +221,17 @@ jobs:
       - name: Install dependencies
         run: bash scripts/ci_install_deps.sh
 
+      - name: Restore Arrow and ORC cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/local
+          key: arrow-orc-cache-${{ github.sha }}
+          restore-keys: arrow-orc-cache-
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: build-orc-async
+          name: tpch-benchmark-orc-async
           path: .
 
       - name: Setup benchmark executable
@@ -255,6 +277,12 @@ jobs:
             --output-dir benchmark-results/ \
             $MODE_FLAGS \
             --verbose 2>&1 | tee "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log"
+
+          # Fail if process dumped core
+          if grep -q "dumped core" "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log"; then
+            echo "ERROR: Benchmark crashed with core dump"
+            exit 1
+          fi
 
       - name: Upload benchmark logs
         if: always()

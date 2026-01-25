@@ -1,5 +1,13 @@
 #!/bin/bash
-# Build and install Apache Arrow C++ from source.
+# Build and install Apache Arrow C++ from source WITHOUT protobuf support.
+#
+# ORC includes protobuf message definitions (orc_proto.proto) that conflict
+# with Arrow's protobuf definitions at runtime. By building Arrow without
+# protobuf support, we eliminate the descriptor database collision error:
+#   "File already exists in database: orc_proto.proto"
+#
+# Arrow doesn't need protobuf for CSV and Parquet support, so this is safe.
+# Only advanced features like Flight and Substrait need protobuf.
 
 set -e
 set -x
@@ -26,12 +34,12 @@ if [ ! -d "${XSIMD_DIR}" ] || [ ! -f "${XSIMD_DIR}/CMakeLists.txt" ]; then
     exit 1
 fi
 
-# Install build dependencies
+# Install build dependencies (excluding protobuf to avoid conflicts with ORC)
 sudo apt-get update
 sudo apt-get install -y \
     g++ cmake git \
     libboost-all-dev rapidjson-dev \
-    libbrotli-dev libthrift-dev protobuf-compiler libprotobuf-dev \
+    libbrotli-dev libthrift-dev \
     libsnappy-dev liblz4-dev libzstd-dev zlib1g-dev \
     pkg-config
 
@@ -61,7 +69,11 @@ cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DARROW_BUILD_TESTS=OFF \
     -DARROW_COMPUTE=ON \
     -DARROW_FILESYSTEM=ON \
-    -DARROW_CSV=ON
+    -DARROW_CSV=ON \
+    -DARROW_WITH_PROTOBUF=OFF \
+    -DARROW_ORC=OFF \
+    -DARROW_FLIGHT=OFF \
+    -DARROW_SUBSTRAIT=OFF
 
 make -j$(nproc)
 sudo make install
