@@ -75,20 +75,7 @@ sudo apt-get install -y -qq \
 echo "[INFO] Installing additional dependencies..."
 sudo apt-get install -y -qq \
     libthrift-dev \
-    libre2-dev \
-    libtool
-
-# Build Apache ORC from source
-echo ""
-echo "[INFO] Building Apache ORC from source..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-
-if [ -f "${SCRIPT_DIR}/build_orc_from_source.sh" ]; then
-    bash "${SCRIPT_DIR}/build_orc_from_source.sh"
-else
-    echo "[WARN] build_orc_from_source.sh not found, skipping ORC build"
-fi
+    libre2-dev
 
 # Python (for benchmark log parsing)
 echo "[INFO] Installing Python..."

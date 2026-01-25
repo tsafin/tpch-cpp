@@ -45,6 +45,12 @@ jobs:
       - name: Install dependencies
         run: bash scripts/ci_install_deps.sh
 
+      - name: Build ORC from source (if enabled)
+        if: matrix.orc == 'ON'
+        run: |
+          sudo apt-get install -y libtool
+          bash scripts/build_orc_from_source.sh
+
       - name: Configure CMake
         run: |
           cmake -B build \
