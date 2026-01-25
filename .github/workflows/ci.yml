@@ -25,6 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - orc: ON
+            async_io: ON
+            artifact_name: build-orc-async
           - orc: OFF
             async_io: ON
             artifact_name: build-async-only
@@ -74,8 +77,41 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        format: [csv, parquet]
-        table: [lineitem, orders, customer, part, partsupp, supplier, nation, region]
+        include:
+          - format: csv
+            table: lineitem
+          - format: csv
+            table: orders
+          - format: csv
+            table: customer
+          - format: csv
+            table: part
+          - format: csv
+            table: partsupp
+          - format: csv
+            table: supplier
+          - format: csv
+            table: nation
+          - format: csv
+            table: region
+          - format: parquet
+            table: lineitem
+          - format: parquet
+            table: orders
+          - format: parquet
+            table: customer
+          - format: parquet
+            table: part
+          - format: parquet
+            table: partsupp
+          - format: parquet
+            table: supplier
+          - format: parquet
+            table: nation
+          - format: parquet
+            table: region
+          - format: orc
+            table: lineitem
 
     steps:
       - name: Checkout code (for dists.dss and scripts)
@@ -92,7 +128,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: build-async-only
+          name: build-orc-async
           path: .
 
       - name: Setup benchmark executable
@@ -164,7 +200,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: build-async-only
+          name: build-orc-async
           path: .
 
       - name: Setup benchmark executable

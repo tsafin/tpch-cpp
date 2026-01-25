@@ -53,17 +53,18 @@ sudo apt-get install -y -qq \
     libarrow-dev \
     libparquet-dev
 
-# Protobuf (for potential future use with Apache ORC)
+# Protobuf (required for Apache ORC)
 echo "[INFO] Installing Protobuf..."
 sudo apt-get install -y -qq \
-    libprotobuf-dev
+    libprotobuf-dev \
+    protobuf-compiler
 
 # Async I/O support (io_uring)
 echo "[INFO] Installing async I/O library (liburing)..."
 sudo apt-get install -y -qq \
     liburing-dev
 
-# Compression libraries (required by Arrow)
+# Compression libraries (required by Arrow and ORC)
 echo "[INFO] Installing compression libraries..."
 sudo apt-get install -y -qq \
     libzstd-dev \
@@ -74,7 +75,20 @@ sudo apt-get install -y -qq \
 echo "[INFO] Installing additional dependencies..."
 sudo apt-get install -y -qq \
     libthrift-dev \
-    libre2-dev
+    libre2-dev \
+    libtool
+
+# Build Apache ORC from source
+echo ""
+echo "[INFO] Building Apache ORC from source..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+if [ -f "${SCRIPT_DIR}/build_orc_from_source.sh" ]; then
+    bash "${SCRIPT_DIR}/build_orc_from_source.sh"
+else
+    echo "[WARN] build_orc_from_source.sh not found, skipping ORC build"
+fi
 
 # Python (for benchmark log parsing)
 echo "[INFO] Installing Python..."
