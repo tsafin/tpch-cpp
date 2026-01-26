@@ -38,6 +38,7 @@ jobs:
         run: bash scripts/ci_install_deps.sh
 
       - name: Restore Arrow and ORC cache
+        id: cache-arrow-orc
         uses: actions/cache@v4
         with:
           path: |
@@ -55,6 +56,7 @@ jobs:
           restore-keys: arrow-orc-cache-
 
       - name: Build Arrow and ORC from source
+        if: steps.cache-arrow-orc.outputs.cache-hit != 'true'
         run: bash scripts/ci_build_arrow_and_orc.sh ON
 
       - name: Cache Arrow and ORC libraries
