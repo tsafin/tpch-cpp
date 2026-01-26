@@ -40,7 +40,17 @@ jobs:
       - name: Restore Arrow and ORC cache
         uses: actions/cache@v4
         with:
-          path: /usr/local
+          path: |
+            /usr/local/lib/libarrow*
+            /usr/local/lib/libparquet*
+            /usr/local/lib/liborc*
+            /usr/local/lib/cmake/arrow
+            /usr/local/lib/cmake/orc
+            /usr/local/lib/pkgconfig/arrow*
+            /usr/local/lib/pkgconfig/liborc*
+            /usr/local/include/arrow
+            /usr/local/include/parquet
+            /usr/local/include/orc
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
@@ -50,7 +60,17 @@ jobs:
       - name: Cache Arrow and ORC libraries
         uses: actions/cache@v4
         with:
-          path: /usr/local
+          path: |
+            /usr/local/lib/libarrow*
+            /usr/local/lib/libparquet*
+            /usr/local/lib/liborc*
+            /usr/local/lib/cmake/arrow
+            /usr/local/lib/cmake/orc
+            /usr/local/lib/pkgconfig/arrow*
+            /usr/local/lib/pkgconfig/liborc*
+            /usr/local/include/arrow
+            /usr/local/include/parquet
+            /usr/local/include/orc
           key: arrow-orc-cache-${{ github.sha }}
 
       - name: Configure CMake
@@ -136,7 +156,17 @@ jobs:
       - name: Restore Arrow and ORC cache
         uses: actions/cache@v4
         with:
-          path: /usr/local
+          path: |
+            /usr/local/lib/libarrow*
+            /usr/local/lib/libparquet*
+            /usr/local/lib/liborc*
+            /usr/local/lib/cmake/arrow
+            /usr/local/lib/cmake/orc
+            /usr/local/lib/pkgconfig/arrow*
+            /usr/local/lib/pkgconfig/liborc*
+            /usr/local/include/arrow
+            /usr/local/include/parquet
+            /usr/local/include/orc
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
@@ -224,7 +254,17 @@ jobs:
       - name: Restore Arrow and ORC cache
         uses: actions/cache@v4
         with:
-          path: /usr/local
+          path: |
+            /usr/local/lib/libarrow*
+            /usr/local/lib/libparquet*
+            /usr/local/lib/liborc*
+            /usr/local/lib/cmake/arrow
+            /usr/local/lib/cmake/orc
+            /usr/local/lib/pkgconfig/arrow*
+            /usr/local/lib/pkgconfig/liborc*
+            /usr/local/include/arrow
+            /usr/local/include/parquet
+            /usr/local/include/orc
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
