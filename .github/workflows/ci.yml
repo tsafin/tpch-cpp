@@ -42,43 +42,44 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/lib/libarrow*
-            /usr/local/lib/libparquet*
-            /usr/local/lib/liborc*
-            /usr/local/lib/cmake/arrow
-            /usr/local/lib/cmake/orc
-            /usr/local/lib/pkgconfig/arrow*
-            /usr/local/lib/pkgconfig/liborc*
-            /usr/local/include/arrow
-            /usr/local/include/parquet
-            /usr/local/include/orc
+            /home/runner/dependencies/lib/libarrow*
+            /home/runner/dependencies/lib/libparquet*
+            /home/runner/dependencies/lib/liborc*
+            /home/runner/dependencies/lib/cmake/arrow
+            /home/runner/dependencies/lib/cmake/orc
+            /home/runner/dependencies/lib/pkgconfig/arrow*
+            /home/runner/dependencies/lib/pkgconfig/liborc*
+            /home/runner/dependencies/include/arrow
+            /home/runner/dependencies/include/parquet
+            /home/runner/dependencies/include/orc
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
       - name: Build Arrow and ORC from source
         if: steps.cache-arrow-orc.outputs.cache-hit != 'true'
-        run: bash scripts/ci_build_arrow_and_orc.sh ON
+        run: bash scripts/ci_build_arrow_and_orc.sh ON /home/runner/dependencies
 
       - name: Cache Arrow and ORC libraries
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/lib/libarrow*
-            /usr/local/lib/libparquet*
-            /usr/local/lib/liborc*
-            /usr/local/lib/cmake/arrow
-            /usr/local/lib/cmake/orc
-            /usr/local/lib/pkgconfig/arrow*
-            /usr/local/lib/pkgconfig/liborc*
-            /usr/local/include/arrow
-            /usr/local/include/parquet
-            /usr/local/include/orc
+            /home/runner/dependencies/lib/libarrow*
+            /home/runner/dependencies/lib/libparquet*
+            /home/runner/dependencies/lib/liborc*
+            /home/runner/dependencies/lib/cmake/arrow
+            /home/runner/dependencies/lib/cmake/orc
+            /home/runner/dependencies/lib/pkgconfig/arrow*
+            /home/runner/dependencies/lib/pkgconfig/liborc*
+            /home/runner/dependencies/include/arrow
+            /home/runner/dependencies/include/parquet
+            /home/runner/dependencies/include/orc
           key: arrow-orc-cache-${{ github.sha }}
 
       - name: Configure CMake
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=/home/runner/dependencies \
             -DTPCH_ENABLE_ORC=ON \
             -DTPCH_ENABLE_ASYNC_IO=ON \
             -DTPCH_ENABLE_ASAN=OFF \
@@ -159,16 +160,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/lib/libarrow*
-            /usr/local/lib/libparquet*
-            /usr/local/lib/liborc*
-            /usr/local/lib/cmake/arrow
-            /usr/local/lib/cmake/orc
-            /usr/local/lib/pkgconfig/arrow*
-            /usr/local/lib/pkgconfig/liborc*
-            /usr/local/include/arrow
-            /usr/local/include/parquet
-            /usr/local/include/orc
+            /home/runner/dependencies/lib/libarrow*
+            /home/runner/dependencies/lib/libparquet*
+            /home/runner/dependencies/lib/liborc*
+            /home/runner/dependencies/lib/cmake/arrow
+            /home/runner/dependencies/lib/cmake/orc
+            /home/runner/dependencies/lib/pkgconfig/arrow*
+            /home/runner/dependencies/lib/pkgconfig/liborc*
+            /home/runner/dependencies/include/arrow
+            /home/runner/dependencies/include/parquet
+            /home/runner/dependencies/include/orc
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
@@ -182,26 +183,20 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
-          # Update library cache to register installed libraries
-          sudo ldconfig
+          # Setup library path to use cached dependencies
+          export LD_LIBRARY_PATH=/home/runner/dependencies/lib:$LD_LIBRARY_PATH
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Verify library installation
         run: |
-          echo "=== Installed Arrow/Parquet packages ==="
-          dpkg -l | grep -E "arrow|parquet" || echo "No arrow/parquet packages found"
-          echo ""
-          echo "=== Libraries found in ldconfig ==="
-          ldconfig -p | grep -E "libparquet|libarrow|liborc" || echo "No Arrow/Parquet/ORC in ldconfig cache"
-          echo ""
           echo "=== Current LD_LIBRARY_PATH ==="
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
           echo ""
-          echo "=== Searching filesystem for libparquet ==="
-          find /usr -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found in /usr"
-          find /lib -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found in /lib"
+          echo "=== Searching for libparquet ==="
+          find /home/runner/dependencies -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found"
           echo ""
-          echo "=== Searching filesystem for liborc ==="
-          find /usr/local -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found in /usr/local"
+          echo "=== Searching for liborc ==="
+          find /home/runner/dependencies -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found"
 
       - name: Run format coverage benchmark
         continue-on-error: true
@@ -257,16 +252,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/lib/libarrow*
-            /usr/local/lib/libparquet*
-            /usr/local/lib/liborc*
-            /usr/local/lib/cmake/arrow
-            /usr/local/lib/cmake/orc
-            /usr/local/lib/pkgconfig/arrow*
-            /usr/local/lib/pkgconfig/liborc*
-            /usr/local/include/arrow
-            /usr/local/include/parquet
-            /usr/local/include/orc
+            /home/runner/dependencies/lib/libarrow*
+            /home/runner/dependencies/lib/libparquet*
+            /home/runner/dependencies/lib/liborc*
+            /home/runner/dependencies/lib/cmake/arrow
+            /home/runner/dependencies/lib/cmake/orc
+            /home/runner/dependencies/lib/pkgconfig/arrow*
+            /home/runner/dependencies/lib/pkgconfig/liborc*
+            /home/runner/dependencies/include/arrow
+            /home/runner/dependencies/include/parquet
+            /home/runner/dependencies/include/orc
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
@@ -280,26 +275,20 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
-          # Update library cache to register installed libraries
-          sudo ldconfig
+          # Setup library path to use cached dependencies
+          export LD_LIBRARY_PATH=/home/runner/dependencies/lib:$LD_LIBRARY_PATH
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Verify library installation
         run: |
-          echo "=== Installed Arrow/Parquet packages ==="
-          dpkg -l | grep -E "arrow|parquet" || echo "No arrow/parquet packages found"
-          echo ""
-          echo "=== Libraries found in ldconfig ==="
-          ldconfig -p | grep -E "libparquet|libarrow|liborc" || echo "No Arrow/Parquet/ORC in ldconfig cache"
-          echo ""
           echo "=== Current LD_LIBRARY_PATH ==="
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
           echo ""
-          echo "=== Searching filesystem for libparquet ==="
-          find /usr -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found in /usr"
-          find /lib -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found in /lib"
+          echo "=== Searching for libparquet ==="
+          find /home/runner/dependencies -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found"
           echo ""
-          echo "=== Searching filesystem for liborc ==="
-          find /usr/local -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found in /usr/local"
+          echo "=== Searching for liborc ==="
+          find /home/runner/dependencies -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found"
 
       - name: Run optimization benchmark
         continue-on-error: true

@@ -8,6 +8,9 @@
 #
 # Arrow doesn't need protobuf for CSV and Parquet support, so this is safe.
 # Only advanced features like Flight and Substrait need protobuf.
+#
+# Usage: bash build_arrow_from_source.sh [install_prefix]
+#   install_prefix: Installation directory (default: /usr/local)
 
 set -e
 set -x
@@ -17,6 +20,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ARROW_DIR="${PROJECT_ROOT}/third_party/arrow"
 XSIMD_DIR="${PROJECT_ROOT}/third_party/xsimd"
 XSIMD_INSTALL_DIR="${PROJECT_ROOT}/build/xsimd_install"
+INSTALL_PREFIX="${1:-/usr/local}"
 
 # Check if Arrow source directory exists
 if [ ! -d "${ARROW_DIR}" ] || [ ! -f "${ARROW_DIR}/cpp/CMakeLists.txt" ]; then
@@ -55,12 +59,12 @@ echo "Building and installing Apache Arrow..."
 mkdir -p "${ARROW_DIR}/cpp/build"
 cd "${ARROW_DIR}/cpp/build"
 
-export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+export PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/pkgconfig:$PKG_CONFIG_PATH"
 
 cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
     -DCMAKE_MODULE_PATH="${ARROW_DIR}/cpp/cmake_modules" \
-    -DCMAKE_PREFIX_PATH="${XSIMD_INSTALL_DIR};/usr/local" \
+    -DCMAKE_PREFIX_PATH="${XSIMD_INSTALL_DIR};${INSTALL_PREFIX}" \
     -DARROW_WITH_SNAPPY=ON \
     -DARROW_WITH_ZSTD=ON \
     -DARROW_WITH_LZ4=ON \
@@ -76,6 +80,12 @@ cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DARROW_SUBSTRAIT=OFF
 
 make -j$(nproc)
-sudo make install
+
+# Use sudo only if installing to /usr/local (system directory)
+if [ "${INSTALL_PREFIX}" = "/usr/local" ]; then
+    sudo make install
+else
+    make install
+fi
 
 echo "Apache Arrow C++ has been built and installed successfully."

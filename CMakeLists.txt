@@ -88,9 +88,11 @@ set(re2Alt_FOUND TRUE)
 find_package(Thrift REQUIRED)
 set(ThriftAlt_FOUND TRUE)
 
-# Protobuf is needed for linking ORC (which was built with system protobuf embedded)
-# Arrow is built WITHOUT protobuf, so there's no conflict between Arrow and ORC's protobuf use
-find_package(Protobuf QUIET)
+# Protobuf handling:
+# - Arrow is built WITHOUT protobuf (-DARROW_WITH_PROTOBUF=OFF)
+# - ORC is built with protobuf STATICALLY EMBEDDED (-DORC_PREFER_STATIC_PROTOBUF=ON)
+# - We do NOT link protobuf separately to avoid conflicts with ORC's embedded protobuf
+# - ORC's CMake target (ORC::orc) handles all protobuf dependencies internally
 
 find_package(Snappy QUIET)
 find_package(ZLIB QUIET)
@@ -202,21 +204,10 @@ if(xsimd_FOUND)
 endif()
 
 # Link ORC if enabled and available
-# Note: ORC was built with system protobuf embedded in the static library
-# Arrow was built WITHOUT protobuf, so no conflict
+# Note: ORC was built with protobuf STATICALLY EMBEDDED via -DORC_PREFER_STATIC_PROTOBUF=ON
+# ORC's CMake target handles all protobuf dependencies internally, so we only need to link ORC::orc
 if(TPCH_ENABLE_ORC AND ORC_FOUND)
     target_link_libraries(tpch_core PRIVATE ORC::orc)
-
-    # Link protobuf for ORC (required since ORC is a static library built with protobuf)
-    if(Protobuf_FOUND)
-        if(TARGET protobuf::libprotobuf)
-            target_link_libraries(tpch_core PRIVATE protobuf::libprotobuf)
-        elseif(TARGET Protobuf::protobuf)
-            target_link_libraries(tpch_core PRIVATE Protobuf::protobuf)
-        elseif(Protobuf_LIBRARIES)
-            target_link_libraries(tpch_core PRIVATE ${Protobuf_LIBRARIES})
-        endif()
-    endif()
 endif()
 
 # Arrow has dependencies on system libraries that need to be linked AFTER ORC

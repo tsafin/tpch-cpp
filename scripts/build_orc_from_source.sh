@@ -4,12 +4,16 @@
 # ORC is built as a STATIC library to be linked into the executable.
 # This encapsulates ORC's protobuf definitions and avoids conflicts
 # with Arrow (which is built without protobuf support).
+#
+# Usage: bash build_orc_from_source.sh [install_prefix]
+#   install_prefix: Installation directory (default: /usr/local)
 
 set -e
 set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+INSTALL_PREFIX="${1:-/usr/local}"
 
 # Install build dependencies
 sudo apt-get update
@@ -35,7 +39,7 @@ git clean -xfd
 # - Protobuf is embedded statically within liborc.a
 # - System libraries (zlib, zstd, lz4, snappy) are dynamic dependencies
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
     -DBUILD_SHARED_LIBS=OFF \
     -DBUILD_JAVA=OFF \
     -DBUILD_LIBHDFSPP=OFF \
@@ -55,6 +59,11 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
 JOBS=$(( ($(nproc)/2) > 0 ? ($(nproc)/2 + 2) : 1 ))
 cmake --build build -j"${JOBS}"
 
-sudo cmake --install build
+# Use sudo only if installing to /usr/local (system directory)
+if [ "${INSTALL_PREFIX}" = "/usr/local" ]; then
+    sudo cmake --install build
+else
+    cmake --install build
+fi
 
 echo "Apache ORC C++ has been built and installed successfully."
