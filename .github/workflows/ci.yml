@@ -41,17 +41,7 @@ jobs:
         id: cache-arrow-orc
         uses: actions/cache@v4
         with:
-          path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/liborc*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/cmake/orc
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/lib/pkgconfig/liborc*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
-            /home/runner/dependencies/include/orc
+          path: /home/runner/dependencies
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
@@ -62,17 +52,7 @@ jobs:
       - name: Cache Arrow and ORC libraries
         uses: actions/cache@v4
         with:
-          path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/liborc*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/cmake/orc
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/lib/pkgconfig/liborc*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
-            /home/runner/dependencies/include/orc
+          path: /home/runner/dependencies
           key: arrow-orc-cache-${{ github.sha }}
 
       - name: Configure CMake
@@ -159,17 +139,7 @@ jobs:
       - name: Restore Arrow and ORC cache
         uses: actions/cache@v4
         with:
-          path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/liborc*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/cmake/orc
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/lib/pkgconfig/liborc*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
-            /home/runner/dependencies/include/orc
+          path: /home/runner/dependencies
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
@@ -251,17 +221,7 @@ jobs:
       - name: Restore Arrow and ORC cache
         uses: actions/cache@v4
         with:
-          path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/liborc*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/cmake/orc
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/lib/pkgconfig/liborc*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
-            /home/runner/dependencies/include/orc
+          path: /home/runner/dependencies
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
