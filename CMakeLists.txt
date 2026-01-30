@@ -204,10 +204,23 @@ if(xsimd_FOUND)
 endif()
 
 # Link ORC if enabled and available
-# Note: ORC was built with protobuf STATICALLY EMBEDDED via -DORC_PREFER_STATIC_PROTOBUF=ON
-# ORC's CMake target handles all protobuf dependencies internally, so we only need to link ORC::orc
+# Note: ORC was built with static protobuf (-DORC_PREFER_STATIC_PROTOBUF=ON)
+# ORC's static library (.a) requires explicit protobuf linking even though
+# protobuf is embedded, because the symbols are referenced by ORC object files
 if(TPCH_ENABLE_ORC AND ORC_FOUND)
     target_link_libraries(tpch_core PRIVATE ORC::orc)
+
+    # Link protobuf - required for ORC static library symbols
+    # This does NOT cause conflicts because we don't use protobuf ourselves
+    # and ORC's protobuf definitions are self-contained
+    find_package(Protobuf QUIET)
+    if(Protobuf_FOUND)
+        if(TARGET protobuf::libprotobuf)
+            target_link_libraries(tpch_core PRIVATE protobuf::libprotobuf)
+        elseif(Protobuf_LIBRARIES)
+            target_link_libraries(tpch_core PRIVATE ${Protobuf_LIBRARIES})
+        endif()
+    endif()
 endif()
 
 # Arrow has dependencies on system libraries that need to be linked AFTER ORC
