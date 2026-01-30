@@ -207,7 +207,7 @@ jobs:
             --format ${{ matrix.format }} \
             --table ${{ matrix.table }} \
             --output-dir benchmark-results/ \
-            --verbose 2>&1 | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"
+            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"
 
           # Fail if process dumped core
           if grep -q "dumped core" "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"; then
@@ -307,7 +307,7 @@ jobs:
             --table ${{ matrix.table }} \
             --output-dir benchmark-results/ \
             $MODE_FLAGS \
-            --verbose 2>&1 | tee "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log"
+            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log"
 
           # Fail if process dumped core
           if grep -q "dumped core" "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log"; then
