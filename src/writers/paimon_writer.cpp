@@ -10,10 +10,8 @@
 #include <sstream>
 #include <vector>
 
-#include <arrow/type.h>
-#include <arrow/record_batch.h>
-#include <arrow/schema.h>
-#include <arrow/table.h>
+#include <arrow/api.h>
+#include <arrow/io/file.h>
 #include <parquet/arrow/writer.h>
 #include <iomanip>
 
@@ -21,10 +19,7 @@ namespace tpch {
 
 PaimonWriter::PaimonWriter(const std::string& table_path, const std::string& table_name)
     : table_path_(table_path),
-      table_name_(table_name),
-      paimon_write_context_(nullptr),
-      paimon_record_batch_builder_(nullptr),
-      paimon_commit_context_(nullptr) {
+      table_name_(table_name) {
 
     // Create table directory if it doesn't exist
     try {
@@ -46,10 +41,6 @@ PaimonWriter::~PaimonWriter() {
     } catch (const std::exception& e) {
         std::cerr << "Warning closing Paimon writer: " << e.what() << std::endl;
     }
-
-    // Note: Cleanup of paimon_* pointers would occur here when paimon-cpp
-    // provides the necessary deleter functions. For now, these are owned
-    // by paimon-cpp internal structures.
 }
 
 std::string PaimonWriter::arrow_type_to_paimon_type(
@@ -120,10 +111,19 @@ std::string PaimonWriter::write_data_file() {
         auto table = table_result.ValueOrDie();
 
         // Write to Parquet file using parquet::arrow::WriteTable
-        auto status = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), filepath);
+        auto file_result = arrow::io::FileOutputStream::Open(filepath);
+        if (!file_result.ok()) {
+            throw std::runtime_error("Failed to open file for writing: " + file_result.status().ToString());
+        }
+        auto file = file_result.ValueOrDie();
+
+        auto status = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), file);
         if (!status.ok()) {
             throw std::runtime_error("Failed to write Parquet file: " + status.ToString());
         }
+
+        // Close file
+        file->Close();
 
         // Track file and row count
         int64_t rows_written = 0;

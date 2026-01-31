@@ -115,8 +115,10 @@ if(TPCH_ENABLE_ORC)
     find_package(ORC QUIET)
 endif()
 
+# Paimon support: Note that our implementation uses Parquet as backing format
+# and does not require paimon-cpp C++ library, so we don't need to find it
 if(TPCH_ENABLE_PAIMON)
-    find_package(Paimon QUIET)
+    set(Paimon_FOUND TRUE)
 endif()
 
 # Print found status
@@ -134,11 +136,7 @@ else()
 endif()
 
 if(TPCH_ENABLE_PAIMON)
-    if(Paimon_FOUND)
-        message(STATUS "Paimon found: ${PAIMON_LIBRARY}")
-    else()
-        message(FATAL_ERROR "Paimon requested (TPCH_ENABLE_PAIMON=ON) but not found - build with: bash scripts/build_paimon_from_source.sh")
-    endif()
+    message(STATUS "Paimon support enabled (uses Parquet backing format)")
 else()
     message(STATUS "Paimon support disabled (TPCH_ENABLE_PAIMON=OFF)")
 endif()
@@ -245,10 +243,7 @@ if(TPCH_ENABLE_ORC AND ORC_FOUND)
     endif()
 endif()
 
-# Link Paimon if enabled and available
-if(TPCH_ENABLE_PAIMON AND Paimon_FOUND)
-    target_link_libraries(tpch_core PRIVATE Paimon::paimon)
-endif()
+# Paimon linking not needed - uses Parquet backing format directly
 
 # Arrow has dependencies on system libraries that need to be linked AFTER ORC
 # Link compression libraries for Arrow's support
