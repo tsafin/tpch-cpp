@@ -67,18 +67,37 @@ private:
     std::string table_name_;
     std::shared_ptr<arrow::Schema> schema_;
     bool schema_locked_ = false;
+    int64_t row_count_ = 0;
+    int32_t file_count_ = 0;
 
-    // Opaque pointers to paimon-cpp implementations
-    // Cast to actual types in implementation file to avoid header pollution
-    void* paimon_write_context_;      // WriteContext*
-    void* paimon_record_batch_builder_;  // RecordBatchBuilder*
-    void* paimon_commit_context_;     // CommitContext*
+    // Store batches for buffered writing to Parquet
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches_;
+    std::vector<std::string> written_files_;
 
     /**
      * Initialize Paimon write context on first batch.
      * Locks schema and creates necessary directories and metadata structures.
      */
     void initialize_paimon_table(const std::shared_ptr<arrow::RecordBatch>& first_batch);
+
+    /**
+     * Write accumulated batches to Parquet data file.
+     * Creates a data file and tracks it for manifest.
+     * @return Path to written file
+     */
+    std::string write_data_file();
+
+    /**
+     * Create Paimon snapshot metadata JSON.
+     * @return JSON string representing snapshot
+     */
+    std::string create_snapshot_metadata();
+
+    /**
+     * Create Paimon manifest metadata JSON.
+     * @return JSON string representing manifest
+     */
+    std::string create_manifest_metadata();
 
     /**
      * Convert Arrow DataType to Paimon type string.

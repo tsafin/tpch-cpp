@@ -6,10 +6,16 @@
 #include <stdexcept>
 #include <memory>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <vector>
 
 #include <arrow/type.h>
 #include <arrow/record_batch.h>
 #include <arrow/schema.h>
+#include <arrow/table.h>
+#include <parquet/arrow/writer.h>
+#include <iomanip>
 
 namespace tpch {
 
@@ -86,27 +92,6 @@ void PaimonWriter::initialize_paimon_table(
         std::filesystem::create_directories(table_path_ + "/manifest");
         std::filesystem::create_directories(table_path_ + "/data");
 
-        // Write schema metadata to a JSON file that describes the table
-        // This is a simplified approach - full Paimon integration would use
-        // the paimon-cpp WriteContext API to create proper metadata
-
-        std::string schema_json = "{\"table_name\": \"" + table_name_ + "\", \"columns\": [";
-
-        for (int i = 0; i < schema_->num_fields(); ++i) {
-            if (i > 0) schema_json += ", ";
-
-            auto field = schema_->field(i);
-            std::string paimon_type = arrow_type_to_paimon_type(field->type());
-
-            schema_json += "{\"name\": \"" + field->name() +
-                          "\", \"type\": \"" + paimon_type + "\"}";
-        }
-
-        schema_json += "]}";
-
-        // Store metadata for later use when creating snapshots
-        // The actual paimon-cpp WriteContext would be initialized here when available
-
         schema_locked_ = true;
 
     } catch (const std::exception& e) {
@@ -114,6 +99,87 @@ void PaimonWriter::initialize_paimon_table(
             std::string("Failed to initialize Paimon table: ") + e.what()
         );
     }
+}
+
+std::string PaimonWriter::write_data_file() {
+    if (batches_.empty()) {
+        return "";
+    }
+
+    try {
+        // Generate data file path
+        std::ostringstream filename;
+        filename << "data_" << std::setfill('0') << std::setw(6) << file_count_ << ".parquet";
+        std::string filepath = table_path_ + "/data/" + filename.str();
+
+        // Create table from batches
+        auto table_result = arrow::Table::FromRecordBatches(batches_);
+        if (!table_result.ok()) {
+            throw std::runtime_error("Failed to create Arrow table from batches: " + table_result.status().ToString());
+        }
+        auto table = table_result.ValueOrDie();
+
+        // Write to Parquet file using parquet::arrow::WriteTable
+        auto status = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), filepath);
+        if (!status.ok()) {
+            throw std::runtime_error("Failed to write Parquet file: " + status.ToString());
+        }
+
+        // Track file and row count
+        int64_t rows_written = 0;
+        for (const auto& batch : batches_) {
+            rows_written += batch->num_rows();
+        }
+        row_count_ += rows_written;
+        written_files_.push_back(filename.str());
+        file_count_++;
+
+        // Clear batches for next file
+        batches_.clear();
+
+        return filepath;
+
+    } catch (const std::exception& e) {
+        throw std::runtime_error(
+            std::string("Failed to write Paimon data file: ") + e.what()
+        );
+    }
+}
+
+std::string PaimonWriter::create_manifest_metadata() {
+    std::ostringstream json;
+    json << "{\n"
+         << "  \"version\": 1,\n"
+         << "  \"manifestEntries\": [\n";
+
+    for (size_t i = 0; i < written_files_.size(); ++i) {
+        if (i > 0) json << ",\n";
+        json << "    {\n"
+             << "      \"dataFile\": \"" << written_files_[i] << "\",\n"
+             << "      \"fileFormat\": \"parquet\",\n"
+             << "      \"schemaId\": 0\n"
+             << "    }";
+    }
+
+    json << "\n  ]\n}\n";
+    return json.str();
+}
+
+std::string PaimonWriter::create_snapshot_metadata() {
+    std::ostringstream json;
+    json << "{\n"
+         << "  \"version\": 1,\n"
+         << "  \"snapshotId\": 1,\n"
+         << "  \"schemaId\": 0,\n"
+         << "  \"recordCount\": " << row_count_ << ",\n"
+         << "  \"manifestList\": [\n";
+
+    if (!written_files_.empty()) {
+        json << "    \"manifest-1\"\n";
+    }
+
+    json << "  ]\n}\n";
+    return json.str();
 }
 
 void PaimonWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
@@ -134,17 +200,18 @@ void PaimonWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch)
     }
 
     try {
-        // For now, we'll use Parquet as the backing format within Paimon
-        // Full paimon-cpp integration would write via WriteContext
+        // Accumulate batch for buffered writing
+        batches_.push_back(batch);
 
-        // This is a placeholder - actual implementation would:
-        // 1. Use paimon-cpp WriteContext to write batches
-        // 2. Track file paths for manifest generation
-        // 3. Handle compression and block layout
+        // Write when we have accumulated enough batches (e.g., ~10M rows per file)
+        // This is a tuning parameter - adjust based on memory constraints
+        int64_t accumulated_rows = 0;
+        for (const auto& b : batches_) {
+            accumulated_rows += b->num_rows();
+        }
 
-        if (batch->num_rows() > 0) {
-            // Batch data has been received and validated
-            // Accumulate for later writing via paimon-cpp
+        if (accumulated_rows >= 10000000) {
+            write_data_file();
         }
 
     } catch (const std::exception& e) {
@@ -160,19 +227,24 @@ void PaimonWriter::close() {
     }
 
     try {
-        // Create snapshot metadata to finalize the table
-        // In a full implementation, this would use paimon-cpp CommitContext
+        // Flush remaining batches to data file
+        if (!batches_.empty()) {
+            write_data_file();
+        }
 
-        // For now, create a minimal snapshot-1 file to indicate table exists
-        std::string snapshot_json =
-            "{"
-            "  \"snapshotId\": 1,"
-            "  \"schemaId\": 0,"
-            "  \"baseManifestList\": []"
-            "}";
+        // Write manifest metadata
+        if (!written_files_.empty()) {
+            std::string manifest_json = create_manifest_metadata();
+            std::ofstream manifest_file(table_path_ + "/manifest/manifest-1");
+            manifest_file << manifest_json;
+            manifest_file.close();
+        }
 
-        // Write placeholder snapshot file
-        // Full implementation would create proper Paimon snapshot metadata
+        // Write snapshot metadata
+        std::string snapshot_json = create_snapshot_metadata();
+        std::ofstream snapshot_file(table_path_ + "/snapshot/snapshot-1");
+        snapshot_file << snapshot_json;
+        snapshot_file.close();
 
     } catch (const std::exception& e) {
         std::cerr << "Warning finalizing Paimon table: " << e.what() << std::endl;
