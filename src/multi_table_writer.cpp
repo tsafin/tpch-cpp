@@ -6,6 +6,9 @@
 #ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
 #endif
+#ifdef TPCH_ENABLE_PAIMON
+#include "tpch/paimon_writer.hpp"
+#endif
 #include <sys/stat.h>
 #include <stdexcept>
 #include <sstream>
@@ -53,6 +56,13 @@ WriterPtr MultiTableWriter::create_writer(TableType /*table_type*/, const std::s
 #ifdef TPCH_ENABLE_ORC
     else if (format_ == "orc") {
         writer = std::make_unique<ORCWriter>(filepath);
+    }
+#endif
+#ifdef TPCH_ENABLE_PAIMON
+    else if (format_ == "paimon") {
+        // Paimon uses table directory, not single file
+        // filepath is the base output directory, we use it as the table path
+        writer = std::make_unique<PaimonWriter>(filepath);
     }
 #endif
     else {

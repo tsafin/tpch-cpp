@@ -25,6 +25,9 @@
 #ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
 #endif
+#ifdef TPCH_ENABLE_PAIMON
+#include "tpch/paimon_writer.hpp"
+#endif
 
 namespace {
 
@@ -46,7 +49,14 @@ void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
               << "Options:\n"
               << "  --scale-factor <SF>   TPC-H scale factor (default: 1)\n"
-              << "  --format <format>     Output format: parquet, csv, orc (default: parquet)\n"
+              << "  --format <format>     Output format: parquet, csv"
+#ifdef TPCH_ENABLE_ORC
+              << ", orc"
+#endif
+#ifdef TPCH_ENABLE_PAIMON
+              << ", paimon"
+#endif
+              << " (default: parquet)\n"
               << "  --output-dir <dir>    Output directory (default: /tmp)\n"
               << "  --max-rows <N>        Maximum rows to generate (default: 1000, 0=all)\n"
               << "  --use-dbgen           Use official TPC-H dbgen (default: synthetic data)\n"
@@ -173,6 +183,11 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
 #ifdef TPCH_ENABLE_ORC
     else if (format == "orc") {
         return std::make_unique<tpch::ORCWriter>(filepath);
+    }
+#endif
+#ifdef TPCH_ENABLE_PAIMON
+    else if (format == "paimon") {
+        return std::make_unique<tpch::PaimonWriter>(filepath);
     }
 #endif
     else {
@@ -1161,6 +1176,9 @@ int main(int argc, char* argv[]) {
         if (opts.format != "csv" && opts.format != "parquet"
 #ifdef TPCH_ENABLE_ORC
             && opts.format != "orc"
+#endif
+#ifdef TPCH_ENABLE_PAIMON
+            && opts.format != "paimon"
 #endif
         ) {
             std::cerr << "Error: Unknown format '" << opts.format << "'\n";

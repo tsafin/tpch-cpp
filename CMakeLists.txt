@@ -23,6 +23,7 @@ option(TPCH_BUILD_TESTS "Build unit tests" OFF)
 option(TPCH_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(TPCH_ENABLE_ASYNC_IO "Enable async I/O with io_uring" OFF)
 option(TPCH_ENABLE_ORC "Enable ORC file format support" OFF)
+option(TPCH_ENABLE_PAIMON "Enable Apache Paimon table format support" OFF)
 option(TPCH_ENABLE_PERF_COUNTERS "Enable performance counters instrumentation" OFF)
 
 # Compiler configuration
@@ -114,6 +115,10 @@ if(TPCH_ENABLE_ORC)
     find_package(ORC QUIET)
 endif()
 
+if(TPCH_ENABLE_PAIMON)
+    find_package(Paimon QUIET)
+endif()
+
 # Print found status
 message(STATUS "Arrow found: ${Arrow_LIBRARY}")
 message(STATUS "Parquet found: ${Parquet_LIBRARY}")
@@ -126,6 +131,16 @@ if(TPCH_ENABLE_ORC)
     endif()
 else()
     message(STATUS "ORC support disabled (TPCH_ENABLE_ORC=OFF)")
+endif()
+
+if(TPCH_ENABLE_PAIMON)
+    if(Paimon_FOUND)
+        message(STATUS "Paimon found: ${PAIMON_LIBRARY}")
+    else()
+        message(FATAL_ERROR "Paimon requested (TPCH_ENABLE_PAIMON=ON) but not found - build with: bash scripts/build_paimon_from_source.sh")
+    endif()
+else()
+    message(STATUS "Paimon support disabled (TPCH_ENABLE_PAIMON=OFF)")
 endif()
 
 if(TPCH_ENABLE_ASYNC_IO)
@@ -185,6 +200,13 @@ if(TPCH_ENABLE_ORC AND ORC_FOUND)
     )
 endif()
 
+# Add Paimon writer if enabled and available
+if(TPCH_ENABLE_PAIMON AND Paimon_FOUND)
+    list(APPEND TPCH_CORE_SOURCES
+        src/writers/paimon_writer.cpp
+    )
+endif()
+
 # Create core library
 add_library(tpch_core STATIC ${TPCH_CORE_SOURCES})
 target_include_directories(tpch_core PUBLIC include)
@@ -223,6 +245,11 @@ if(TPCH_ENABLE_ORC AND ORC_FOUND)
     endif()
 endif()
 
+# Link Paimon if enabled and available
+if(TPCH_ENABLE_PAIMON AND Paimon_FOUND)
+    target_link_libraries(tpch_core PRIVATE Paimon::paimon)
+endif()
+
 # Arrow has dependencies on system libraries that need to be linked AFTER ORC
 # Link compression libraries for Arrow's support
 find_library(ZLIB_LIB NAMES z)
@@ -254,6 +281,10 @@ if(TPCH_ENABLE_ORC)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ORC)
 endif()
 
+if(TPCH_ENABLE_PAIMON)
+    target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_PAIMON)
+endif()
+
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_link_libraries(tpch_core PUBLIC Uring::uring)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ASYNC_IO)
@@ -271,6 +302,9 @@ target_link_libraries(tpch_benchmark PRIVATE tpch_core)
 # Ensure main executable sees the same compilation flags
 if(TPCH_ENABLE_ORC)
     target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ORC)
+endif()
+if(TPCH_ENABLE_PAIMON)
+    target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_PAIMON)
 endif()
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ASYNC_IO)
