@@ -31,6 +31,9 @@
 #ifdef TPCH_ENABLE_ICEBERG
 #include "tpch/iceberg_writer.hpp"
 #endif
+#ifdef TPCH_ENABLE_LANCE
+#include "tpch/lance_writer.hpp"
+#endif
 
 namespace {
 
@@ -61,6 +64,9 @@ void print_usage(const char* prog) {
 #endif
 #ifdef TPCH_ENABLE_ICEBERG
               << ", iceberg"
+#endif
+#ifdef TPCH_ENABLE_LANCE
+              << ", lance"
 #endif
               << " (default: parquet)\n"
               << "  --output-dir <dir>    Output directory (default: /tmp)\n"
@@ -199,6 +205,11 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
 #ifdef TPCH_ENABLE_ICEBERG
     else if (format == "iceberg") {
         return std::make_unique<tpch::IcebergWriter>(filepath);
+    }
+#endif
+#ifdef TPCH_ENABLE_LANCE
+    else if (format == "lance") {
+        return std::make_unique<tpch::LanceWriter>(filepath);
     }
 #endif
     else {
@@ -1193,6 +1204,9 @@ int main(int argc, char* argv[]) {
 #endif
 #ifdef TPCH_ENABLE_ICEBERG
             && opts.format != "iceberg"
+#endif
+#ifdef TPCH_ENABLE_LANCE
+            && opts.format != "lance"
 #endif
         ) {
             std::cerr << "Error: Unknown format '" << opts.format << "'\n";
