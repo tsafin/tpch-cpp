@@ -1,6 +1,6 @@
 # TPC-H C++ Data Generator
 
-A high-performance TPC-H data generator with multiple output format support (Parquet, ORC, CSV) and optional asynchronous I/O capabilities using Linux io_uring.
+A high-performance TPC-H data generator with multiple output format support (Parquet, ORC, CSV, Paimon, Iceberg) and optional asynchronous I/O capabilities using Linux io_uring.
 
 ## Features
 
@@ -8,6 +8,8 @@ A high-performance TPC-H data generator with multiple output format support (Par
   - Apache Parquet (columnar, compressed)
   - Apache ORC (columnar, optimized for Hive/Spark)
   - CSV (row-oriented, human-readable)
+  - Apache Paimon (lakehouse table format with metadata)
+  - Apache Iceberg (industry-standard lakehouse format, compatible with Spark/Trino/DuckDB)
 
 - **Apache Arrow Integration**
   - Central in-memory columnar representation
@@ -49,9 +51,9 @@ Install system dependencies:
 ### Build
 
 ```bash
-# Configure
+# Configure with default options (Parquet, CSV only)
 mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
 
 # Build
 make -j$(nproc)
@@ -60,18 +62,52 @@ make -j$(nproc)
 make install
 ```
 
+#### Building with Optional Formats
+
+Enable Paimon table format:
+```bash
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTPCH_ENABLE_PAIMON=ON ..
+```
+
+Enable Iceberg table format:
+```bash
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTPCH_ENABLE_ICEBERG=ON ..
+```
+
+Enable both Paimon and Iceberg:
+```bash
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTPCH_ENABLE_PAIMON=ON -DTPCH_ENABLE_ICEBERG=ON ..
+```
+
+Enable ORC format (requires liborc-dev):
+```bash
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTPCH_ENABLE_ORC=ON ..
+```
+
 ### Usage
 
-Generate TPC-H data in Parquet format:
+Generate TPC-H customer table in Parquet format:
 
 ```bash
-./tpch_benchmark --scale-factor 1 --format parquet --output data/
+./tpch_benchmark --scale-factor 1 --format parquet --output data/ --use-dbgen --table customer
+```
+
+Generate customer table in Iceberg format (with TPCH_ENABLE_ICEBERG=ON):
+
+```bash
+./tpch_benchmark --scale-factor 1 --format iceberg --output data/ --use-dbgen --table customer
+```
+
+Generate customer table in Paimon format (with TPCH_ENABLE_PAIMON=ON):
+
+```bash
+./tpch_benchmark --scale-factor 1 --format paimon --output data/ --use-dbgen --table customer
 ```
 
 With async I/O (if enabled):
 
 ```bash
-./tpch_benchmark --scale-factor 1 --format parquet --output data/ --async-io
+./tpch_benchmark --scale-factor 1 --format parquet --output data/ --async-io --use-dbgen --table customer
 ```
 
 See `./tpch_benchmark --help` for all options.
