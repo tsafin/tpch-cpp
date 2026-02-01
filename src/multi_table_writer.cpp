@@ -9,6 +9,9 @@
 #ifdef TPCH_ENABLE_PAIMON
 #include "tpch/paimon_writer.hpp"
 #endif
+#ifdef TPCH_ENABLE_ICEBERG
+#include "tpch/iceberg_writer.hpp"
+#endif
 #include <sys/stat.h>
 #include <stdexcept>
 #include <sstream>
@@ -63,6 +66,13 @@ WriterPtr MultiTableWriter::create_writer(TableType /*table_type*/, const std::s
         // Paimon uses table directory, not single file
         // filepath is the base output directory, we use it as the table path
         writer = std::make_unique<PaimonWriter>(filepath);
+    }
+#endif
+#ifdef TPCH_ENABLE_ICEBERG
+    else if (format_ == "iceberg") {
+        // Iceberg uses table directory, not single file
+        // filepath is the base output directory, we use it as the table path
+        writer = std::make_unique<IcebergWriter>(filepath);
     }
 #endif
     else {

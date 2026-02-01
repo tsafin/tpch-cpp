@@ -24,6 +24,7 @@ option(TPCH_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(TPCH_ENABLE_ASYNC_IO "Enable async I/O with io_uring" OFF)
 option(TPCH_ENABLE_ORC "Enable ORC file format support" OFF)
 option(TPCH_ENABLE_PAIMON "Enable Apache Paimon table format support" OFF)
+option(TPCH_ENABLE_ICEBERG "Enable Apache Iceberg table format support" OFF)
 option(TPCH_ENABLE_PERF_COUNTERS "Enable performance counters instrumentation" OFF)
 
 # Compiler configuration
@@ -121,6 +122,12 @@ if(TPCH_ENABLE_PAIMON)
     set(Paimon_FOUND TRUE)
 endif()
 
+# Iceberg support: Similar to Paimon, our implementation uses Parquet as backing format
+# and does not require iceberg-cpp C++ library, so we don't need to find it
+if(TPCH_ENABLE_ICEBERG)
+    set(Iceberg_FOUND TRUE)
+endif()
+
 # Print found status
 message(STATUS "Arrow found: ${Arrow_LIBRARY}")
 message(STATUS "Parquet found: ${Parquet_LIBRARY}")
@@ -139,6 +146,12 @@ if(TPCH_ENABLE_PAIMON)
     message(STATUS "Paimon support enabled (uses Parquet backing format)")
 else()
     message(STATUS "Paimon support disabled (TPCH_ENABLE_PAIMON=OFF)")
+endif()
+
+if(TPCH_ENABLE_ICEBERG)
+    message(STATUS "Iceberg support enabled (uses Parquet backing format)")
+else()
+    message(STATUS "Iceberg support disabled (TPCH_ENABLE_ICEBERG=OFF)")
 endif()
 
 if(TPCH_ENABLE_ASYNC_IO)
@@ -202,6 +215,13 @@ endif()
 if(TPCH_ENABLE_PAIMON AND Paimon_FOUND)
     list(APPEND TPCH_CORE_SOURCES
         src/writers/paimon_writer.cpp
+    )
+endif()
+
+# Add Iceberg writer if enabled and available
+if(TPCH_ENABLE_ICEBERG AND Iceberg_FOUND)
+    list(APPEND TPCH_CORE_SOURCES
+        src/writers/iceberg_writer.cpp
     )
 endif()
 
@@ -280,6 +300,10 @@ if(TPCH_ENABLE_PAIMON)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_PAIMON)
 endif()
 
+if(TPCH_ENABLE_ICEBERG)
+    target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ICEBERG)
+endif()
+
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_link_libraries(tpch_core PUBLIC Uring::uring)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ASYNC_IO)
@@ -300,6 +324,9 @@ if(TPCH_ENABLE_ORC)
 endif()
 if(TPCH_ENABLE_PAIMON)
     target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_PAIMON)
+endif()
+if(TPCH_ENABLE_ICEBERG)
+    target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ICEBERG)
 endif()
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ASYNC_IO)
