@@ -1,0 +1,11 @@
+[package]
+name = "lance_ffi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Minimal dependencies for now - Arrow FFI will be added when Rust is updated
+# The FFI structure is self-contained and can work with C Data Interface directly
+
+[lib]
+crate-type = ["staticlib"]

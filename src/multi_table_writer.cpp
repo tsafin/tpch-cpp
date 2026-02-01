@@ -12,6 +12,9 @@
 #ifdef TPCH_ENABLE_ICEBERG
 #include "tpch/iceberg_writer.hpp"
 #endif
+#ifdef TPCH_ENABLE_LANCE
+#include "tpch/lance_writer.hpp"
+#endif
 #include <sys/stat.h>
 #include <stdexcept>
 #include <sstream>
@@ -73,6 +76,13 @@ WriterPtr MultiTableWriter::create_writer(TableType /*table_type*/, const std::s
         // Iceberg uses table directory, not single file
         // filepath is the base output directory, we use it as the table path
         writer = std::make_unique<IcebergWriter>(filepath);
+    }
+#endif
+#ifdef TPCH_ENABLE_LANCE
+    else if (format_ == "lance") {
+        // Lance uses dataset directory, not single file
+        // filepath is the base output directory, we use it as the dataset path
+        writer = std::make_unique<LanceWriter>(filepath);
     }
 #endif
     else {
