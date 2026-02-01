@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <filesystem>
 #include <getopt.h>
 #include <iomanip>
 #include <sys/stat.h>
@@ -31,9 +30,6 @@
 #endif
 #ifdef TPCH_ENABLE_ICEBERG
 #include "tpch/iceberg_writer.hpp"
-#endif
-#ifdef TPCH_ENABLE_LANCE
-#include "tpch/lance_writer.hpp"
 #endif
 
 namespace {
@@ -65,9 +61,6 @@ void print_usage(const char* prog) {
 #endif
 #ifdef TPCH_ENABLE_ICEBERG
               << ", iceberg"
-#endif
-#ifdef TPCH_ENABLE_LANCE
-              << ", lance"
 #endif
               << " (default: parquet)\n"
               << "  --output-dir <dir>    Output directory (default: /tmp)\n"
@@ -177,54 +170,9 @@ std::string get_output_filename(
     return output_dir + "/" + filename;
 }
 
-// Helper function to recursively calculate directory size
-// Handles directory-based formats (Paimon, Iceberg, Lance)
-int64_t get_directory_size(const std::string& dirpath) {
-    namespace fs = std::filesystem;
-
-    int64_t total_size = 0;
-    try {
-        for (const auto& entry : fs::recursive_directory_iterator(dirpath)) {
-            if (entry.is_regular_file()) {
-                std::error_code ec;
-                auto size = entry.file_size(ec);
-                if (!ec) {
-                    total_size += size;
-                }
-            }
-        }
-    } catch (const std::filesystem::filesystem_error& e) {
-        std::cerr << "Error calculating directory size: " << e.what() << "\n";
-        return -1;
-    }
-    return total_size;
-}
-
-// get_file_size() - Calculate storage size for output
-//
-// Handles two format types:
-//   - File-based: Parquet, CSV, ORC (single file)
-//   - Directory-based: Paimon, Iceberg, Lance (multiple files in directory structure)
-//
-// Returns total size in bytes, or -1 on error
-int64_t get_file_size(const std::string& path) {
-    namespace fs = std::filesystem;
-
-    std::error_code ec;
-
-    // Check if path exists
-    if (!fs::exists(path, ec)) {
-        return -1;
-    }
-
-    // Handle directory-based formats (Paimon, Iceberg, Lance)
-    if (fs::is_directory(path, ec)) {
-        return get_directory_size(path);
-    }
-
-    // Handle file-based formats (Parquet, CSV, ORC)
+long get_file_size(const std::string& filename) {
     struct stat st;
-    if (stat(path.c_str(), &st) != 0) {
+    if (stat(filename.c_str(), &st) != 0) {
         return -1;
     }
     return st.st_size;
@@ -251,11 +199,6 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
 #ifdef TPCH_ENABLE_ICEBERG
     else if (format == "iceberg") {
         return std::make_unique<tpch::IcebergWriter>(filepath);
-    }
-#endif
-#ifdef TPCH_ENABLE_LANCE
-    else if (format == "lance") {
-        return std::make_unique<tpch::LanceWriter>(filepath);
     }
 #endif
     else {
@@ -1251,9 +1194,6 @@ int main(int argc, char* argv[]) {
 #ifdef TPCH_ENABLE_ICEBERG
             && opts.format != "iceberg"
 #endif
-#ifdef TPCH_ENABLE_LANCE
-            && opts.format != "lance"
-#endif
         ) {
             std::cerr << "Error: Unknown format '" << opts.format << "'\n";
             return 1;
@@ -1540,16 +1480,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Output file: " << output_path << "\n";
         std::cout << "Rows written: " << total_rows << "\n";
         if (file_size > 0) {
-            std::string size_label = "File size";
-
-            // Check if output is directory-based format
-            namespace fs = std::filesystem;
-            std::error_code ec;
-            if (fs::is_directory(output_path, ec)) {
-                size_label = "Total size (all files)";
-            }
-
-            std::cout << size_label << ": " << file_size << " bytes\n";
+            std::cout << "File size: " << file_size << " bytes\n";
         }
         std::cout << "Time elapsed: " << std::fixed << std::setprecision(3)
                   << (static_cast<double>(elapsed.count()) / 1000.0) << " seconds\n";
