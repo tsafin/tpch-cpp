@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <filesystem>
 #include <getopt.h>
 #include <iomanip>
 #include <sys/stat.h>
@@ -176,9 +177,54 @@ std::string get_output_filename(
     return output_dir + "/" + filename;
 }
 
-long get_file_size(const std::string& filename) {
+// Helper function to recursively calculate directory size
+// Handles directory-based formats (Paimon, Iceberg, Lance)
+long get_directory_size(const std::string& dirpath) {
+    namespace fs = std::filesystem;
+
+    long total_size = 0;
+    try {
+        for (const auto& entry : fs::recursive_directory_iterator(dirpath)) {
+            if (entry.is_regular_file()) {
+                std::error_code ec;
+                auto size = entry.file_size(ec);
+                if (!ec) {
+                    total_size += size;
+                }
+            }
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Error calculating directory size: " << e.what() << "\n";
+        return -1;
+    }
+    return total_size;
+}
+
+// get_file_size() - Calculate storage size for output
+//
+// Handles two format types:
+//   - File-based: Parquet, CSV, ORC (single file)
+//   - Directory-based: Paimon, Iceberg, Lance (multiple files in directory structure)
+//
+// Returns total size in bytes, or -1 on error
+long get_file_size(const std::string& path) {
+    namespace fs = std::filesystem;
+
+    std::error_code ec;
+
+    // Check if path exists
+    if (!fs::exists(path, ec)) {
+        return -1;
+    }
+
+    // Handle directory-based formats (Paimon, Iceberg, Lance)
+    if (fs::is_directory(path, ec)) {
+        return get_directory_size(path);
+    }
+
+    // Handle file-based formats (Parquet, CSV, ORC)
     struct stat st;
-    if (stat(filename.c_str(), &st) != 0) {
+    if (stat(path.c_str(), &st) != 0) {
         return -1;
     }
     return st.st_size;
@@ -1494,7 +1540,16 @@ int main(int argc, char* argv[]) {
         std::cout << "Output file: " << output_path << "\n";
         std::cout << "Rows written: " << total_rows << "\n";
         if (file_size > 0) {
-            std::cout << "File size: " << file_size << " bytes\n";
+            std::string size_label = "File size";
+
+            // Check if output is directory-based format
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            if (fs::is_directory(output_path, ec)) {
+                size_label = "Total size (all files)";
+            }
+
+            std::cout << size_label << ": " << file_size << " bytes\n";
         }
         std::cout << "Time elapsed: " << std::fixed << std::setprecision(3)
                   << (static_cast<double>(elapsed.count()) / 1000.0) << " seconds\n";
