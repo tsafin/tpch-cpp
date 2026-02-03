@@ -10,23 +10,32 @@
 namespace tpch {
 
 /**
- * Apache Paimon table writer using paimon-cpp library.
+ * Apache Paimon table writer (spec-compliant, Flink/Spark compatible).
  *
  * IMPORTANT: Paimon is a TABLE FORMAT (lakehouse), not just a file format.
- * This writer creates:
- *   - Table directory structure
- *   - Snapshot metadata files
- *   - Manifest files
- *   - Data files (Parquet backend by default)
+ * This writer creates a production-ready table with:
+ *   - Table directory structure (OPTIONS, schema/, snapshot/, manifest/, bucket-0/)
+ *   - Snapshot metadata files (snapshot-1, EARLIEST, LATEST hints)
+ *   - Manifest files in Avro binary format
+ *   - Data files in Parquet format (bucket-0/)
  *
  * Output is a directory containing a complete Paimon table that can be
- * read by Apache Paimon (Java), Flink, or Spark.
+ * read by Apache Paimon (Java), Apache Flink, or Apache Spark directly.
  *
  * Directory structure:
  *   table_path/
- *     snapshot/           - Snapshot metadata files
- *     manifest/           - Manifest files
- *     data/               - Parquet data files
+ *     OPTIONS                      - Table configuration (plain text)
+ *     schema/
+ *       schema-0                   - Schema file (JSON)
+ *     snapshot/
+ *       EARLIEST                   - Hint file with earliest snapshot ID
+ *       LATEST                     - Hint file with latest snapshot ID
+ *       snapshot-1                 - Snapshot metadata (JSON, v3)
+ *     manifest/
+ *       manifest-<UUID>-0          - Manifest entries (Avro binary)
+ *       manifest-list-<UUID>-0     - Manifest list (Avro binary)
+ *     bucket-0/
+ *       data-<UUID>-0.parquet      - Parquet data files
  */
 class PaimonWriter : public WriterInterface {
 public:
@@ -63,16 +72,23 @@ public:
     void close() override;
 
 private:
+    struct DataFileInfo {
+        std::string name;
+        int64_t size;
+        int64_t rows;
+    };
+
     std::string table_path_;
     std::string table_name_;
     std::shared_ptr<arrow::Schema> schema_;
     bool schema_locked_ = false;
+    bool closed_ = false;
     int64_t row_count_ = 0;
     int32_t file_count_ = 0;
 
     // Store batches for buffered writing to Parquet
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches_;
-    std::vector<std::string> written_files_;
+    std::vector<DataFileInfo> data_files_;
 
     /**
      * Initialize Paimon write context on first batch.
@@ -82,22 +98,80 @@ private:
 
     /**
      * Write accumulated batches to Parquet data file.
-     * Creates a data file and tracks it for manifest.
-     * @return Path to written file
+     * Creates a data file in bucket-0/ and tracks metadata.
      */
-    std::string write_data_file();
+    void write_data_file();
 
     /**
-     * Create Paimon snapshot metadata JSON.
-     * @return JSON string representing snapshot
+     * Write OPTIONS file.
      */
-    std::string create_snapshot_metadata();
+    void write_options_file();
 
     /**
-     * Create Paimon manifest metadata JSON.
-     * @return JSON string representing manifest
+     * Write schema/schema-0 file.
      */
-    std::string create_manifest_metadata();
+    void write_schema_file();
+
+    /**
+     * Write manifest (Avro binary) containing all data file entries.
+     * @return Manifest filename (not full path)
+     */
+    std::string write_data_manifest();
+
+    /**
+     * Write manifest list (Avro binary) referencing the manifest file.
+     * @param manifest_name Manifest filename to reference
+     * @param manifest_size Size of manifest file in bytes
+     * @return Manifest list filename (not full path)
+     */
+    std::string write_manifest_list(const std::string& manifest_name, int64_t manifest_size);
+
+    /**
+     * Write snapshot metadata file (snapshot-1).
+     * @param delta_manifest_list_name Manifest list filename to reference
+     */
+    void write_snapshot(const std::string& delta_manifest_list_name);
+
+    /**
+     * Write snapshot hint files (EARLIEST, LATEST).
+     */
+    void write_snapshot_hints();
+
+    /**
+     * Encode a ManifestEntry record in Avro format.
+     * @param file Data file metadata to encode
+     * @return Encoded Avro record bytes
+     */
+    std::vector<uint8_t> encode_manifest_entry(const DataFileInfo& file);
+
+    /**
+     * Encode a ManifestListEntry record in Avro format.
+     * @param manifest_name Manifest filename to reference
+     * @param manifest_size Size of manifest file
+     * @return Encoded Avro record bytes
+     */
+    std::vector<uint8_t> encode_manifest_list_entry(const std::string& manifest_name, int64_t manifest_size);
+
+    /**
+     * Get the Avro schema for ManifestEntry records (JSON string).
+     */
+    static const std::string& manifest_entry_schema();
+
+    /**
+     * Get the Avro schema for ManifestListEntry records (JSON string).
+     */
+    static const std::string& manifest_list_entry_schema();
+
+    /**
+     * Generate a random UUID (used in file names).
+     * @return UUID string without hyphens (32 hex chars)
+     */
+    static std::string generate_uuid();
+
+    /**
+     * Get current timestamp in milliseconds since epoch.
+     */
+    static int64_t current_timestamp_ms();
 
     /**
      * Convert Arrow DataType to Paimon type string.
