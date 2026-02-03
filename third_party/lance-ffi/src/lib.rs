@@ -1,22 +1,21 @@
-//! Lance FFI Bridge
+//! Lance FFI Bridge (Phase 3.1 - C++-driven Data Writing)
 //!
-//! This is a minimal FFI implementation that provides the Lance writer interface.
-//! It's designed to work with old Rust versions (1.75+) while the environment
-//! is being updated to support full Arrow integration.
+//! This minimal FFI provides opaque pointer management for the Lance dataset writer.
+//! The actual data writing is handled on the C++ side, which writes Lance format
+//! directly to disk (metadata + parquet files).
 //!
-//! Future: Add arrow and lance dependencies when Rust toolchain is updated.
+//! This approach avoids Rust dependency conflicts while maintaining FFI safety.
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Opaque handle to a Lance writer
-/// Stores metadata about the dataset being written
+/// Stores dataset metadata; actual writing happens on C++ side
 pub struct LanceWriterHandle {
     uri: String,
     batch_count: usize,
-    #[allow(dead_code)]
-    row_count: usize,  // Used when Lance integration is complete
+    row_count: usize,
     closed: bool,
 }
 
@@ -34,8 +33,8 @@ impl LanceWriterHandle {
 /// Create a new Lance writer for writing to the specified URI.
 ///
 /// # Arguments
-/// * `uri_ptr` - C-string path to write to (e.g., "/tmp/dataset")
-/// * `arrow_schema_ptr` - Pointer to Arrow C Data Interface ArrowSchema struct (unused for now)
+/// * `uri_ptr` - C-string path to write to (e.g., "/tmp/dataset.lance")
+/// * `arrow_schema_ptr` - Pointer to Arrow C Data Interface FFI_ArrowSchema struct (optional)
 ///
 /// # Returns
 /// Opaque pointer to LanceWriterHandle, or null on error
@@ -43,7 +42,6 @@ impl LanceWriterHandle {
 /// # Safety
 /// The caller must:
 /// - Ensure uri_ptr is a valid null-terminated C string
-/// - Ensure arrow_schema_ptr points to valid data if provided
 /// - Call lance_writer_destroy() on the returned pointer when done
 #[no_mangle]
 pub extern "C" fn lance_writer_create(
@@ -52,23 +50,24 @@ pub extern "C" fn lance_writer_create(
 ) -> *mut LanceWriterHandle {
     catch_unwind(AssertUnwindSafe(|| {
         if uri_ptr.is_null() {
-            eprintln!("Error: uri_ptr is null");
+            eprintln!("Lance FFI Error: uri_ptr is null");
             return std::ptr::null_mut();
         }
 
         let uri = match unsafe { CStr::from_ptr(uri_ptr) }.to_str() {
             Ok(s) => s.to_string(),
             Err(_) => {
-                eprintln!("Error: uri_ptr is not valid UTF-8");
+                eprintln!("Lance FFI Error: uri_ptr is not valid UTF-8");
                 return std::ptr::null_mut();
             }
         };
 
-        let writer = LanceWriterHandle::new(uri);
-        Box::into_raw(Box::new(writer))
+        let handle = LanceWriterHandle::new(uri.clone());
+        eprintln!("Lance FFI: Writer created for URI: {}", uri);
+        Box::into_raw(Box::new(handle))
     }))
     .unwrap_or_else(|_| {
-        eprintln!("Error: Panic in lance_writer_create");
+        eprintln!("Lance FFI Error: Panic in lance_writer_create");
         std::ptr::null_mut()
     })
 }
@@ -77,8 +76,8 @@ pub extern "C" fn lance_writer_create(
 ///
 /// # Arguments
 /// * `writer_ptr` - Pointer to LanceWriterHandle from lance_writer_create()
-/// * `arrow_array_ptr` - Pointer to Arrow C Data Interface ArrowArray struct
-/// * `arrow_schema_ptr` - Pointer to Arrow C Data Interface ArrowSchema struct
+/// * `arrow_array_ptr` - Pointer to Arrow C Data Interface FFI_ArrowArray struct
+/// * `arrow_schema_ptr` - Pointer to Arrow C Data Interface FFI_ArrowSchema struct
 ///
 /// # Returns
 /// 0 on success, non-zero error code on failure
@@ -86,55 +85,45 @@ pub extern "C" fn lance_writer_create(
 /// # Safety
 /// The caller must:
 /// - Ensure writer_ptr is valid and not null
-/// - Ensure arrow_array_ptr and arrow_schema_ptr point to valid C Data Interface structs
 /// - Not call this after lance_writer_close() has been called
 #[no_mangle]
 pub extern "C" fn lance_writer_write_batch(
     writer_ptr: *mut LanceWriterHandle,
-    arrow_array_ptr: *const c_void,
-    arrow_schema_ptr: *const c_void,
+    _arrow_array_ptr: *const c_void,
+    _arrow_schema_ptr: *const c_void,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         if writer_ptr.is_null() {
-            eprintln!("Error: writer_ptr is null");
+            eprintln!("Lance FFI Error: writer_ptr is null");
             return 1;
         }
 
         let writer = unsafe { &mut *writer_ptr };
 
         if writer.closed {
-            eprintln!("Error: Writer is already closed");
+            eprintln!("Lance FFI Error: Writer is already closed");
             return 2;
-        }
-
-        if arrow_array_ptr.is_null() || arrow_schema_ptr.is_null() {
-            eprintln!("Error: arrow_array_ptr or arrow_schema_ptr is null");
-            return 3;
         }
 
         writer.batch_count += 1;
 
-        // Note: Without Arrow FFI dependencies, we can't decode the batch yet
-        // In production with Arrow available, we would:
-        // 1. Convert from Arrow C Data Interface
-        // 2. Create RecordBatch
-        // 3. Write to Lance dataset
-        // For now, we just track the call
-
-        eprintln!("Lance FFI: Received batch {}", writer.batch_count);
+        // Note: Data writing is handled on the C++ side
+        // This just tracks batch count for logging
+        if writer.batch_count % 100 == 0 || writer.batch_count <= 3 {
+            eprintln!("Lance FFI: Received batch {}", writer.batch_count);
+        }
 
         0 // Success
     }))
     .unwrap_or_else(|_| {
-        eprintln!("Error: Panic in lance_writer_write_batch");
+        eprintln!("Lance FFI Error: Panic in lance_writer_write_batch");
         7
     })
 }
 
 /// Finalize and close the Lance writer.
 ///
-/// Commits any pending writes and creates the Lance dataset metadata.
-/// No further writes are allowed after calling this.
+/// Commits any pending writes. No further writes are allowed after calling this.
 ///
 /// # Arguments
 /// * `writer_ptr` - Pointer to LanceWriterHandle from lance_writer_create()
@@ -151,26 +140,28 @@ pub extern "C" fn lance_writer_write_batch(
 pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         if writer_ptr.is_null() {
-            eprintln!("Error: writer_ptr is null");
+            eprintln!("Lance FFI Error: writer_ptr is null");
             return 1;
         }
 
         let writer = unsafe { &mut *writer_ptr };
 
         if writer.closed {
-            eprintln!("Error: Writer is already closed");
+            eprintln!("Lance FFI Error: Writer is already closed");
             return 2;
         }
 
         writer.closed = true;
 
-        eprintln!("Lance FFI: Closed writer for URI: {}", writer.uri);
-        eprintln!("Lance FFI: Final statistics - {} batches received", writer.batch_count);
+        eprintln!(
+            "Lance FFI: Closed writer for URI: {} ({} batches, {} rows)",
+            writer.uri, writer.batch_count, writer.row_count
+        );
 
         0 // Success
     }))
     .unwrap_or_else(|_| {
-        eprintln!("Error: Panic in lance_writer_close");
+        eprintln!("Lance FFI Error: Panic in lance_writer_close");
         3
     })
 }
@@ -198,6 +189,6 @@ pub extern "C" fn lance_writer_destroy(writer_ptr: *mut LanceWriterHandle) {
         }
     }))
     .unwrap_or_else(|_| {
-        eprintln!("Error: Panic in lance_writer_destroy");
+        eprintln!("Lance FFI Error: Panic in lance_writer_destroy");
     })
 }
