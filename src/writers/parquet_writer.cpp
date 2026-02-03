@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
+#include <filesystem>
 
 #include <arrow/api.h>
 #include <arrow/io/api.h>
@@ -26,6 +27,21 @@ ParquetWriter::ParquetWriter(
     , closed_(false)
     , memory_pool_(memory_pool ? memory_pool : arrow::default_memory_pool())
     , estimated_rows_(estimated_rows) {
+
+    // Create parent directory if it doesn't exist
+    std::filesystem::path file_path(filepath);
+    std::filesystem::path parent_dir = file_path.parent_path();
+
+    if (!parent_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(parent_dir, ec);
+        if (ec && ec.value() != 0) {
+            // Ignore "already exists" errors, fail on others
+            if (ec.value() != EEXIST) {
+                throw std::runtime_error("Failed to create parent directory: " + parent_dir.string() + " (" + ec.message() + ")");
+            }
+        }
+    }
 
     // Pre-allocate batches vector if we have an estimate
     if (estimated_rows_ > 0) {
