@@ -179,10 +179,10 @@ std::string get_output_filename(
 
 // Helper function to recursively calculate directory size
 // Handles directory-based formats (Paimon, Iceberg, Lance)
-long get_directory_size(const std::string& dirpath) {
+int64_t get_directory_size(const std::string& dirpath) {
     namespace fs = std::filesystem;
 
-    long total_size = 0;
+    int64_t total_size = 0;
     try {
         for (const auto& entry : fs::recursive_directory_iterator(dirpath)) {
             if (entry.is_regular_file()) {
@@ -207,7 +207,7 @@ long get_directory_size(const std::string& dirpath) {
 //   - Directory-based: Paimon, Iceberg, Lance (multiple files in directory structure)
 //
 // Returns total size in bytes, or -1 on error
-long get_file_size(const std::string& path) {
+int64_t get_file_size(const std::string& path) {
     namespace fs = std::filesystem;
 
     std::error_code ec;

@@ -35,11 +35,8 @@ ParquetWriter::ParquetWriter(
     if (!parent_dir.empty()) {
         std::error_code ec;
         std::filesystem::create_directories(parent_dir, ec);
-        if (ec && ec.value() != 0) {
-            // Ignore "already exists" errors, fail on others
-            if (ec.value() != EEXIST) {
-                throw std::runtime_error("Failed to create parent directory: " + parent_dir.string() + " (" + ec.message() + ")");
-            }
+        if (ec) {
+            throw std::runtime_error("Failed to create parent directory: " + parent_dir.string() + " (" + ec.message() + ")");
         }
     }
 

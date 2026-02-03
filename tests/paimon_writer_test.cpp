@@ -128,7 +128,7 @@ protected:
     std::string temp_dir;
 
     void SetUp() override {
-        temp_dir = fs::temp_directory_path() / "paimon_avro_test";
+        temp_dir = (fs::temp_directory_path() / "paimon_avro_test").string();
         fs::create_directories(temp_dir);
     }
 
@@ -225,7 +225,7 @@ protected:
     std::string temp_table_dir;
 
     void SetUp() override {
-        temp_table_dir = fs::temp_directory_path() / "paimon_integration_test";
+        temp_table_dir = (fs::temp_directory_path() / "paimon_integration_test").string();
         fs::remove_all(temp_table_dir);  // Clean before test
     }
 
