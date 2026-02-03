@@ -62,3 +62,10 @@ __pycache__/
 # Package manager artifacts (should not be committed)
 *.deb
 *.rpm
+
+# Rust build artifacts
+# Note: Cargo target directory should be in CMAKE_BINARY_DIR (e.g., build/rust/)
+# NOT in the source tree. Ignore any in-source target/ directories.
+third_party/lance-ffi/target/
+# Note: Project-specific Cargo.lock files (e.g., third_party/lance-ffi/Cargo.lock) ARE committed
+# Only a root-level Cargo.lock would be ignored (if it existed)
