@@ -239,7 +239,8 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
     # Note: Cargo target directory is set to build/rust to keep artifacts out of source tree
     # All build artifacts go to CMAKE_BINARY_DIR/rust, NOT source tree
     # On macOS, we specify the target triple to ensure correct output directory
-    set(CARGO_BUILD_CMD "${CMAKE_COMMAND}" -E env RUSTC="${RUSTC_ENV_VAR}"
+    # RUSTC env var ensures correct rustc version is used (snap vs system)
+    set(CARGO_BUILD_CMD "env" "RUSTC=${RUSTC_ENV_VAR}"
             "${Cargo_EXECUTABLE}" build --release
             --manifest-path "${LANCE_FFI_DIR}/Cargo.toml"
             --target-dir "${LANCE_FFI_BUILD_DIR}")
