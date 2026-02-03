@@ -331,6 +331,7 @@ target_link_libraries(tpch_core PUBLIC
     Arrow::arrow
     Arrow::parquet
     dbgen_objs
+    uuid
 )
 
 # Link xsimd if available (header-only library)
