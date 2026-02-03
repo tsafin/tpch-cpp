@@ -7,7 +7,7 @@
 //! Future: Add arrow and lance dependencies when Rust toolchain is updated.
 
 use std::ffi::CStr;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Opaque handle to a Lance writer
@@ -48,7 +48,7 @@ impl LanceWriterHandle {
 #[no_mangle]
 pub extern "C" fn lance_writer_create(
     uri_ptr: *const c_char,
-    _arrow_schema_ptr: *const c_char,
+    _arrow_schema_ptr: *const c_void,
 ) -> *mut LanceWriterHandle {
     catch_unwind(AssertUnwindSafe(|| {
         if uri_ptr.is_null() {
@@ -91,8 +91,8 @@ pub extern "C" fn lance_writer_create(
 #[no_mangle]
 pub extern "C" fn lance_writer_write_batch(
     writer_ptr: *mut LanceWriterHandle,
-    arrow_array_ptr: *const c_char,
-    arrow_schema_ptr: *const c_char,
+    arrow_array_ptr: *const c_void,
+    arrow_schema_ptr: *const c_void,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         if writer_ptr.is_null() {

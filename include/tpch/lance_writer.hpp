@@ -23,18 +23,17 @@ namespace tpch {
  *
  * Output is a directory containing a complete Lance dataset.
  *
- * Directory structure:
- *   dataset_path/
- *     data/
- *       xyz.lance              - Lance data file
- *       ...
- *     _metadata.json           - Dataset metadata
- *     _commits.json            - Commit log
+ * Current implementation (stub/placeholder):
+ *   - Creates dataset_path directory with data/ subdirectory
+ *   - Communicates with Rust FFI library (liblance_ffi.a) via opaque pointers
+ *   - Proper lifecycle management of opaque Rust pointers
+ *   - Full Lance data writing and metadata file creation implemented in future phases
  *
  * Implementation Details:
- *   - Uses Arrow C Data Interface for zero-copy data transfer
+ *   - Uses Arrow C Data Interface (opaque pointers) for passing data to Rust layer
  *   - Communicates with Rust FFI library (liblance_ffi.a)
  *   - Proper lifecycle management of opaque Rust pointers
+ *   - Currently stores writer state without writing to Lance format
  */
 class LanceWriter : public WriterInterface {
 public:

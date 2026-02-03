@@ -231,18 +231,26 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
     # Build Rust FFI library using cargo
     # Note: Cargo target directory is set to build/rust to keep artifacts out of source tree
     # All build artifacts go to CMAKE_BINARY_DIR/rust, NOT source tree
+    # On macOS, we specify the target triple to ensure correct output directory
+    set(CARGO_BUILD_CMD "${Cargo_EXECUTABLE}" build --release
+            --manifest-path "${LANCE_FFI_DIR}/Cargo.toml"
+            --target-dir "${LANCE_FFI_BUILD_DIR}")
+
+    if(RUST_TARGET)
+        list(APPEND CARGO_BUILD_CMD --target "${RUST_TARGET}")
+    endif()
+
     add_custom_command(
         OUTPUT "${LANCE_FFI_LIB_FINAL}"
         COMMAND ${CMAKE_COMMAND} -E echo "Building Lance FFI library with Rust cargo ..."
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LANCE_FFI_BUILD_DIR}"
-        COMMAND ${Cargo_EXECUTABLE} build --release
-                --manifest-path "${LANCE_FFI_DIR}/Cargo.toml"
-                --target-dir "${LANCE_FFI_BUILD_DIR}"
+        COMMAND ${CARGO_BUILD_CMD}
         COMMAND ${CMAKE_COMMAND} -E copy "${LANCE_FFI_LIB}" "${LANCE_FFI_LIB_FINAL}"
         WORKING_DIRECTORY "${LANCE_FFI_DIR}"
         DEPENDS "${LANCE_FFI_DIR}/Cargo.toml"
+                "${LANCE_FFI_DIR}/Cargo.lock"
                 "${LANCE_FFI_DIR}/src/lib.rs"
-        COMMENT "Compiling Lance FFI library with Rust"
+        COMMENT "Compiling Lance FFI library with Rust (target: ${RUST_TARGET})"
         VERBATIM
     )
 

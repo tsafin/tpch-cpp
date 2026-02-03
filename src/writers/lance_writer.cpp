@@ -26,6 +26,15 @@ LanceWriter::LanceWriter(const std::string& dataset_path,
 
 LanceWriter::~LanceWriter() {
     if (rust_writer_ != nullptr) {
+        try {
+            // Call close() first to finalize the dataset
+            // Suppress exceptions in destructor to avoid termination
+            auto* raw_writer = reinterpret_cast<::LanceWriter*>(rust_writer_);
+            lance_writer_close(raw_writer);
+        } catch (...) {
+            // Suppress exceptions in destructor
+        }
+        // Then destroy the handle
         lance_writer_destroy(reinterpret_cast<::LanceWriter*>(rust_writer_));
         rust_writer_ = nullptr;
     }

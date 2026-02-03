@@ -17,7 +17,7 @@ typedef struct LanceWriter LanceWriter;
  * Create a new Lance writer for writing to the specified URI.
  *
  * @param uri Path to write to (e.g., "/tmp/dataset" or "s3://bucket/path")
- * @param arrow_schema_ptr Pointer to Arrow C Data Interface ArrowSchema struct
+ * @param arrow_schema_ptr Opaque pointer to Arrow C Data Interface ArrowSchema struct
  *        (Can be NULL; schema will be inferred from first batch)
  *
  * @return Opaque pointer to LanceWriter on success, NULL on error
@@ -31,17 +31,15 @@ LanceWriter* lance_writer_create(const char* uri, const void* arrow_schema_ptr);
  * Write a batch of records to the Lance dataset.
  *
  * @param writer Pointer to LanceWriter from lance_writer_create()
- * @param arrow_array_ptr Pointer to Arrow C Data Interface ArrowArray struct
- * @param arrow_schema_ptr Pointer to Arrow C Data Interface ArrowSchema struct
+ * @param arrow_array_ptr Opaque pointer to Arrow C Data Interface ArrowArray struct
+ * @param arrow_schema_ptr Opaque pointer to Arrow C Data Interface ArrowSchema struct
  *
  * @return 0 on success, non-zero error code on failure:
  *         1 = writer_ptr is null
  *         2 = Writer is already closed
  *         3 = arrow_array_ptr or arrow_schema_ptr is null
- *         4 = Error converting schema from FFI
- *         5 = Error converting array to RecordBatch
- *         6 = Error converting array from FFI
  *         7 = Panic in lance_writer_write_batch
+ *         (Other non-zero values are reserved for future use.)
  *
  * The ArrowArray and ArrowSchema pointers must point to valid C Data Interface
  * structs. Memory ownership is not transferred; the caller retains responsibility

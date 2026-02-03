@@ -181,10 +181,18 @@ private:
 
     /**
      * Write one data block with all pending records concatenated.
-     * Block format:
+     * Block format (when records present):
      *   [zigzag record-count] [zigzag byte-size] [record1] [record2] ... [sync marker]
+     *
+     * Note: Per Avro spec, a block record-count of 0 is an end marker with no trailing data.
+     * We skip the block entirely for empty records (not writing count=0 with size/sync).
      */
     void write_block(std::ofstream& out) {
+        // If no records, don't write any block (Avro spec: 0 count is end marker, no data after)
+        if (pending_records_.empty()) {
+            return;
+        }
+
         // Calculate total byte size of all records
         size_t total_bytes = 0;
         for (const auto& rec : pending_records_) {
