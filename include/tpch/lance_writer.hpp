@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <utility>
 #include <arrow/record_batch.h>
 
 #include "writer_interface.hpp"
@@ -40,7 +41,7 @@ public:
     /**
      * Create Lance dataset writer.
      *
-     * @param dataset_path Directory path for the Lance dataset (NOT a file!)
+     * @param dataset_path Directory path for the Lance dataset (should end with .lance)
      * @param dataset_name Logical dataset name (used in metadata, default: "tpch_dataset")
      *
      * The directory will be created if it doesn't exist.
@@ -55,8 +56,7 @@ public:
      *
      * On first call, initializes Lance writer and locks schema.
      * Subsequent batches must match the locked schema exactly.
-     *
-     * Uses Arrow C Data Interface for zero-copy data transfer to Rust layer.
+     * Batches are accumulated and flushed to Parquet files.
      *
      * @param batch Arrow RecordBatch to write
      * @throws std::runtime_error if batch schema doesn't match or write fails
@@ -66,7 +66,7 @@ public:
     /**
      * Finalize the Lance dataset.
      *
-     * Closes the Rust writer and creates dataset metadata files.
+     * Flushes remaining batches, creates metadata files, and closes the writer.
      * Must be called before reading the dataset with other tools.
      */
     void close() override;
@@ -78,6 +78,10 @@ private:
     bool schema_locked_ = false;
     int64_t row_count_ = 0;
     int32_t batch_count_ = 0;
+    int32_t parquet_file_count_ = 0;
+
+    // Accumulated batches before flushing to Parquet
+    std::vector<std::shared_ptr<arrow::RecordBatch>> accumulated_batches_;
 
     // Opaque pointer to Rust LanceWriter (use void* to avoid type conflicts)
     void* rust_writer_ = nullptr;
@@ -89,18 +93,33 @@ private:
     void initialize_lance_dataset(const std::shared_ptr<arrow::RecordBatch>& first_batch);
 
     /**
-     * Convert Arrow RecordBatch to Arrow C Data Interface format.
-     * Creates C-compatible FFI structures for passing to Rust layer.
+     * Flush accumulated batches to a Parquet file.
+     * Called when batch size threshold is reached or on close().
+     */
+    void flush_batches_to_parquet();
+
+    /**
+     * Write Lance metadata files (_metadata.json, _manifest.json, _commits.json).
+     * Called during close() after all data is written.
+     */
+    void write_lance_metadata();
+
+    /**
+     * Generate a random UUID for dataset identifiers.
+     * @return UUID string (36 characters)
+     */
+    static std::string generate_uuid();
+
+    /**
+     * Convert Arrow RecordBatch to Arrow C Data Interface format (placeholder).
      *
      * @param batch RecordBatch to convert
-     * @return Pair of (ArrowArray pointer, ArrowSchema pointer) for FFI
-     *
-     * Note: These pointers must be freed after use.
+     * @return Pair of (ArrowArray pointer, ArrowSchema pointer)
      */
     std::pair<void*, void*> batch_to_ffi(const std::shared_ptr<arrow::RecordBatch>& batch);
 
     /**
-     * Free Arrow C Data Interface structures created by batch_to_ffi().
+     * Free Arrow C Data Interface structures (placeholder for future use).
      *
      * @param array_ptr Pointer to ArrowArray FFI structure
      * @param schema_ptr Pointer to ArrowSchema FFI structure
