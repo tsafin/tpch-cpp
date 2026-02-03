@@ -25,6 +25,7 @@ option(TPCH_ENABLE_ASYNC_IO "Enable async I/O with io_uring" OFF)
 option(TPCH_ENABLE_ORC "Enable ORC file format support" OFF)
 option(TPCH_ENABLE_PAIMON "Enable Apache Paimon table format support" OFF)
 option(TPCH_ENABLE_ICEBERG "Enable Apache Iceberg table format support" OFF)
+option(TPCH_ENABLE_LANCE "Enable Lance columnar format support (requires Rust)" OFF)
 option(TPCH_ENABLE_PERF_COUNTERS "Enable performance counters instrumentation" OFF)
 
 # Compiler configuration
@@ -128,6 +129,24 @@ if(TPCH_ENABLE_ICEBERG)
     set(Iceberg_FOUND TRUE)
 endif()
 
+# Lance support: Requires Rust toolchain to build FFI library
+if(TPCH_ENABLE_LANCE)
+    # Check for Rust toolchain - prefer /snap/bin for newer Rust versions
+    find_program(Cargo_EXECUTABLE cargo PATHS /snap/bin NO_DEFAULT_PATH)
+    if(NOT Cargo_EXECUTABLE)
+        # Fallback to system cargo
+        find_program(Cargo_EXECUTABLE cargo)
+    endif()
+
+    if(Cargo_EXECUTABLE)
+        message(STATUS "Found Rust toolchain: ${Cargo_EXECUTABLE}")
+        set(Lance_FOUND TRUE)
+    else()
+        message(FATAL_ERROR "Lance requested (TPCH_ENABLE_LANCE=ON) but Rust toolchain not found. "
+                "Install with: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh")
+    endif()
+endif()
+
 # Print found status
 message(STATUS "Arrow found: ${Arrow_LIBRARY}")
 message(STATUS "Parquet found: ${Parquet_LIBRARY}")
@@ -154,6 +173,16 @@ else()
     message(STATUS "Iceberg support disabled (TPCH_ENABLE_ICEBERG=OFF)")
 endif()
 
+if(TPCH_ENABLE_LANCE)
+    if(Lance_FOUND)
+        message(STATUS "Lance support enabled (Rust FFI bridge)")
+    else()
+        message(FATAL_ERROR "Lance support requested but Rust toolchain not found")
+    endif()
+else()
+    message(STATUS "Lance support disabled (TPCH_ENABLE_LANCE=OFF)")
+endif()
+
 if(TPCH_ENABLE_ASYNC_IO)
     find_package(Uring QUIET)
     if(Uring_FOUND)
@@ -178,6 +207,75 @@ configure_file(
     COPYONLY
 )
 message(STATUS "Copied dists.dss to build directory")
+
+# Build Rust FFI library for Lance support (if enabled)
+if(TPCH_ENABLE_LANCE AND Lance_FOUND)
+    set(LANCE_FFI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lance-ffi")
+    set(LANCE_FFI_BUILD_DIR "${CMAKE_BINARY_DIR}/rust")
+
+    # Determine output library path based on platform and Rust target
+    if(APPLE)
+        set(RUST_TARGET "aarch64-apple-darwin")
+        set(LANCE_FFI_LIB "${LANCE_FFI_BUILD_DIR}/${RUST_TARGET}/release/liblance_ffi.a")
+    else()
+        # Use default native build for Linux (x86_64-unknown-linux-gnu)
+        set(RUST_TARGET "")
+        set(LANCE_FFI_LIB "${LANCE_FFI_BUILD_DIR}/release/liblance_ffi.a")
+    endif()
+
+    set(LANCE_FFI_LIB_FINAL "${CMAKE_BINARY_DIR}/liblance_ffi.a")
+
+    # Check for snap Rust - both cargo and rustc should come from snap together
+    find_program(SNAP_RUSTC rustc PATHS /snap/bin NO_DEFAULT_PATH)
+    if(SNAP_RUSTC)
+        message(STATUS "Detected Rust from snap: ${SNAP_RUSTC}")
+        set(RUSTC_ENV_VAR "${SNAP_RUSTC}")
+    else()
+        message(STATUS "Using system Rust compiler")
+        find_program(RUSTC_ENV_VAR rustc)
+    endif()
+
+    # Build Rust FFI library using cargo
+    # Note: Cargo target directory is set to build/rust to keep artifacts out of source tree
+    # All build artifacts go to CMAKE_BINARY_DIR/rust, NOT source tree
+    # On macOS, we specify the target triple to ensure correct output directory
+    set(CARGO_BUILD_CMD "${CMAKE_COMMAND}" -E env RUSTC="${RUSTC_ENV_VAR}"
+            "${Cargo_EXECUTABLE}" build --release
+            --manifest-path "${LANCE_FFI_DIR}/Cargo.toml"
+            --target-dir "${LANCE_FFI_BUILD_DIR}")
+
+    if(RUST_TARGET)
+        list(APPEND CARGO_BUILD_CMD --target "${RUST_TARGET}")
+    endif()
+
+    add_custom_command(
+        OUTPUT "${LANCE_FFI_LIB_FINAL}"
+        COMMAND ${CMAKE_COMMAND} -E echo "Building Lance FFI library with Rust cargo ..."
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${LANCE_FFI_BUILD_DIR}"
+        COMMAND ${CARGO_BUILD_CMD}
+        COMMAND ${CMAKE_COMMAND} -E copy "${LANCE_FFI_LIB}" "${LANCE_FFI_LIB_FINAL}"
+        WORKING_DIRECTORY "${LANCE_FFI_DIR}"
+        DEPENDS "${LANCE_FFI_DIR}/Cargo.toml"
+                "${LANCE_FFI_DIR}/Cargo.lock"
+                "${LANCE_FFI_DIR}/src/lib.rs"
+        COMMENT "Compiling Lance FFI library with Rust (target: ${RUST_TARGET})"
+        VERBATIM
+    )
+
+    # Create custom target for Rust build
+    add_custom_target(lance_ffi ALL DEPENDS "${LANCE_FFI_LIB_FINAL}")
+
+    # Import the Rust library as an external target
+    add_library(lance_ffi_lib STATIC IMPORTED GLOBAL)
+    set_target_properties(lance_ffi_lib PROPERTIES
+        IMPORTED_LOCATION "${LANCE_FFI_LIB_FINAL}"
+    )
+    add_dependencies(lance_ffi_lib lance_ffi)
+
+    message(STATUS "Rust FFI build configured for Lance support")
+    message(STATUS "  Rust target directory: ${LANCE_FFI_BUILD_DIR}")
+    message(STATUS "  Output library: ${LANCE_FFI_LIB_FINAL}")
+endif()
 
 # Source files for main library
 set(TPCH_CORE_SOURCES
@@ -225,6 +323,13 @@ if(TPCH_ENABLE_ICEBERG AND Iceberg_FOUND)
     )
 endif()
 
+# Add Lance writer if enabled and available
+if(TPCH_ENABLE_LANCE AND Lance_FOUND)
+    list(APPEND TPCH_CORE_SOURCES
+        src/writers/lance_writer.cpp
+    )
+endif()
+
 # Create core library
 add_library(tpch_core STATIC ${TPCH_CORE_SOURCES})
 target_include_directories(tpch_core PUBLIC include)
@@ -266,6 +371,28 @@ endif()
 
 # Paimon linking not needed - uses Parquet backing format directly
 
+# Link Lance FFI library if enabled
+if(TPCH_ENABLE_LANCE AND Lance_FOUND)
+    target_link_libraries(tpch_core PRIVATE lance_ffi_lib)
+
+    # Lance FFI requires Rust runtime libraries
+    # These are typically available on Unix-like systems
+    find_library(DL_LIB NAMES dl)
+    if(DL_LIB)
+        target_link_libraries(tpch_core PRIVATE ${DL_LIB})
+    endif()
+
+    find_library(PTHREAD_LIB NAMES pthread)
+    if(PTHREAD_LIB)
+        target_link_libraries(tpch_core PRIVATE ${PTHREAD_LIB})
+    endif()
+
+    find_library(M_LIB NAMES m)
+    if(M_LIB)
+        target_link_libraries(tpch_core PRIVATE ${M_LIB})
+    endif()
+endif()
+
 # Arrow has dependencies on system libraries that need to be linked AFTER ORC
 # Link compression libraries for Arrow's support
 find_library(ZLIB_LIB NAMES z)
@@ -305,6 +432,10 @@ if(TPCH_ENABLE_ICEBERG)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ICEBERG)
 endif()
 
+if(TPCH_ENABLE_LANCE)
+    target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_LANCE)
+endif()
+
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_link_libraries(tpch_core PUBLIC Uring::uring)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_ASYNC_IO)
@@ -328,6 +459,9 @@ if(TPCH_ENABLE_PAIMON)
 endif()
 if(TPCH_ENABLE_ICEBERG)
     target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ICEBERG)
+endif()
+if(TPCH_ENABLE_LANCE)
+    target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_LANCE)
 endif()
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
     target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_ASYNC_IO)
