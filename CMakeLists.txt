@@ -131,8 +131,13 @@ endif()
 
 # Lance support: Requires Rust toolchain to build FFI library
 if(TPCH_ENABLE_LANCE)
-    # Check for Rust toolchain
-    find_program(Cargo_EXECUTABLE cargo)
+    # Check for Rust toolchain - prefer /snap/bin for newer Rust versions
+    find_program(Cargo_EXECUTABLE cargo PATHS /snap/bin NO_DEFAULT_PATH)
+    if(NOT Cargo_EXECUTABLE)
+        # Fallback to system cargo
+        find_program(Cargo_EXECUTABLE cargo)
+    endif()
+
     if(Cargo_EXECUTABLE)
         message(STATUS "Found Rust toolchain: ${Cargo_EXECUTABLE}")
         set(Lance_FOUND TRUE)
@@ -224,15 +229,18 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
     find_program(SNAP_RUSTC rustc PATHS /snap/bin NO_DEFAULT_PATH)
     if(SNAP_RUSTC)
         message(STATUS "Detected Rust from snap: ${SNAP_RUSTC}")
+        set(RUSTC_ENV_VAR "${SNAP_RUSTC}")
     else()
         message(STATUS "Using system Rust compiler")
+        find_program(RUSTC_ENV_VAR rustc)
     endif()
 
     # Build Rust FFI library using cargo
     # Note: Cargo target directory is set to build/rust to keep artifacts out of source tree
     # All build artifacts go to CMAKE_BINARY_DIR/rust, NOT source tree
     # On macOS, we specify the target triple to ensure correct output directory
-    set(CARGO_BUILD_CMD "${Cargo_EXECUTABLE}" build --release
+    set(CARGO_BUILD_CMD "${CMAKE_COMMAND}" -E env RUSTC="${RUSTC_ENV_VAR}"
+            "${Cargo_EXECUTABLE}" build --release
             --manifest-path "${LANCE_FFI_DIR}/Cargo.toml"
             --target-dir "${LANCE_FFI_BUILD_DIR}")
 
