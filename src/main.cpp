@@ -48,7 +48,7 @@ struct Options {
     bool use_dbgen = false;
     bool parallel = false;
     bool zero_copy = false;  // Phase 13.4: Enable zero-copy optimizations
-    bool true_zero_copy = false;  // Phase 14.2.3: Enable true zero-copy with Buffer::Wrap
+    bool true_zero_copy = false;  // DISABLED: Always false. Use --zero-copy instead (simpler, no Buffer::Wrap complexity)
     std::string table = "lineitem";
 };
 
@@ -77,7 +77,7 @@ void print_usage(const char* prog) {
               << "                        partsupp, supplier, nation, region (default: lineitem)\n"
               << "  --parallel            Generate all 8 tables in parallel (Phase 12.6)\n"
               << "  --zero-copy           Enable zero-copy optimizations (Phase 13.4)\n"
-              << "  --true-zero-copy      Enable true zero-copy with Buffer::Wrap (Phase 14.2.3)\n"
+              // Removed --true-zero-copy option (use --zero-copy instead)
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
@@ -97,7 +97,7 @@ Options parse_args(int argc, char* argv[]) {
         {"table", required_argument, nullptr, 't'},
         {"parallel", no_argument, nullptr, 'p'},  // Phase 12.6: Fork-after-init
         {"zero-copy", no_argument, nullptr, 'z'},  // Phase 13.4: Zero-copy optimization
-        {"true-zero-copy", no_argument, nullptr, 'Z'},  // Phase 14.2.3: True zero-copy with Buffer::Wrap
+        // {"true-zero-copy", no_argument, nullptr, 'Z'},  // DISABLED: Removed to simplify
 #ifdef TPCH_ENABLE_ASYNC_IO
         {"async-io", no_argument, nullptr, 'a'},
 #endif
@@ -137,10 +137,7 @@ Options parse_args(int argc, char* argv[]) {
             case 'z':
                 opts.zero_copy = true;
                 break;
-            case 'Z':
-                opts.true_zero_copy = true;
-                opts.zero_copy = true;  // Implies --zero-copy
-                break;
+            // case 'Z': DISABLED - true-zero-copy removed, use --zero-copy instead
 #ifdef TPCH_ENABLE_ASYNC_IO
             case 'a':
                 opts.async_io = true;
