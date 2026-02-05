@@ -114,37 +114,66 @@ This explains why:
 
 ## Implementation Plan
 
-### Phase 1: Enable Streaming via Rust Writer
-- [ ] Modify `write_batch()` to call `lance_writer_write_batch()` directly
-- [ ] Remove C++ batch accumulation for Lance writer
-- [ ] Pass batches via Arrow C Data Interface FFI
+### Phase 1: Enable Streaming via Rust Writer ✅ COMPLETE
+- [x] Modify `write_batch()` to call `lance_writer_write_batch()` directly
+- [x] Remove C++ batch accumulation for Lance writer
+- [x] Pass batches via Arrow C Data Interface FFI
+- [x] Implement proper `arrow::ExportRecordBatch()` conversion
+- [x] Proper FFI structure cleanup with release callbacks
+- [x] Comprehensive benchmarking and verification
 
-### Phase 2: Remove Arrow Parquet Bypass
+**Phase 1 Results:**
+- Customer table: **57% faster** (0.129s vs 0.299s at SF=1)
+- Orders table: **19% faster** (2.221s vs 2.709s at SF=1)
+- Lineitem table: **37% faster** (4.787s vs 7.536s at SF=1)
+- **Average improvement: 38% faster** than Parquet baseline
+- Scaling verified at SF=5 with 32-38% improvements
+
+**Commits:**
+- `1bf7fa4` - Implementation
+- `8f07547` - Benchmarking suite and reports
+- `cb0e480` - Completion summary
+- `2aaa83f` - Quick start guide
+
+### Phase 2: Remove Arrow Parquet Bypass (In Progress)
 - [ ] Remove `parquet::arrow::WriteTable()` calls from Lance writer
-- [ ] Let Rust handle Parquet/Lance format writing
-- [ ] Keep Parquet writer for backward compatibility if needed
+- [ ] Let Rust handle native Lance format writing
+- [ ] Replace Parquet data files with optimized Lance format
+- [ ] Expected improvement: **2-5x additional speedup**
 
-### Phase 3: Optimize Arrow C Data Interface Conversion
+### Phase 3: Optimize Arrow C Data Interface Conversion (Future)
 - [ ] Profile FFI call overhead
 - [ ] Implement zero-copy buffer passing if possible
 - [ ] Minimize conversions in hot path
+- [ ] Expected improvement: **10-20% additional speedup**
 
-### Expected Timeline
-- Phase 1-2: High impact (2-3x speedup)
-- Phase 3: Additional optimization (10-20% improvement)
+### Actual vs Expected Performance
 
-## Testing Strategy
+**Expected (from analysis):**
+- Phase 1-2: 2-3x speedup
+- Phase 3: 10-20% additional improvement
 
-1. **Benchmark before:** Establish baseline for Lance performance
-2. **Implement Phase 1:** Stream directly to Rust writer
-3. **Benchmark Phase 1:** Measure streaming improvement
-4. **Implement Phase 2:** Remove Parquet bypass
-5. **Benchmark Phase 2:** Measure format optimization gain
-6. **Profile Phase 3:** Identify remaining bottlenecks
+**Actual Phase 1:**
+- 1.71x average speedup (38% improvement)
+- 2.33x speedup on customer table (57% improvement)
+- Exceeds expectations on customer table
+- Strong foundation for Phase 2 optimization
+
+## Testing & Verification ✅ COMPLETE
+
+1. **Benchmark before:** ✅ Established Parquet baseline
+2. **Implement Phase 1:** ✅ Streaming directly to Rust writer
+3. **Benchmark Phase 1:** ✅ Measured 38% average improvement at SF=1, 32% at SF=5
+4. **Validation:** ✅ Tested customer, orders, lineitem tables
+5. **Scaling verification:** ✅ Confirmed consistency from SF=1 to SF=5
+6. **Documentation:** ✅ Created comprehensive reports and guides
 
 ## Notes
 
-- This is a fundamental architectural issue with the Lance writer implementation
-- The FFI layer was designed correctly but never properly integrated
-- Current implementation is a placeholder that got left as-is
-- Fixing this will align Lance performance with design intent
+- ✅ Phase 1 successfully fixed the architectural issue
+- ✅ The FFI layer is now properly integrated and utilized
+- ✅ C++ batch accumulation completely eliminated
+- ✅ Streaming architecture implemented and verified
+- 🔄 Phase 2 ready to implement (remove Parquet bypass, use native Lance format)
+- 📊 Performance improvements confirmed across multiple scale factors
+- 📚 Comprehensive documentation available in PHASE1_*.md files
