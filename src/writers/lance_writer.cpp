@@ -3,20 +3,10 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
-#include <cstring>
-#include <fstream>
-#include <sstream>
-#include <ctime>
-#include <chrono>
-#include <iomanip>
-#include <uuid/uuid.h>
-#include <arrow/array.h>
-#include <arrow/buffer.h>
 #include <arrow/type.h>
-#include <arrow/table.h>
-#include <arrow/io/file.h>
-#include <parquet/arrow/writer.h>
-#include <parquet/properties.h>
+#include <arrow/record_batch.h>
+#include <arrow/c/bridge.h>
+#include <arrow/c/abi.h>
 
 namespace fs = std::filesystem;
 
@@ -42,14 +32,6 @@ LanceWriter::~LanceWriter() {
             // Suppress exceptions in destructor
         }
     }
-}
-
-std::string LanceWriter::generate_uuid() {
-    uuid_t uuid;
-    uuid_generate(uuid);
-    char uuid_str[37];
-    uuid_unparse(uuid, uuid_str);
-    return std::string(uuid_str);
 }
 
 void LanceWriter::initialize_lance_dataset(
@@ -83,15 +65,42 @@ void LanceWriter::initialize_lance_dataset(
 
 std::pair<void*, void*> LanceWriter::batch_to_ffi(
     const std::shared_ptr<arrow::RecordBatch>& batch) {
-    // For now, we don't use Arrow C Data Interface
-    // The actual data is written directly to Parquet below
-    void* batch_ptr = batch.get();
-    void* schema_ptr = batch->schema().get();
-    return std::make_pair(batch_ptr, schema_ptr);
+    // Convert RecordBatch and Schema to Arrow C Data Interface format
+    // using Arrow's built-in export functions
+
+    auto* arrow_array = new ArrowArray();
+    auto* arrow_schema = new ArrowSchema();
+
+    // Export RecordBatch as ArrowArray (includes schema)
+    auto status = arrow::ExportRecordBatch(*batch, arrow_array, arrow_schema);
+    if (!status.ok()) {
+        delete arrow_array;
+        delete arrow_schema;
+        throw std::runtime_error("Failed to export RecordBatch to C Data Interface: " +
+                                status.ToString());
+    }
+
+    return std::make_pair(reinterpret_cast<void*>(arrow_array),
+                         reinterpret_cast<void*>(arrow_schema));
 }
 
-void LanceWriter::free_ffi_structures(void* /*array_ptr*/, void* /*schema_ptr*/) {
-    // No dynamic allocation, nothing to free
+void LanceWriter::free_ffi_structures(void* array_ptr, void* schema_ptr) {
+    // Free the ArrowArray and ArrowSchema structs that were allocated in batch_to_ffi()
+    // The release callbacks handle releasing the actual data
+    if (array_ptr != nullptr) {
+        auto* arr = reinterpret_cast<ArrowArray*>(array_ptr);
+        if (arr->release != nullptr) {
+            arr->release(arr);
+        }
+        delete arr;
+    }
+    if (schema_ptr != nullptr) {
+        auto* sch = reinterpret_cast<ArrowSchema*>(schema_ptr);
+        if (sch->release != nullptr) {
+            sch->release(sch);
+        }
+        delete sch;
+    }
 }
 
 void LanceWriter::write_batch(
@@ -117,85 +126,38 @@ void LanceWriter::write_batch(
             "Got: " + batch->schema()->ToString());
     }
 
-    // Accumulate batches
-    accumulated_batches_.push_back(batch);
-    row_count_ += batch->num_rows();
-
-    // Write to Parquet when accumulated rows reach threshold
-    const int64_t BATCH_SIZE_THRESHOLD = 10000000;  // 10M rows
-    if (row_count_ >= BATCH_SIZE_THRESHOLD || batch_count_ < 0) {
-        flush_batches_to_parquet();
-    }
-
-    batch_count_++;
-    if (batch_count_ % 100 == 0 || batch_count_ <= 3) {
-        std::cout << "Lance: Received batch " << batch_count_ << ", "
-                  << row_count_ << " rows total\n";
-    }
-}
-
-void LanceWriter::flush_batches_to_parquet() {
-    if (accumulated_batches_.empty()) {
-        return;
-    }
-
-    // Combine all batches into a single table
-    std::vector<std::shared_ptr<arrow::RecordBatch>> to_write = accumulated_batches_;
-    accumulated_batches_.clear();
+    // Convert batch to Arrow C Data Interface format
+    auto [array_ptr, schema_ptr] = batch_to_ffi(batch);
 
     try {
-        // Create combined table
-        auto table = arrow::Table::FromRecordBatches(to_write);
-        if (!table.ok()) {
-            throw std::runtime_error("Failed to create table from batches: " +
-                                    table.status().ToString());
+        // Stream batch directly to Rust writer
+        auto* raw_writer = reinterpret_cast<::LanceWriter*>(rust_writer_);
+        int result = lance_writer_write_batch(raw_writer, array_ptr, schema_ptr);
+
+        if (result != 0) {
+            free_ffi_structures(array_ptr, schema_ptr);
+            throw std::runtime_error(
+                "Failed to write batch to Lance writer (error code: " +
+                std::to_string(result) + ")");
         }
 
-        // Generate data file name
-        std::ostringstream filename;
-        filename << dataset_path_ << "/data/part-" << std::setfill('0')
-                 << std::setw(5) << parquet_file_count_ << ".parquet";
-        parquet_file_count_++;
+        // Clean up FFI structures after successful write
+        free_ffi_structures(array_ptr, schema_ptr);
 
-        // Write to Parquet with compression
-        auto properties = parquet::WriterProperties::Builder()
-            .compression(parquet::Compression::SNAPPY)
-            ->build();
+        row_count_ += batch->num_rows();
+        batch_count_++;
 
-        auto arrow_props = parquet::ArrowWriterProperties::Builder().build();
-
-        // Create file output stream
-        auto outfile_result = arrow::io::FileOutputStream::Open(filename.str());
-        if (!outfile_result.ok()) {
-            throw std::runtime_error("Failed to open file: " +
-                                    outfile_result.status().ToString());
+        if (batch_count_ % 100 == 0 || batch_count_ <= 3) {
+            std::cout << "Lance: Streamed batch " << batch_count_ << ", "
+                      << row_count_ << " rows total\n";
         }
-        auto outfile = outfile_result.ValueOrDie();
-
-        // Write table to file
-        auto write_result = parquet::arrow::WriteTable(
-            *table.ValueOrDie(),
-            arrow::default_memory_pool(),
-            outfile,
-            1000,  // chunk size
-            properties,
-            arrow_props);
-
-        if (!write_result.ok()) {
-            throw std::runtime_error("Failed to write Parquet file: " +
-                                    write_result.ToString());
-        }
-
-        if (!outfile->Close().ok()) {
-            throw std::runtime_error("Failed to close Parquet file");
-        }
-
-        std::cout << "Lance: Wrote Parquet file " << filename.str() << "\n";
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Error flushing batches to Parquet: " +
-                                std::string(e.what()));
+    } catch (...) {
+        // Make sure to clean up FFI structures on exception
+        free_ffi_structures(array_ptr, schema_ptr);
+        throw;
     }
 }
+
 
 void LanceWriter::close() {
     if (rust_writer_ == nullptr) {
@@ -203,13 +165,9 @@ void LanceWriter::close() {
     }
 
     try {
-        // Flush any remaining batches
-        flush_batches_to_parquet();
+        // Batches are already streamed to Rust writer, nothing to flush
 
-        // Write Lance metadata
-        write_lance_metadata();
-
-        // Close Rust writer
+        // Close Rust writer (handles metadata creation)
         auto* raw_writer = reinterpret_cast<::LanceWriter*>(rust_writer_);
         int result = lance_writer_close(raw_writer);
         if (result != 0) {
@@ -219,8 +177,7 @@ void LanceWriter::close() {
 
         std::cout << "Lance dataset finalized: " << dataset_path_ << "\n"
                   << "  Total rows: " << row_count_ << "\n"
-                  << "  Total batches: " << batch_count_ << "\n"
-                  << "  Parquet files: " << parquet_file_count_ << "\n";
+                  << "  Total batches: " << batch_count_ << "\n";
 
         // Clean up
         lance_writer_destroy(raw_writer);
@@ -232,108 +189,6 @@ void LanceWriter::close() {
         }
         throw;
     }
-}
-
-void LanceWriter::write_lance_metadata() {
-    // Get current timestamp
-    auto now = std::chrono::system_clock::now();
-    auto timestamp_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch())
-            .count();
-
-    // Generate schema UUID
-    std::string schema_id = generate_uuid();
-
-    // Write _metadata.json
-    std::ostringstream metadata_json;
-    metadata_json << "{\n"
-                  << "  \"version\": 0,\n"
-                  << "  \"manifests\": [\n"
-                  << "    {\n"
-                  << "      \"manifest_path\": \"_manifest.json\",\n"
-                  << "      \"created_at\": " << timestamp_ms << ",\n"
-                  << "      \"schema_id\": \"" << schema_id << "\"\n"
-                  << "    }\n"
-                  << "  ],\n"
-                  << "  \"schema\": {\n"
-                  << "    \"id\": \"" << schema_id << "\",\n"
-                  << "    \"fields\": [\n";
-
-    // Write schema fields
-    for (int i = 0; i < schema_->num_fields(); i++) {
-        if (i > 0) metadata_json << ",\n";
-        auto field = schema_->field(i);
-        metadata_json << "      {\n"
-                      << "        \"id\": " << i << ",\n"
-                      << "        \"name\": \"" << field->name() << "\",\n"
-                      << "        \"type\": \"" << field->type()->ToString()
-                      << "\"\n"
-                      << "      }";
-    }
-
-    metadata_json << "\n    ]\n"
-                  << "  }\n"
-                  << "}\n";
-
-    std::string metadata_path = dataset_path_ + "/_metadata.json";
-    std::ofstream metadata_file(metadata_path);
-    if (!metadata_file) {
-        throw std::runtime_error("Failed to open " + metadata_path + " for writing");
-    }
-    metadata_file << metadata_json.str();
-    metadata_file.close();
-
-    // Write _manifest.json
-    std::ostringstream manifest_json;
-    manifest_json << "{\n"
-                  << "  \"version\": 0,\n"
-                  << "  \"created_at\": " << timestamp_ms << ",\n"
-                  << "  \"files\": [\n";
-
-    for (int i = 0; i < parquet_file_count_; i++) {
-        if (i > 0) manifest_json << ",\n";
-        std::ostringstream file_path;
-        file_path << "data/part-" << std::setfill('0') << std::setw(5) << i
-                  << ".parquet";
-        manifest_json << "    {\n"
-                      << "      \"path\": \"" << file_path.str() << "\",\n"
-                      << "      \"row_count\": 0,\n"
-                      << "      \"size_bytes\": 0\n"
-                      << "    }";
-    }
-
-    manifest_json << "\n  ]\n"
-                  << "}\n";
-
-    std::string manifest_path = dataset_path_ + "/_manifest.json";
-    std::ofstream manifest_file(manifest_path);
-    if (!manifest_file) {
-        throw std::runtime_error("Failed to open " + manifest_path + " for writing");
-    }
-    manifest_file << manifest_json.str();
-    manifest_file.close();
-
-    // Write _commits.json (commit log)
-    std::ostringstream commits_json;
-    commits_json << "{\n"
-                 << "  \"version\": 0,\n"
-                 << "  \"commits\": [\n"
-                 << "    {\n"
-                 << "      \"version\": 0,\n"
-                 << "      \"timestamp\": " << timestamp_ms << ",\n"
-                 << "      \"operation\": \"append\"\n"
-                 << "    }\n"
-                 << "  ]\n"
-                 << "}\n";
-
-    std::string commits_path = dataset_path_ + "/_commits.json";
-    std::ofstream commits_file(commits_path);
-    if (!commits_file) {
-        throw std::runtime_error("Failed to open " + commits_path + " for writing");
-    }
-    commits_file << commits_json.str();
-    commits_file.close();
 }
 
 }  // namespace tpch
