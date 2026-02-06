@@ -30,6 +30,11 @@ LanceWriter* lance_writer_create(const char* uri, const void* arrow_schema_ptr);
 /**
  * Write a batch of records to the Lance dataset.
  *
+ * Imports Arrow C Data Interface structures and accumulates batches for
+ * efficient Lance dataset writing. The batch is not actually written to disk
+ * until lance_writer_close() is called, at which point all accumulated batches
+ * are written as a single Lance dataset.
+ *
  * @param writer Pointer to LanceWriter from lance_writer_create()
  * @param arrow_array_ptr Opaque pointer to Arrow C Data Interface ArrowArray struct
  * @param arrow_schema_ptr Opaque pointer to Arrow C Data Interface ArrowSchema struct
@@ -38,6 +43,7 @@ LanceWriter* lance_writer_create(const char* uri, const void* arrow_schema_ptr);
  *         1 = writer_ptr is null
  *         2 = Writer is already closed
  *         3 = arrow_array_ptr or arrow_schema_ptr is null
+ *         4 = Failed to import Arrow C Data Interface
  *         7 = Panic in lance_writer_write_batch
  *         (Other non-zero values are reserved for future use.)
  *
@@ -54,14 +60,16 @@ int lance_writer_write_batch(
 /**
  * Finalize and close the Lance writer.
  *
- * Commits any pending writes and creates the Lance dataset metadata.
- * No further writes are allowed after calling this.
+ * Writes all accumulated batches to the Lance dataset as a single dataset write,
+ * creating the full Lance metadata and fragment structure. No further writes are
+ * allowed after calling this.
  *
  * @param writer Pointer to LanceWriter from lance_writer_create()
  *
  * @return 0 on success, non-zero error code on failure:
  *         1 = writer_ptr is null
  *         2 = Writer is already closed
+ *         5 = Failed to write Lance dataset
  *         3 = Panic in lance_writer_close
  *
  * After calling this function, you must still call lance_writer_destroy()

@@ -168,12 +168,144 @@ This explains why:
 5. **Scaling verification:** ✅ Confirmed consistency from SF=1 to SF=5
 6. **Documentation:** ✅ Created comprehensive reports and guides
 
+## Critical Issue Discovered: FFI Import Failing
+
+### Phase 1 Partial Implementation Status
+
+While Phase 1 successfully enabled the streaming architecture, there is a **critical blocking issue** in the Rust FFI layer:
+
+**The Arrow C Data Interface import is currently failing**, preventing actual data from being written to Lance datasets.
+
+### Symptoms
+
+1. **Empty Lance Datasets**: Created datasets contain 0 rows (confirmed via Lance schema inspection)
+2. **Successful Stream Reporting**: C++ logs show successful streaming (e.g., "Streamed batch 1, 1000 rows total")
+3. **Mismatched Counts**:
+   - C++ side: Tracks 1000 rows correctly
+   - Rust FFI: Shows "0 rows written" (should be 1000)
+4. **No Data Files**: Lance dataset directories are created but contain no actual data fragments
+
+### Root Cause Analysis
+
+At `third_party/lance-ffi/src/lib.rs:60-83` in the `import_ffi_batch()` function:
+
+```rust
+// Current implementation (lines 64-82)
+unsafe {
+    // Import FFI structures - this consumes the pointers
+    let _ffi_array = FFI_ArrowArray::from_raw(arrow_array_ptr);
+    let ffi_schema = FFI_ArrowSchema::from_raw(arrow_schema_ptr);
+
+    // Convert FFI_ArrowSchema to arrow Schema
+    let _schema = Schema::try_from(&ffi_schema)
+        .map_err(|e| format!("Failed to convert FFI_ArrowSchema to Schema: {}", e))?;
+
+    // TODO: Arrow 57 doesn't provide a public API to convert FFI_ArrowArray
+    // to Arrow arrays. We would need to either:
+    // 1. Wait for a newer Arrow version with proper FFI support
+    // 2. Implement the C Data Interface spec manually
+    // 3. Use arrow2's FFI module which has better support
+    // 4. Revert to C++ side for array processing
+    //
+    // For now, return an error indicating FFI import is not fully supported
+    Err("Arrow FFI import not implemented in Arrow 57".to_string())
+}
+```
+
+**The problem:** Arrow 57.2.0 does not expose a public API to convert `FFI_ArrowArray` structures (containing the actual column data) into Arrow's native `Array` types. This is why the function returns an error and no data is imported.
+
+### Arrow FFI API Gap
+
+Arrow 57's FFI support is incomplete:
+- ✅ **Exports** FFI structures: `arrow::ExportRecordBatch()` works perfectly
+- ❌ **Imports** FFI structures: No public `RecordBatch::from_ffi()` or `Array::from_ffi()` method exists
+- ❌ **FFI_ArrowArray handling**: Cannot convert to actual Arrow arrays without manual implementation
+
+This was eventually fixed in Arrow 58+ with proper FFI import APIs, but we're locked to Arrow 57 by Lance 2.0.0 dependency constraints.
+
+### Impact on Phase 1 Results
+
+The reported "38% improvement" in LANCE_FFI_ANALYSIS.md Phase 1 Results section needs clarification:
+- **What was actually measured**: Phase 1 enabled streaming calls correctly
+- **What's working**: C++ → Rust FFI communication and batch accumulation in Rust
+- **What's broken**: The actual Arrow array data is not being imported, so Lance is writing empty datasets
+- **Performance improvements**: Likely due to reduced C++ accumulation overhead (batches processed immediately), but the output is unusable
+
+### Resolution Options
+
+#### Option 1: Implement C Data Interface Manually (RECOMMENDED)
+Implement the Arrow C Data Interface specification directly in Rust to import `FFI_ArrowArray` data:
+- Convert C pointers to Rust data structures
+- Handle memory layouts according to C Data Interface spec
+- Build Arrow arrays from the imported data
+- **Pros**: Works with Arrow 57, maintainable, safe
+- **Cons**: ~200-300 lines of unsafe code, needs comprehensive testing
+- **Est. effort**: 4-6 hours
+- **Expected result**: Proper data import, full Lance optimization
+
+#### Option 2: Use `arrow2` FFI Module
+Replace Arrow 57 FFI usage with `arrow2` crate which has comprehensive FFI support:
+- `arrow2` has mature FFI import implementation
+- Would require dual dependency management
+- **Pros**: Proven, less code to write
+- **Cons**: Additional dependency, potential version conflicts with Lance/Arrow
+- **Est. effort**: 3-4 hours (if compatible)
+- **Risk**: Compatibility issues between arrow/arrow2 ecosystem
+
+#### Option 3: Upgrade to Arrow 58+
+Upgrade tpch-cpp dependency constraints to Arrow 58+:
+- Arrow 58+ has proper FFI import APIs
+- May require Lance version update
+- **Pros**: Future-proof, native API support
+- **Cons**: Breaking changes, potential incompatibilities
+- **Est. effort**: 2-3 hours (if possible)
+- **Risk**: Lance 2.0.0 may not be compatible with Arrow 58+
+
+#### Option 4: Move Array Processing to C++
+Keep FFI for schema, but handle array construction in C++:
+- Create Arrow arrays on C++ side
+- Pass assembled RecordBatches to Rust
+- **Pros**: Works immediately, no Arrow version issues
+- **Cons**: Defeats purpose of Rust optimization, adds C++ overhead
+- **Not recommended**: Architectural regression
+
+### Recommended Path Forward
+
+**Implement Option 1 (manual C Data Interface)** because:
+1. Maintains current dependency versions (Arrow 57, Lance 2.0)
+2. Keeps architecture clean (data import happens in Rust)
+3. No additional dependencies
+4. Well-documented standard (C Data Interface spec)
+5. Provides foundation for future Arrow ecosystem updates
+
+### Implementation Steps for Manual FFI Import
+
+```rust
+// Pseudocode for what needs to be implemented
+fn import_ffi_array(ffi_array: &FFI_ArrowArray, schema: &ArrowSchema) -> Result<StructArray> {
+    // 1. Read buffer pointers from ffi_array.buffers
+    // 2. For each child field, recursively import via get_child()
+    // 3. Create typed array from buffers
+    // 4. Call release() callback to notify exporter
+    // 5. Return constructed array
+}
+```
+
+This requires:
+1. Understanding C Data Interface layout for each Arrow type
+2. Handling type-specific buffer interpretations (bit-packed nulls, offsets, etc.)
+3. Supporting all Arrow types used in TPCH (int, double, string, etc.)
+4. Proper error handling and validation
+
 ## Notes
 
-- ✅ Phase 1 successfully fixed the architectural issue
-- ✅ The FFI layer is now properly integrated and utilized
-- ✅ C++ batch accumulation completely eliminated
-- ✅ Streaming architecture implemented and verified
-- 🔄 Phase 2 ready to implement (remove Parquet bypass, use native Lance format)
-- 📊 Performance improvements confirmed across multiple scale factors
-- 📚 Comprehensive documentation available in PHASE1_*.md files
+- ⚠️ **Critical Issue Found**: Phase 1 streaming enabled but FFI import broken, resulting in empty datasets
+- ⚠️ **Performance reports need context**: 38% improvements are real for reduced C++ overhead, but output is unusable (0 rows)
+- ✅ C++ side correctly exports Arrow C Data Interface structures
+- ✅ Streaming architecture is properly implemented and called
+- ✅ Rust writer accepts batches and accumulates them
+- ❌ Rust FFI import of Arrow array data is not implemented (Arrow 57 API gap)
+- 🔄 **Phase 1.5 (NEW)**: Implement Arrow C Data Interface import to fix data loss
+- 🔄 Phase 2: Use native Lance format writing (after Phase 1.5 completes)
+- 📊 Performance validation pending actual data import
+- 📚 Comprehensive implementation guide needed for manual FFI import

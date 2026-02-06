@@ -1,8 +1,8 @@
 # Apache Paimon, Iceberg, and Lance Format Support Implementation Plan
 
-**Status**: Phase 1 (Paimon) ✅ SPEC-COMPLIANT UPGRADE COMPLETE | Phase 2 (Iceberg) ✅ COMPLETE | Phase 3 (Lance) 🔄 IN PROGRESS
+**Status**: Phase 1 (Paimon) ✅ COMPLETE | Phase 2 (Iceberg) ✅ COMPLETE | Phase 3 (Lance) ⚠️ CRITICAL ISSUE FOUND
 
-**Last Updated**: 2026-02-03 - Phase 1 upgraded to production-ready (Avro binary manifests)
+**Last Updated**: 2026-02-07 - Critical blocking issue identified in Lance FFI: Arrow C Data Interface import not implemented, causing empty datasets. Phase 1.5 required.
 
 ---
 
@@ -24,10 +24,13 @@ This document outlines the complete implementation plan for adding three new tab
    - Self-contained implementation, full Iceberg compatibility
    - Enables interoperability with enterprise data lakehouse ecosystems
 
-3. **Lance** (Phase 3) - ⏳ PENDING
+3. **Lance** (Phase 3) - ⚠️ CRITICAL ISSUE FOUND
    - Modern columnar format optimized for ML/AI workloads
    - Requires Rust FFI bridge (lance-rs has no C++ bindings)
-   - Higher complexity, requires additional toolchain
+   - **BLOCKER**: Arrow C Data Interface import not implemented (Arrow 57 API gap)
+   - **Result**: Empty datasets despite successful batch streaming
+   - **Fix**: Phase 1.5 - Implement manual FFI import (7-11 hours)
+   - **Timeline**: Feb 10-12, 2026 (must complete before Phase 2 can proceed)
 
 ---
 
@@ -825,7 +828,7 @@ See TODO.md for Phase 2.2 timeline (10-16 hours).
 - [x] Testing with synthetic and dbgen data
 - [x] Documentation in PAIMON_LANCE_IMPLEMENTATION_PLAN.md
 
-### Phase 3.1: Lance Data Writing (✅ COMPLETED - Feb 4, 2026)
+### Phase 3.1: Lance Data Writing (⚠️ INCOMPLETE - Feb 4, 2026)
 - [x] Implement complete Lance writer in C++
 - [x] Batch accumulation and Parquet flushing
 - [x] Lance metadata file generation (_metadata.json, _manifest.json, _commits.json)
@@ -835,15 +838,177 @@ See TODO.md for Phase 2.2 timeline (10-16 hours).
 - [x] Verify dataset structure and metadata
 - [x] Update documentation with completion details
 - [x] Commit work with comprehensive message
+- [ ] ⚠️ **CRITICAL BLOCKER FOUND**: Arrow FFI import not implemented
+- [ ] Datasets created but contain 0 rows (data loss)
+- [ ] Streaming works but data doesn't flow through FFI
+- [ ] **BLOCKED**: Cannot proceed to Phase 2 without fixing this
 
-### Phase 3.2: Lance Format Enhancements (⏳ FUTURE)
-- [ ] Update Rust toolchain to 1.82+
-- [ ] Implement Arrow C Data Interface in Rust FFI
-- [ ] Add actual Lance data file writing
-- [ ] Create Lance dataset metadata files
-- [ ] Buffer management and batch size tuning
-- [ ] Performance benchmarking
-- [ ] Cross-format compatibility tests
+### Phase 1.5 / Phase 3.1.5: Arrow FFI Import Fix (🔴 CRITICAL - NEW)
+- [ ] Implement SafeArrowArray wrapper for FFI structures
+- [ ] Implement primitive type array import (Int64, Float64, Int32)
+- [ ] Implement string array import (UTF-8)
+- [ ] Update import_ffi_batch() to use new implementation
+- [ ] Test with Rust cargo check (no warnings)
+- [ ] Build Rust FFI library with new code
+- [ ] Build full tpch_benchmark with Lance enabled
+- [ ] Test customer table (expect 150K rows, not 0)
+- [ ] Test orders table (expect 1.5M rows, not 0)
+- [ ] Test lineitem table (expect 6M rows, not 0)
+- [ ] Verify error code 4 no longer appears
+- [ ] Verify data can be read back from Lance datasets
+- [ ] Document implementation in commit message
+- [ ] Update LANCE_FFI_ANALYSIS.md with completion status
+- [ ] Update this plan with Phase 1.5 completion
+
+### Phase 3.1.5: Critical Issue - Arrow FFI Import Broken (🔴 BLOCKING)
+
+**Discovery Date**: 2026-02-07
+**Status**: Critical issue identified, Phase 1.5 implementation required before Phase 2
+
+#### The Problem
+
+The Lance writer streaming architecture from Phase 1 is fundamentally broken due to a missing Arrow C Data Interface import implementation:
+
+- ✅ C++ exports Arrow C Data Interface structures correctly (using `arrow::ExportRecordBatch()`)
+- ✅ Batches stream to Rust FFI layer successfully
+- ❌ Rust FFI cannot import the array data (Arrow 57 lacks public import APIs)
+- ❌ Result: **Empty Lance datasets (0 rows) despite successful batch transmission**
+
+#### Symptoms
+
+```
+C++ Logs:  "Streamed batch 1, 1000 rows total" ✓
+Rust Logs: "Accumulated batch 1, 1000 rows total" ✓
+Lance Result: Dataset created with 0 rows ✗
+```
+
+#### Root Cause
+
+Location: `third_party/lance-ffi/src/lib.rs:60-83` in `import_ffi_batch()` function
+
+```rust
+// Current state (broken)
+Err("Arrow FFI import not implemented in Arrow 57".to_string())
+```
+
+Arrow 57.2.0 provides:
+- ✅ **Export APIs**: `arrow::ExportRecordBatch()` works
+- ❌ **Import APIs**: No `RecordBatch::from_ffi()` or `Array::from_ffi()` methods exist
+
+**Constraint**: Lance 2.0.0 requires Arrow 57.x, blocking upgrade to Arrow 58+ which has proper FFI import
+
+#### Impact on Phase 1 Results
+
+The "38% speedup" reported in Phase 1 is **misleading**:
+- ✅ Real: Reduced C++ memory accumulation overhead
+- ❌ Problem: Output datasets contain 0 rows (unusable)
+
+**Current State**: Faster-to-empty is not useful.
+
+#### Solution: Phase 1.5 Implementation
+
+**Implement Arrow C Data Interface import manually in Rust** using the C Data Interface specification.
+
+**Estimated Effort**: 7-11 hours
+- **Estimated Timeline**: Feb 10-12, 2025
+- **Critical Blocker**: Must complete before Phase 2 can proceed
+- **Required for**: Actual data to flow through FFI layer
+
+#### Phase 1.5 Details
+
+See dedicated implementation documents:
+- `LANCE_FFI_STATUS_SUMMARY.md` - Quick reference and current status
+- `LANCE_FFI_PHASE1_5_IMPLEMENTATION.md` - Detailed implementation guide (7-11 hours)
+- `PHASE1_5_QUICK_START.md` - Step-by-step hands-on guide
+- `PHASE1_EXPECTATIONS_VS_REALITY.md` - Analysis of what went wrong
+
+#### What Phase 1.5 Will Do
+
+1. **Implement FFI import utilities** (1-2 hours)
+   - Safe wrapper around `FFI_ArrowArray` structures
+   - Buffer pointer reading and child array access
+
+2. **Support primitive types** (2-3 hours)
+   - Int64, Float64, Int32
+   - Null bitmap and data buffer handling
+
+3. **Support string types** (2-3 hours)
+   - UTF-8 string arrays
+   - Offset and data buffer handling
+
+4. **Integrate into RecordBatch assembly** (1-2 hours)
+   - Convert imported arrays to Arrow types
+   - Proper FFI release callback handling
+   - Return complete RecordBatch with actual data
+
+5. **Testing and validation** (1 hour)
+   - Verify error code 4 no longer occurs
+   - Confirm Lance datasets contain correct row counts
+   - Test customer, orders, lineitem tables
+
+#### Updated Dependency Chain
+
+```
+Phase 1:   Streaming enabled (incomplete - data import broken) ❌
+    ↓
+Phase 1.5: Fix data import (CRITICAL - unblocks Phase 2) 🔴
+    ↓
+Phase 2:   Remove Parquet bypass, use native Lance format ✓
+    ↓
+Phase 3:   Performance optimization (future)
+```
+
+#### Success Criteria for Phase 1.5
+
+- [ ] Error code 4 no longer occurs in logs
+- [ ] Lance datasets contain actual data (row count > 0)
+- [ ] Customer table SF=1: produces 150K rows
+- [ ] Orders table SF=1: produces 1.5M rows
+- [ ] Lineitem table SF=1: produces 6M rows
+- [ ] Data integrity verified (can read back from Lance)
+- [ ] No regressions to Phase 2 implementation
+
+#### What Happens If We Skip Phase 1.5?
+
+If we proceed to Phase 2 without fixing Phase 1.5:
+- Phase 2 would also produce empty datasets
+- Data would still not flow correctly
+- Phase 2 optimizations would be applied to broken data
+- Result: Native Lance format files with 0 rows (useless)
+
+**We cannot skip Phase 1.5 - it's a hard dependency.**
+
+#### Timeline Adjustment
+
+Original plan:
+```
+Feb 3: Phase 2 starts
+Feb 7: Phase 2 complete
+```
+
+Actual plan:
+```
+Feb 7-10:  Phase 1.5 implementation (7-11 hours)
+Feb 11:    Phase 1.5 testing and validation
+Feb 12:    Phase 2 implementation begins
+Feb 15:    Phase 2 complete
+```
+
+#### Commits to Be Made
+
+1. Phase 1.5 implementation: Fix Arrow C Data Interface import
+2. Comprehensive tests: Verify data flows correctly
+3. Updated documentation: Record resolution
+
+### Phase 3.2: Lance Format Enhancements (⏳ FUTURE - AFTER PHASE 1.5)
+
+After Phase 1.5 fixes the data import issue:
+- [ ] Verify actual data flows to Lance
+- [ ] Benchmark Phase 1.5 against Parquet baseline
+- [ ] Remove Arrow Parquet writer bypass
+- [ ] Implement native Lance format writing
+- [ ] Performance profiling and optimization
+- [ ] Expected improvement: 2-5x speedup over Parquet
 
 ---
 
@@ -1060,12 +1225,13 @@ Once Phase 2 is complete, Lance datasets will be readable by:
 | 2026-02-01 | 1.2 | Updated implementation checklist with test results, roadmap refinement |
 | 2026-02-03 | 1.3 | Phase 1 upgraded: Avro binary manifests, spec-compliant, 26 tests, Flink/Spark compatible |
 | 2026-02-04 | 1.4 | Phase 3.1 complete: Real Lance data writing with Parquet backing, all 3 formats production-ready |
+| 2026-02-07 | 1.5 | **CRITICAL**: Lance Phase 3.1 broken - FFI import not implemented (Arrow 57 API gap). Phase 1.5 required (7-11 hrs). Updated timeline, added blocking issue documentation. |
 
 ---
 
 ## Summary of Current Status
 
-**As of February 4, 2026 - Evening**
+**As of February 7, 2026 - Critical Issue Identified**
 
 ✅ **Phase 1 (Paimon)**: PRODUCTION-READY (Feb 3, 2026)
 - Hand-rolled Avro binary encoder (200 lines, zero deps)
@@ -1090,15 +1256,27 @@ Once Phase 2 is complete, Lance datasets will be readable by:
 - Synthetic and dbgen data generation tested
 - Commit: a08dcde
 
-✅ **Phase 3.1 (Lance Data Writing)**: COMPLETE (Feb 4, 2026)
-- C++-driven Lance writer with Parquet backing
-- Batch accumulation and metadata file generation
-- Complete Lance dataset structure (_metadata.json, _manifest.json, _commits.json)
-- UUID-based schema identification
-- Tested with TPC-H customer table: 1000 rows → 143KB Parquet + 2.3KB metadata
-- Throughput: 3378 rows/sec
-- Commit: 5af6e8a
-- Status: Production-ready for benchmark data generation
+⚠️ **Phase 3.1 (Lance Data Writing)**: INCOMPLETE (Feb 4, 2026)
+- ✅ C++-driven Lance writer with Parquet backing (works)
+- ✅ Batch accumulation and metadata file generation (works)
+- ✅ Complete Lance dataset structure (works)
+- ❌ Arrow FFI import broken (Arrow 57 API gap)
+- ❌ **Result: Empty datasets (0 rows written, streaming fails)**
+- Commit: 5af6e8a (but incomplete - data import missing)
+- Status: NOT PRODUCTION-READY (data loss)
+
+🔴 **Phase 1.5 (CRITICAL - NEW)**: BLOCKING ISSUE (Feb 7, 2026)
+- **Status**: Must complete before Phase 2 can proceed
+- **Issue**: Arrow C Data Interface import not implemented
+- **Impact**: Lance datasets contain 0 rows despite successful batch streaming
+- **Root Cause**: Arrow 57.2.0 lacks public FFI import APIs
+- **Solution**: Implement manual C Data Interface import in Rust (7-11 hours)
+- **Timeline**: Feb 10-12, 2026
+- **Documentation**:
+  - LANCE_FFI_STATUS_SUMMARY.md (quick reference)
+  - LANCE_FFI_PHASE1_5_IMPLEMENTATION.md (detailed guide)
+  - PHASE1_5_QUICK_START.md (hands-on implementation)
+  - PHASE1_EXPECTATIONS_VS_REALITY.md (analysis)
 
 ⏳ **Phase 2.2 (Iceberg Enhancements)**: Future work
 - Partitioned tables support
@@ -1106,11 +1284,13 @@ Once Phase 2 is complete, Lance datasets will be readable by:
 - Avro manifest files (v2 format)
 - Statistics and row counts in metadata
 
-⏳ **Phase 3.2 (Lance Format Enhancements)**: Future work
+⏳ **Phase 3.2 (Lance Format Enhancements)**: DEFERRED (After Phase 1.5)
+- ← Phase 1.5 must complete first (data import fix)
+- Then complete Phase 3.1 (data will flow correctly)
+- Then optimize Phase 3.2 (native Lance format)
 - Lance v2 format compliance
 - Statistics and index metadata
 - Partitioned dataset support
-- Arrow FFI integration (when Rust dependencies stabilize)
 
 ---
 
