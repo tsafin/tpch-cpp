@@ -268,7 +268,7 @@ void generate_with_dbgen(
     GenerateFn generate_fn,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     size_t rows_in_batch = 0;
 
     auto builders = create_builders_from_schema(schema);
@@ -321,7 +321,7 @@ void generate_lineitem_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;  // Match Phase 13.4 plan
+    const size_t batch_size = 5000;  // Match Phase 13.4 plan
 
     // Use batch iterator (zero-copy friendly)
     auto batch_iter = dbgen.generate_lineitem_batches(batch_size, opts.max_rows);
@@ -361,7 +361,7 @@ void generate_orders_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_orders_batches(batch_size, opts.max_rows);
 
     while (batch_iter.has_next()) {
@@ -397,7 +397,7 @@ void generate_customer_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_customer_batches(batch_size, opts.max_rows);
 
     while (batch_iter.has_next()) {
@@ -433,7 +433,7 @@ void generate_part_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_part_batches(batch_size, opts.max_rows);
 
     while (batch_iter.has_next()) {
@@ -469,7 +469,7 @@ void generate_partsupp_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_partsupp_batches(batch_size, opts.max_rows);
 
     while (batch_iter.has_next()) {
@@ -505,7 +505,7 @@ void generate_supplier_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_supplier_batches(batch_size, opts.max_rows);
 
     while (batch_iter.has_next()) {
@@ -541,7 +541,7 @@ void generate_nation_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 25;  // Nation table has exactly 25 rows
+    const size_t batch_size = 5000;  // Nation table has exactly 25 rows
     auto batch_iter = dbgen.generate_nation_batches(batch_size, opts.max_rows);
 
     while (batch_iter.has_next()) {
@@ -573,7 +573,7 @@ void generate_region_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 5;  // Region table has exactly 5 rows
+    const size_t batch_size = 5000;  // Region table has exactly 5 rows
     auto batch_iter = dbgen.generate_region_batches(batch_size, opts.max_rows);
 
     while (batch_iter.has_next()) {
@@ -617,7 +617,7 @@ void generate_lineitem_true_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
 
     // Use batch iterator (zero-copy friendly)
     auto batch_iter = dbgen.generate_lineitem_batches(batch_size, opts.max_rows);
@@ -668,7 +668,7 @@ void generate_orders_true_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_orders_batches(batch_size, opts.max_rows);
 
     auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
@@ -713,7 +713,7 @@ void generate_customer_true_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_customer_batches(batch_size, opts.max_rows);
 
     auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
@@ -758,7 +758,7 @@ void generate_part_true_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_part_batches(batch_size, opts.max_rows);
 
     auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
@@ -803,7 +803,7 @@ void generate_partsupp_true_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_partsupp_batches(batch_size, opts.max_rows);
 
     auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
@@ -848,7 +848,7 @@ void generate_supplier_true_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = 5000;
     auto batch_iter = dbgen.generate_supplier_batches(batch_size, opts.max_rows);
 
     auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
@@ -893,7 +893,7 @@ void generate_nation_true_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 25;  // Nation table has exactly 25 rows
+    const size_t batch_size = 5000;  // Nation table has exactly 25 rows
     auto batch_iter = dbgen.generate_nation_batches(batch_size, opts.max_rows);
 
     auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
@@ -934,7 +934,7 @@ void generate_region_true_zero_copy(
     std::unique_ptr<tpch::WriterInterface>& writer,
     size_t& total_rows) {
 
-    const size_t batch_size = 5;  // Region table has exactly 5 rows
+    const size_t batch_size = 5000;  // Region table has exactly 5 rows
     auto batch_iter = dbgen.generate_region_batches(batch_size, opts.max_rows);
 
     auto parquet_writer = dynamic_cast<tpch::ParquetWriter*>(writer.get());
@@ -1383,7 +1383,7 @@ int main(int argc, char* argv[]) {
             }
         } else {
             // Synthetic data (current implementation, kept for backward compatibility)
-            const size_t batch_size = 10000;
+            const size_t batch_size = 5000;
             size_t batch_count = 0;
             size_t rows_in_batch = 0;
 
