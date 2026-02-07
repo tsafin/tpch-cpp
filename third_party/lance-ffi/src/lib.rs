@@ -15,6 +15,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 use std::slice;
+use std::collections::HashMap;
 
 use arrow::ffi::{FFI_ArrowSchema, FFI_ArrowArray};
 use arrow::record_batch::RecordBatch;
@@ -479,6 +480,46 @@ pub extern "C" fn lance_writer_write_batch(
 /// # Arguments
 /// * `writer_ptr` - Pointer to LanceWriterHandle from lance_writer_create()
 ///
+/// Phase 2.0c-2: Generate encoding hints for schema columns
+///
+/// Creates Arrow schema metadata with encoding hints to optimize Lance
+/// statistics computation and encoding strategy selection.
+/// These hints guide Lance's encoding decisions without requiring explicit statistics.
+fn create_schema_with_hints(schema: &Schema) -> Schema {
+    let mut metadata = schema.metadata().cloned().unwrap_or_default();
+
+    // Add encoding hints for each column based on data type
+    for field in schema.fields() {
+        let hint = match field.data_type() {
+            // Integer types: Use fixed-width encoding (no statistics needed for encoding)
+            DataType::Int64 | DataType::Int32 | DataType::Int16 | DataType::Int8 => {
+                "fixed-width"
+            }
+            // Unsigned integers: Fixed-width
+            DataType::UInt64 | DataType::UInt32 | DataType::UInt16 | DataType::UInt8 => {
+                "fixed-width"
+            }
+            // Float types: Fixed-width encoding
+            DataType::Float64 | DataType::Float32 => "fixed-width",
+            // Decimal: Fixed-width encoding
+            DataType::Decimal128(_, _) => "fixed-width",
+            // Date/Time: Fixed-width encoding
+            DataType::Date32 | DataType::Date64 => "fixed-width",
+            // Skip hints for complex types to let Lance auto-optimize
+            _ => continue,
+        };
+
+        // Add hint to metadata
+        metadata.insert(
+            format!("lance-encoding:{}", field.name()),
+            hint.to_string(),
+        );
+    }
+
+    // Create new schema with metadata hints
+    Schema::new_with_metadata(schema.fields().clone(), metadata)
+}
+
 /// # Returns
 /// 0 on success, non-zero error code on failure:
 ///   1 = writer_ptr is null
@@ -516,8 +557,14 @@ pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_in
             // Use Tokio runtime to execute async Lance write
             // with optimized WriteParams for better performance
             let result = writer.runtime.block_on(async {
-                let schema = batches[0].schema();
-                let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), schema);
+                let original_schema = batches[0].schema();
+
+                // Phase 2.0c-2: Apply encoding hints to reduce statistics computation overhead
+                // These hints guide Lance encoding decisions without requiring explicit statistics
+                let optimized_schema = create_schema_with_hints(&original_schema);
+
+                // Create batch iterator with optimized schema
+                let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), optimized_schema);
 
                 // Phase 2.0c-2a: Optimized Lance configuration
                 // Increase max_rows_per_group for reduced encoding overhead
@@ -525,6 +572,10 @@ pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_in
                     max_rows_per_group: 4096,  // 4× default (1024) for better cache locality
                     ..Default::default()
                 };
+
+                eprintln!(
+                    "Lance FFI: Writing with encoding hints (Phase 2.0c-2)"
+                );
 
                 lance::Dataset::write(batch_iter, &uri, write_params).await
             });
