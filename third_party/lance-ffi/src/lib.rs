@@ -23,6 +23,7 @@ use arrow::datatypes::{Schema, DataType, Field};
 use arrow::buffer::Buffer;
 use arrow::array::ArrayData;
 use tokio::runtime::Runtime;
+use lance::dataset::WriteParams;
 
 /// C Data Interface ArrowArray structure - matches the C specification
 /// This allows us to access the FFI_ArrowArray fields directly
@@ -513,11 +514,19 @@ pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_in
             let row_count = writer.row_count;
 
             // Use Tokio runtime to execute async Lance write
+            // with optimized WriteParams for better performance
             let result = writer.runtime.block_on(async {
                 let schema = batches[0].schema();
                 let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), schema);
 
-                lance::Dataset::write(batch_iter, &uri, Default::default()).await
+                // Phase 2.0c-2a: Optimized Lance configuration
+                // Increase max_rows_per_group for reduced encoding overhead
+                let write_params = WriteParams {
+                    max_rows_per_group: 4096,  // 4× default (1024) for better cache locality
+                    ..Default::default()
+                };
+
+                lance::Dataset::write(batch_iter, &uri, write_params).await
             });
 
             match result {
