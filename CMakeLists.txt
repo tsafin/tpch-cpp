@@ -70,6 +70,15 @@ if(TPCH_ENABLE_ASAN)
     add_link_options(-fsanitize=address)
 endif()
 
+# Use mold linker if available (faster linking for both GCC and Clang)
+find_program(MOLD_LINKER mold)
+if(MOLD_LINKER)
+    message(STATUS "Found mold linker: ${MOLD_LINKER}")
+    add_link_options(-fuse-ld=mold)
+else()
+    message(STATUS "mold linker not found (optional) - using default linker")
+endif()
+
 # Find required packages from system
 # Note: We need to find zstd before Arrow to avoid CMake configuration issues
 find_package(PkgConfig QUIET)
