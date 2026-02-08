@@ -78,5 +78,25 @@ if(TPCH_BUILD_TESTS)
         gtest_discover_tests(paimon_writer_test)
     endif()
 
+    # Lance writer tests (only if Lance FFI is enabled)
+    if(TPCH_ENABLE_LANCE)
+        add_executable(lance_writer_test
+            lance_writer_test.cpp
+        )
+
+        target_link_libraries(lance_writer_test
+            PRIVATE
+                tpch_core
+                GTest::gtest_main
+        )
+
+        target_include_directories(lance_writer_test
+            PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        )
+
+        gtest_discover_tests(lance_writer_test)
+    endif()
+
     message(STATUS "Test targets configured successfully")
 endif()
