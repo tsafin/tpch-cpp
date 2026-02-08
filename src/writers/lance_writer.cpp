@@ -84,24 +84,16 @@ std::pair<void*, void*> LanceWriter::batch_to_ffi(
                          reinterpret_cast<void*>(arrow_schema));
 }
 
-void LanceWriter::free_ffi_structures(void* array_ptr, void* schema_ptr) {
-    // Free the ArrowArray and ArrowSchema structs that were allocated in batch_to_ffi()
-    // The release callbacks handle releasing the actual data
-    if (array_ptr != nullptr) {
-        auto* arr = reinterpret_cast<ArrowArray*>(array_ptr);
-        if (arr->release != nullptr) {
-            arr->release(arr);
-        }
-        delete arr;
-    }
-    if (schema_ptr != nullptr) {
-        auto* sch = reinterpret_cast<ArrowSchema*>(schema_ptr);
-        if (sch->release != nullptr) {
-            sch->release(sch);
-        }
-        delete sch;
-    }
-}
+// NOTE: free_ffi_structures() removed as of PR #5 fix
+//
+// FFI ownership is transferred to Rust FFI layer via lance_writer_write_batch().
+// The Rust side calls FFI_ArrowSchema::from_raw() and FFI_ArrowArray::from_raw(),
+// which take ownership and call release callbacks when dropped.
+//
+// C++ must NOT call release() or delete these pointers after passing them to Rust.
+// Doing so would cause double-free / use-after-free.
+//
+// Reference: Arrow C Data Interface specification - ownership transfers to callee
 
 void LanceWriter::write_batch(
     const std::shared_ptr<arrow::RecordBatch>& batch) {
@@ -131,18 +123,16 @@ void LanceWriter::write_batch(
 
     try {
         // Stream batch directly to Rust writer
+        // NOTE: FFI ownership is transferred to Rust (via from_raw calls in Rust FFI)
+        // Do NOT call free_ffi_structures() - Rust handles cleanup via Drop trait
         auto* raw_writer = reinterpret_cast<::LanceWriter*>(rust_writer_);
         int result = lance_writer_write_batch(raw_writer, array_ptr, schema_ptr);
 
         if (result != 0) {
-            free_ffi_structures(array_ptr, schema_ptr);
             throw std::runtime_error(
                 "Failed to write batch to Lance writer (error code: " +
                 std::to_string(result) + ")");
         }
-
-        // Clean up FFI structures after successful write
-        free_ffi_structures(array_ptr, schema_ptr);
 
         row_count_ += batch->num_rows();
         batch_count_++;
@@ -152,8 +142,8 @@ void LanceWriter::write_batch(
                       << row_count_ << " rows total\n";
         }
     } catch (...) {
-        // Make sure to clean up FFI structures on exception
-        free_ffi_structures(array_ptr, schema_ptr);
+        // Exception handling: FFI structures now owned by Rust if call was initiated
+        // Rust will clean up via Drop when writer closes or errors out
         throw;
     }
 }
