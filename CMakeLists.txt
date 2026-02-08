@@ -100,6 +100,17 @@ set(re2Alt_FOUND TRUE)
 find_package(Thrift REQUIRED)
 set(ThriftAlt_FOUND TRUE)
 
+# Find UUID library (optional, used by Paimon/Iceberg writers)
+# On most Linux systems this is available; macOS/Windows may need separate install
+find_library(UUID_LIBRARY NAMES uuid libuuid)
+if(UUID_LIBRARY)
+    set(UUID_FOUND TRUE)
+    message(STATUS "Found uuid library: ${UUID_LIBRARY}")
+else()
+    set(UUID_FOUND FALSE)
+    message(WARNING "uuid library not found - Paimon/Iceberg writers may have limited functionality")
+endif()
+
 # Protobuf handling:
 # - Arrow is built WITHOUT protobuf (-DARROW_WITH_PROTOBUF=OFF)
 # - ORC is built with protobuf STATICALLY EMBEDDED (-DORC_PREFER_STATIC_PROTOBUF=ON)
@@ -349,8 +360,12 @@ target_link_libraries(tpch_core PUBLIC
     Arrow::arrow
     Arrow::parquet
     dbgen_objs
-    uuid
 )
+
+# Link uuid library if found
+if(UUID_FOUND)
+    target_link_libraries(tpch_core PUBLIC ${UUID_LIBRARY})
+endif()
 
 # Link xsimd if available (header-only library)
 if(xsimd_FOUND)
