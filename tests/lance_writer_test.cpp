@@ -130,11 +130,23 @@ TEST_F(LanceWriterIntegrationTest, EmptyBatchIgnored) {
     auto batch = create_simple_batch(10);
     writer.write_batch(batch);
 
-    // Empty batch should be ignored without throwing
+    // Empty batch (0 rows) should be safely ignored without throwing
+    // This tests that the writer gracefully handles zero-row batches
     auto schema = batch->schema();
-    auto empty_batch = arrow::RecordBatch::Make(schema, 0,
-        std::vector<std::shared_ptr<arrow::Array>>(schema->num_fields()));
 
+    // Create empty arrays using the same approach as creating regular batches
+    arrow::Int64Builder id_builder;
+    arrow::StringBuilder name_builder;
+    // Don't append any rows - builders stay empty
+
+    std::shared_ptr<arrow::Array> id_array;
+    std::shared_ptr<arrow::Array> name_array;
+    id_builder.Finish(&id_array);
+    name_builder.Finish(&name_array);
+
+    auto empty_batch = arrow::RecordBatch::Make(schema, 0, {id_array, name_array});
+
+    // This should not throw - empty batches are skipped internally
     EXPECT_NO_THROW(writer.write_batch(empty_batch));
     writer.close();
 
