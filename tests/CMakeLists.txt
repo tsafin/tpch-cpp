@@ -95,7 +95,8 @@ if(TPCH_BUILD_TESTS)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../include
         )
 
-        gtest_discover_tests(lance_writer_test)
+        # Add single test registration for lance writer
+        add_test(NAME lance_writer_test COMMAND lance_writer_test)
     endif()
 
     message(STATUS "Test targets configured successfully")
