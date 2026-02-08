@@ -27,6 +27,7 @@ option(TPCH_ENABLE_PAIMON "Enable Apache Paimon table format support" OFF)
 option(TPCH_ENABLE_ICEBERG "Enable Apache Iceberg table format support" OFF)
 option(TPCH_ENABLE_LANCE "Enable Lance columnar format support (requires Rust)" OFF)
 option(TPCH_ENABLE_PERF_COUNTERS "Enable performance counters instrumentation" OFF)
+option(TPCH_ENABLE_MOLD "Enable mold linker if available (incompatible with GTest in this project)" ON)
 
 # Compiler configuration
 include(cmake/CompilerWarnings.cmake)
@@ -71,12 +72,22 @@ if(TPCH_ENABLE_ASAN)
 endif()
 
 # Use mold linker if available (faster linking for both GCC and Clang)
-find_program(MOLD_LINKER mold)
-if(MOLD_LINKER)
-    message(STATUS "Found mold linker: ${MOLD_LINKER}")
-    add_link_options(-fuse-ld=mold)
+if(TPCH_ENABLE_MOLD AND TPCH_BUILD_TESTS)
+    message(WARNING "mold linker is incompatible with GTest in this project. "
+                    "Disabling mold for test builds.")
+    set(TPCH_ENABLE_MOLD OFF)
+endif()
+
+if(TPCH_ENABLE_MOLD)
+    find_program(MOLD_LINKER mold)
+    if(MOLD_LINKER)
+        message(STATUS "Found mold linker: ${MOLD_LINKER}")
+        add_link_options(-fuse-ld=mold)
+    else()
+        message(STATUS "mold linker not found (optional) - using default linker")
+    endif()
 else()
-    message(STATUS "mold linker not found (optional) - using default linker")
+    message(STATUS "mold linker disabled (TPCH_ENABLE_MOLD=OFF)")
 endif()
 
 # Find required packages from system
