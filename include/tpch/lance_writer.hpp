@@ -93,16 +93,13 @@ private:
      *
      * @param batch RecordBatch to convert
      * @return Pair of (ArrowArray pointer, ArrowSchema pointer) allocated with new
+     *
+     * NOTE: Ownership of returned pointers is transferred to Rust FFI layer via
+     * lance_writer_write_batch(). Rust calls FFI_ArrowSchema::from_raw() which takes
+     * ownership and is responsible for calling release callbacks via Drop trait.
+     * C++ must NOT call release() or delete these pointers.
      */
     std::pair<void*, void*> batch_to_ffi(const std::shared_ptr<arrow::RecordBatch>& batch);
-
-    /**
-     * Free Arrow C Data Interface structures and call their release callbacks.
-     *
-     * @param array_ptr Pointer to ArrowArray FFI structure
-     * @param schema_ptr Pointer to ArrowSchema FFI structure
-     */
-    void free_ffi_structures(void* array_ptr, void* schema_ptr);
 };
 
 }  // namespace tpch
