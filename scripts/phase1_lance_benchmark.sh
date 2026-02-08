@@ -7,13 +7,13 @@
 # by comparing Lance writer with Parquet writer across different scale factors.
 #
 # Usage: ./phase1_lance_benchmark.sh [scale_factors]
-# Example: ./phase1_lance_benchmark.sh "0.1 1 5"
+# Example: ./phase1_lance_benchmark.sh "1 5 10"
 #=============================================================================
 
 set -e
 
-# Default scale factors if not provided
-SCALE_FACTORS="${1:-0.1 1 5}"
+# Default scale factors if not provided (CLI accepts integers only)
+SCALE_FACTORS="${1:-1 5 10}"
 
 # Build configuration
 BUILD_DIR="$(cd "$(dirname "$0")/../build" && pwd)"
@@ -60,7 +60,7 @@ for SF in $SCALE_FACTORS; do
     /usr/bin/time -v "$TPCH_BIN" \
         --use-dbgen \
         --format lance \
-        --output "$LANCE_OUTPUT" \
+        --output-dir "$LANCE_OUTPUT" \
         --scale-factor "$SF" \
         --table customer \
         2>&1 | tee "$LANCE_LOG"
@@ -79,7 +79,7 @@ for SF in $SCALE_FACTORS; do
     /usr/bin/time -v "$TPCH_BIN" \
         --use-dbgen \
         --format parquet \
-        --output "$PARQUET_OUTPUT" \
+        --output-dir "$PARQUET_OUTPUT" \
         --scale-factor "$SF" \
         --table customer \
         2>&1 | tee "$PARQUET_LOG"

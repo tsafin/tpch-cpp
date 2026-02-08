@@ -17,7 +17,7 @@ set -e
 BUILD_DIR="$(cd "$(dirname "$0")/../build" && pwd)"
 TPCH_BIN="$BUILD_DIR/tpch_benchmark"
 OUTPUT_DIR="$BUILD_DIR/phase1_verify"
-SCALE_FACTOR=0.1  # Small scale for quick verification
+SCALE_FACTOR=1  # Scale factor 1 = base TPC-H dataset (150K customers, 6M lineitem rows)
 
 # Ensure binary exists
 if [ ! -f "$TPCH_BIN" ]; then
@@ -58,7 +58,7 @@ for TABLE in "${TABLES[@]}"; do
     if timeout 120 "$TPCH_BIN" \
         --use-dbgen \
         --format lance \
-        --output "$LANCE_OUTPUT" \
+        --output-dir "$LANCE_OUTPUT" \
         --scale-factor "$SCALE_FACTOR" \
         --table "$TABLE" \
         > "$LANCE_LOG" 2>&1; then

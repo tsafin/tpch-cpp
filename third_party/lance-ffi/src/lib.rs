@@ -123,7 +123,7 @@ fn import_primitive_array(
 
         // Buffer 0: Null bitmap (one bit per element)
         // Read null bitmap if present
-        let _null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
+        let null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
             let byte_count = (length + 7) / 8; // Ceiling division
             let slice = slice::from_raw_parts(ptr, byte_count);
             Some(Buffer::from_slice_ref(slice))
@@ -143,11 +143,19 @@ fn import_primitive_array(
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
                 let data_buffer = Buffer::from_slice_ref(slice);
 
+                // Build buffers array: [validity_bitmap, data] (validity required if nulls present)
+                let buffers = if let Some(validity_buffer) = null_bitmap {
+                    vec![validity_buffer, data_buffer]
+                } else {
+                    vec![data_buffer]
+                };
+
                 let array_data = ArrayData::builder(DataType::Int64)
                     .len(length)
-                    .buffers(vec![data_buffer])
+                    .buffers(buffers)
                     .null_count(safe_array.null_count() as usize)
-                    .build_unchecked();
+                    .build()
+                    .map_err(|e| format!("Failed to build Int64Array: {}", e))?;
 
                 Ok(Arc::new(Int64Array::from(array_data)))
             }
@@ -157,11 +165,19 @@ fn import_primitive_array(
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
                 let data_buffer = Buffer::from_slice_ref(slice);
 
+                // Build buffers array: [validity_bitmap, data]
+                let buffers = if let Some(validity_buffer) = null_bitmap {
+                    vec![validity_buffer, data_buffer]
+                } else {
+                    vec![data_buffer]
+                };
+
                 let array_data = ArrayData::builder(DataType::Float64)
                     .len(length)
-                    .buffers(vec![data_buffer])
+                    .buffers(buffers)
                     .null_count(safe_array.null_count() as usize)
-                    .build_unchecked();
+                    .build()
+                    .map_err(|e| format!("Failed to build Float64Array: {}", e))?;
 
                 Ok(Arc::new(Float64Array::from(array_data)))
             }
@@ -171,11 +187,18 @@ fn import_primitive_array(
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
                 let data_buffer = Buffer::from_slice_ref(slice);
 
+                let buffers = if let Some(validity_buffer) = null_bitmap {
+                    vec![validity_buffer, data_buffer]
+                } else {
+                    vec![data_buffer]
+                };
+
                 let array_data = ArrayData::builder(DataType::Int32)
                     .len(length)
-                    .buffers(vec![data_buffer])
+                    .buffers(buffers)
                     .null_count(safe_array.null_count() as usize)
-                    .build_unchecked();
+                    .build()
+                    .map_err(|e| format!("Failed to build Int32Array: {}", e))?;
 
                 Ok(Arc::new(Int32Array::from(array_data)))
             }
@@ -198,8 +221,8 @@ fn import_string_array(
             return Err("Cannot import array with 0 length".to_string());
         }
 
-        // Buffer 0: Null bitmap (not included in ArrayData buffers)
-        let _null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
+        // Buffer 0: Null bitmap (validity buffer for null handling)
+        let null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
             let byte_count = (length + 7) / 8;
             let slice = slice::from_raw_parts(ptr, byte_count);
             Some(Buffer::from_slice_ref(slice))
@@ -231,15 +254,20 @@ fn import_string_array(
         let data_slice = slice::from_raw_parts(data_ptr, data_byte_count);
         let data_buffer = Buffer::from_slice_ref(data_slice);
 
-        // String arrays only need offsets and data buffers in ArrayData
+        // String arrays need [validity, offsets, data] buffers in ArrayData
+        // Validity buffer must be included when nulls are present
+        let buffers = if let Some(validity_buffer) = null_bitmap {
+            vec![validity_buffer, offset_buffer, data_buffer]
+        } else {
+            vec![offset_buffer, data_buffer]
+        };
+
         let array_data = ArrayData::builder(DataType::Utf8)
             .len(length)
-            .buffers(vec![
-                offset_buffer,
-                data_buffer,
-            ])
+            .buffers(buffers)
             .null_count(safe_array.null_count() as usize)
-            .build_unchecked();
+            .build()
+            .map_err(|e| format!("Failed to build Utf8Array: {}", e))?;
 
         Ok(Arc::new(StringArray::from(array_data)))
     }
@@ -551,7 +579,7 @@ fn compute_encoding_strategies(schema: &Schema) -> Vec<EncodingStrategy> {
 /// statistics computation and encoding strategy selection.
 /// These hints guide Lance's encoding decisions without requiring explicit statistics.
 fn create_schema_with_hints(schema: &Schema, strategies: &[EncodingStrategy]) -> Schema {
-    let mut metadata = schema.metadata().cloned().unwrap_or_default();
+    let mut metadata = schema.metadata().clone();
 
     // Apply pre-computed strategies as encoding hints
     // Fast-path columns avoid all strategy evaluation overhead
@@ -619,7 +647,7 @@ pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_in
                 let optimized_schema = create_schema_with_hints(&original_schema, &strategies);
 
                 // Create batch iterator with optimized schema
-                let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), optimized_schema);
+                let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), Arc::new(optimized_schema));
 
                 // Phase 2.0c-2a: Optimized Lance configuration
                 // Increase max_rows_per_group for reduced encoding overhead
@@ -632,7 +660,7 @@ pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_in
                     "Lance FFI: Writing with pre-computed encoding strategies (Phase 2.0c-3)"
                 );
 
-                lance::Dataset::write(batch_iter, &uri, write_params).await
+                lance::Dataset::write(batch_iter, &uri, Some(write_params)).await
             });
 
             match result {
