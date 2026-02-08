@@ -110,7 +110,7 @@ impl SafeArrowArray {
     }
 }
 
-/// Import a primitive type array (Int64, Float64, Int32)
+/// Import a primitive type array (Int64, Float64, Int32, Float32, Date32, Boolean)
 fn import_primitive_array(
     safe_array: &SafeArrowArray,
     field: &Field,
@@ -121,19 +121,31 @@ fn import_primitive_array(
             return Err("Cannot import array with 0 length".to_string());
         }
 
-        // Buffer 0: Null bitmap (one bit per element)
-        // Read null bitmap if present
-        let null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
-            let byte_count = (length + 7) / 8; // Ceiling division
-            let slice = slice::from_raw_parts(ptr, byte_count);
-            Some(Buffer::from_slice_ref(slice))
+        // For primitive types coming from FFI:
+        // - If field is nullable: [validity_bitmap, data]
+        // - If field is non-nullable: [data]
+        // The field's nullable flag determines buffer layout, not actual null values
+        let null_count = safe_array.null_count() as usize;
+
+        let (null_bitmap, data_buffer_index) = if field.is_nullable() {
+            // Field is nullable, so expect validity buffer at 0, data at 1
+            let null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
+                let byte_count = (length + 7) / 8; // Ceiling division
+                let slice = slice::from_raw_parts(ptr, byte_count);
+                Some(Buffer::from_slice_ref(slice))
+            } else {
+                None
+            };
+            // Data is at buffer 1 for nullable fields
+            (null_bitmap, 1)
         } else {
-            None
+            // Field is non-nullable, data is at buffer 0
+            (None, 0)
         };
 
-        // Buffer 1: Data values
+        // Data buffer is at the computed index
         let data_ptr = safe_array
-            .buffer_ptr(1)
+            .buffer_ptr(data_buffer_index)
             .ok_or("Missing data buffer for primitive array")?;
 
         match field.data_type() {
@@ -143,17 +155,12 @@ fn import_primitive_array(
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
                 let data_buffer = Buffer::from_slice_ref(slice);
 
-                // Build buffers array: [validity_bitmap, data] (validity required if nulls present)
-                let buffers = if let Some(validity_buffer) = null_bitmap {
-                    vec![validity_buffer, data_buffer]
-                } else {
-                    vec![data_buffer]
-                };
-
+                // For primitive arrays, only pass the data buffer in buffers list
+                // Arrow's ArrayData stores the null bitmap separately via null_count
                 let array_data = ArrayData::builder(DataType::Int64)
                     .len(length)
-                    .buffers(buffers)
-                    .null_count(safe_array.null_count() as usize)
+                    .buffers(vec![data_buffer])
+                    .null_count(null_count)
                     .build()
                     .map_err(|e| format!("Failed to build Int64Array: {}", e))?;
 
@@ -165,17 +172,10 @@ fn import_primitive_array(
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
                 let data_buffer = Buffer::from_slice_ref(slice);
 
-                // Build buffers array: [validity_bitmap, data]
-                let buffers = if let Some(validity_buffer) = null_bitmap {
-                    vec![validity_buffer, data_buffer]
-                } else {
-                    vec![data_buffer]
-                };
-
                 let array_data = ArrayData::builder(DataType::Float64)
                     .len(length)
-                    .buffers(buffers)
-                    .null_count(safe_array.null_count() as usize)
+                    .buffers(vec![data_buffer])
+                    .null_count(null_count)
                     .build()
                     .map_err(|e| format!("Failed to build Float64Array: {}", e))?;
 
@@ -187,20 +187,62 @@ fn import_primitive_array(
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
                 let data_buffer = Buffer::from_slice_ref(slice);
 
-                let buffers = if let Some(validity_buffer) = null_bitmap {
-                    vec![validity_buffer, data_buffer]
-                } else {
-                    vec![data_buffer]
-                };
-
                 let array_data = ArrayData::builder(DataType::Int32)
                     .len(length)
-                    .buffers(buffers)
-                    .null_count(safe_array.null_count() as usize)
+                    .buffers(vec![data_buffer])
+                    .null_count(null_count)
                     .build()
                     .map_err(|e| format!("Failed to build Int32Array: {}", e))?;
 
                 Ok(Arc::new(Int32Array::from(array_data)))
+            }
+            DataType::Float32 => {
+                let value_count = length;
+                let byte_count = value_count * std::mem::size_of::<f32>();
+                let slice = slice::from_raw_parts(data_ptr, byte_count);
+                let data_buffer = Buffer::from_slice_ref(slice);
+
+                let array_data = ArrayData::builder(DataType::Float32)
+                    .len(length)
+                    .buffers(vec![data_buffer])
+                    .null_count(null_count)
+                    .build()
+                    .map_err(|e| format!("Failed to build Float32Array: {}", e))?;
+
+                use arrow::array::Float32Array;
+                Ok(Arc::new(Float32Array::from(array_data)))
+            }
+            DataType::Date32 => {
+                let value_count = length;
+                let byte_count = value_count * std::mem::size_of::<i32>();
+                let slice = slice::from_raw_parts(data_ptr, byte_count);
+                let data_buffer = Buffer::from_slice_ref(slice);
+
+                let array_data = ArrayData::builder(DataType::Date32)
+                    .len(length)
+                    .buffers(vec![data_buffer])
+                    .null_count(null_count)
+                    .build()
+                    .map_err(|e| format!("Failed to build Date32Array: {}", e))?;
+
+                use arrow::array::Date32Array;
+                Ok(Arc::new(Date32Array::from(array_data)))
+            }
+            DataType::Boolean => {
+                let value_count = length;
+                let byte_count = (value_count + 7) / 8; // Boolean is bit-packed
+                let slice = slice::from_raw_parts(data_ptr, byte_count);
+                let data_buffer = Buffer::from_slice_ref(slice);
+
+                let array_data = ArrayData::builder(DataType::Boolean)
+                    .len(length)
+                    .buffers(vec![data_buffer])
+                    .null_count(null_count)
+                    .build()
+                    .map_err(|e| format!("Failed to build BooleanArray: {}", e))?;
+
+                use arrow::array::BooleanArray;
+                Ok(Arc::new(BooleanArray::from(array_data)))
             }
             other => Err(format!(
                 "Unsupported primitive type in FFI import: {}",
@@ -254,13 +296,9 @@ fn import_string_array(
         let data_slice = slice::from_raw_parts(data_ptr, data_byte_count);
         let data_buffer = Buffer::from_slice_ref(data_slice);
 
-        // String arrays need [validity, offsets, data] buffers in ArrayData
-        // Validity buffer must be included when nulls are present
-        let buffers = if let Some(validity_buffer) = null_bitmap {
-            vec![validity_buffer, offset_buffer, data_buffer]
-        } else {
-            vec![offset_buffer, data_buffer]
-        };
+        // String arrays need [offsets, data] buffers in ArrayData
+        // Validity/null bitmap is handled separately via null_count, not in buffers list
+        let buffers = vec![offset_buffer, data_buffer];
 
         let array_data = ArrayData::builder(DataType::Utf8)
             .len(length)
@@ -346,7 +384,10 @@ impl LanceWriterHandle {
                 let array = match field.data_type() {
                     DataType::Int64
                     | DataType::Float64
-                    | DataType::Int32 => {
+                    | DataType::Int32
+                    | DataType::Float32
+                    | DataType::Date32
+                    | DataType::Boolean => {
                         import_primitive_array(&child_safe, field)?
                     }
                     DataType::Utf8 => import_string_array(&child_safe, field)?,
