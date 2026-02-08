@@ -3,10 +3,10 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
-#include <cstring>
-#include <arrow/array.h>
-#include <arrow/buffer.h>
 #include <arrow/type.h>
+#include <arrow/record_batch.h>
+#include <arrow/c/bridge.h>
+#include <arrow/c/abi.h>
 
 namespace fs = std::filesystem;
 
@@ -27,16 +27,10 @@ LanceWriter::LanceWriter(const std::string& dataset_path,
 LanceWriter::~LanceWriter() {
     if (rust_writer_ != nullptr) {
         try {
-            // Call close() first to finalize the dataset
-            // Suppress exceptions in destructor to avoid termination
-            auto* raw_writer = reinterpret_cast<::LanceWriter*>(rust_writer_);
-            lance_writer_close(raw_writer);
+            close();
         } catch (...) {
             // Suppress exceptions in destructor
         }
-        // Then destroy the handle
-        lance_writer_destroy(reinterpret_cast<::LanceWriter*>(rust_writer_));
-        rust_writer_ = nullptr;
     }
 }
 
@@ -49,64 +43,57 @@ void LanceWriter::initialize_lance_dataset(
     schema_ = first_batch->schema();
     schema_locked_ = true;
 
-    // Create dataset directory
+    // Create dataset directory structure
     try {
         fs::create_directories(dataset_path_);
+        fs::create_directories(dataset_path_ + "/data");
     } catch (const std::exception& e) {
         throw std::runtime_error("Failed to create dataset directory: " +
                                 std::string(e.what()));
     }
 
-    // Create data subdirectory
-    std::string data_dir = dataset_path_ + "/data";
-    try {
-        fs::create_directories(data_dir);
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Failed to create data directory: " +
-                                std::string(e.what()));
-    }
-
-    // Create Rust writer via FFI
-    // Note: First argument is URI (dataset path), second is schema (can be null for now)
+    // Initialize Rust FFI writer
     auto* raw_writer = lance_writer_create(dataset_path_.c_str(), nullptr);
     rust_writer_ = reinterpret_cast<void*>(raw_writer);
 
     if (rust_writer_ == nullptr) {
         throw std::runtime_error("Failed to create Lance writer via FFI");
     }
+
+    std::cout << "Lance: Initialized dataset at " << dataset_path_ << "\n";
 }
 
 std::pair<void*, void*> LanceWriter::batch_to_ffi(
     const std::shared_ptr<arrow::RecordBatch>& batch) {
-    // Convert RecordBatch to Arrow C Data Interface format
-    // This creates two FFI structures: ArrowArray and ArrowSchema
+    // Convert RecordBatch and Schema to Arrow C Data Interface format
+    // using Arrow's built-in export functions
 
-    try {
-        // Note: Arrow 23.x doesn't have a C Data Interface export API yet
-        // We'll pass the batch pointer directly as a placeholder
-        // The actual data will be consumed by the Rust FFI layer which
-        // can work with Arrow objects directly
+    auto* arrow_array = new ArrowArray();
+    auto* arrow_schema = new ArrowSchema();
 
-        // For now, we return the batch as a void pointer
-        // The Rust FFI can access it directly if needed
-
-        void* batch_ptr = const_cast<arrow::RecordBatch*>(batch.get());
-        void* schema_ptr = const_cast<arrow::Schema*>(batch->schema().get());
-
-        return std::make_pair(batch_ptr, schema_ptr);
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Error converting batch to FFI format: " +
-                                std::string(e.what()));
+    // Export RecordBatch as ArrowArray (includes schema)
+    auto status = arrow::ExportRecordBatch(*batch, arrow_array, arrow_schema);
+    if (!status.ok()) {
+        delete arrow_array;
+        delete arrow_schema;
+        throw std::runtime_error("Failed to export RecordBatch to C Data Interface: " +
+                                status.ToString());
     }
+
+    return std::make_pair(reinterpret_cast<void*>(arrow_array),
+                         reinterpret_cast<void*>(arrow_schema));
 }
 
-void LanceWriter::free_ffi_structures(void* /*array_ptr*/, void* /*schema_ptr*/) {
-    // Note: For now, we're not allocating memory in batch_to_ffi,
-    // so there's nothing to free. When using proper C Data Interface,
-    // this would release the exported FFI structures.
-    //
-    // The pointers are managed by the Arrow library and shared_ptr
-}
+// NOTE: free_ffi_structures() removed as of PR #5 fix
+//
+// FFI ownership is transferred to Rust FFI layer via lance_writer_write_batch().
+// The Rust side calls FFI_ArrowSchema::from_raw() and FFI_ArrowArray::from_raw(),
+// which take ownership and call release callbacks when dropped.
+//
+// C++ must NOT call release() or delete these pointers after passing them to Rust.
+// Doing so would cause double-free / use-after-free.
+//
+// Reference: Arrow C Data Interface specification - ownership transfers to callee
 
 void LanceWriter::write_batch(
     const std::shared_ptr<arrow::RecordBatch>& batch) {
@@ -115,7 +102,6 @@ void LanceWriter::write_batch(
     }
 
     if (batch->num_rows() == 0) {
-        // Skip empty batches
         return;
     }
 
@@ -132,38 +118,36 @@ void LanceWriter::write_batch(
             "Got: " + batch->schema()->ToString());
     }
 
-    // Convert batch to FFI format
+    // Convert batch to Arrow C Data Interface format
     auto [array_ptr, schema_ptr] = batch_to_ffi(batch);
 
     try {
-        // Write batch via Rust FFI
+        // Stream batch directly to Rust writer
+        // NOTE: FFI ownership is transferred to Rust (via from_raw calls in Rust FFI)
+        // Do NOT call free_ffi_structures() - Rust handles cleanup via Drop trait
         auto* raw_writer = reinterpret_cast<::LanceWriter*>(rust_writer_);
-        int result = lance_writer_write_batch(
-            raw_writer,
-            reinterpret_cast<const char*>(array_ptr),
-            reinterpret_cast<const char*>(schema_ptr)
-        );
+        int result = lance_writer_write_batch(raw_writer, array_ptr, schema_ptr);
 
         if (result != 0) {
             throw std::runtime_error(
-                "Lance writer returned error code: " + std::to_string(result));
+                "Failed to write batch to Lance writer (error code: " +
+                std::to_string(result) + ")");
         }
 
         row_count_ += batch->num_rows();
         batch_count_++;
 
-        // Log progress
         if (batch_count_ % 100 == 0 || batch_count_ <= 3) {
-            std::cout << "Lance: Wrote " << batch_count_ << " batches, "
+            std::cout << "Lance: Streamed batch " << batch_count_ << ", "
                       << row_count_ << " rows total\n";
         }
-    } catch (const std::exception& e) {
-        free_ffi_structures(array_ptr, schema_ptr);
+    } catch (...) {
+        // Exception handling: FFI structures now owned by Rust if call was initiated
+        // Rust will clean up via Drop when writer closes or errors out
         throw;
     }
-
-    free_ffi_structures(array_ptr, schema_ptr);
 }
+
 
 void LanceWriter::close() {
     if (rust_writer_ == nullptr) {
@@ -171,7 +155,9 @@ void LanceWriter::close() {
     }
 
     try {
-        // Close Rust writer
+        // Batches are already streamed to Rust writer, nothing to flush
+
+        // Close Rust writer (handles metadata creation)
         auto* raw_writer = reinterpret_cast<::LanceWriter*>(rust_writer_);
         int result = lance_writer_close(raw_writer);
         if (result != 0) {
@@ -183,11 +169,10 @@ void LanceWriter::close() {
                   << "  Total rows: " << row_count_ << "\n"
                   << "  Total batches: " << batch_count_ << "\n";
 
-        // Clean up Rust writer handle
+        // Clean up
         lance_writer_destroy(raw_writer);
         rust_writer_ = nullptr;
     } catch (const std::exception& e) {
-        // Attempt cleanup even if close failed
         if (rust_writer_ != nullptr) {
             lance_writer_destroy(reinterpret_cast<::LanceWriter*>(rust_writer_));
             rust_writer_ = nullptr;

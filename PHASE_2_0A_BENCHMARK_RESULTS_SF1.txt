@@ -1,0 +1,22 @@
+Phase 2.0a Benchmark Results (SF=1)
+Generated: Sat Feb  7 16:00:50 MSK 2026
+
+=== LANCE FORMAT ===
+customer: rows=150000, throughput=506757 rows/sec, rate=90.66 MB/sec
+orders: rows=1500000, throughput=452489 rows/sec, rate=56.75 MB/sec
+lineitem: rows=6001215, throughput=479483 rows/sec, rate=71.56 MB/sec
+part: rows=200000, throughput=245098 rows/sec, rate=27.60 MB/sec
+partsupp: rows=800000, throughput=1075269 rows/sec, rate=144.09 MB/sec
+supplier: rows=10000, throughput=476190 rows/sec, rate=80.28 MB/sec
+nation: rows=25, throughput=3571 rows/sec, rate=0.68 MB/sec
+region: rows=5, throughput=714 rows/sec, rate=0.28 MB/sec
+
+=== PARQUET FORMAT ===
+customer: rows=150000, throughput=568182 rows/sec, rate=74.85 MB/sec
+orders: rows=1500000, throughput=391850 rows/sec, rate=25.91 MB/sec
+lineitem: rows=6001215, throughput=836523 rows/sec, rate=42.04 MB/sec
+part: rows=200000, throughput=346021 rows/sec, rate=13.75 MB/sec
+partsupp: rows=800000, throughput=975610 rows/sec, rate=105.40 MB/sec
+supplier: rows=10000, throughput=526316 rows/sec, rate=66.71 MB/sec
+nation: rows=25, throughput=25000 rows/sec, rate=3.52 MB/sec
+region: rows=5, throughput=2500 rows/sec, rate=0.57 MB/sec

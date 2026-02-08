@@ -1,11 +1,22 @@
 [package]
 name = "lance_ffi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+authors = ["Timur Safin <timur.safin@gmail.com>"]
+
+# Phase 2: Native Lance Writing with Arrow FFI
+# Rust 1.93.0 now available - enabling full Arrow/Lance support
+# Implements actual Lance dataset writing in Rust FFI
 
 [dependencies]
-# Minimal dependencies for now - Arrow FFI will be added when Rust is updated
-# The FFI structure is self-contained and can work with C Data Interface directly
+arrow = { version = "57", features = ["ffi"] }
+lance = "2"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+serde_json = "1.0"
 
 [lib]
 crate-type = ["staticlib"]
+
+[profile.release]
+opt-level = 3
+lto = "off"

@@ -70,6 +70,15 @@ if(TPCH_ENABLE_ASAN)
     add_link_options(-fsanitize=address)
 endif()
 
+# Use mold linker if available (faster linking for both GCC and Clang)
+find_program(MOLD_LINKER mold)
+if(MOLD_LINKER)
+    message(STATUS "Found mold linker: ${MOLD_LINKER}")
+    add_link_options(-fuse-ld=mold)
+else()
+    message(STATUS "mold linker not found (optional) - using default linker")
+endif()
+
 # Find required packages from system
 # Note: We need to find zstd before Arrow to avoid CMake configuration issues
 find_package(PkgConfig QUIET)
@@ -131,8 +140,13 @@ endif()
 
 # Lance support: Requires Rust toolchain to build FFI library
 if(TPCH_ENABLE_LANCE)
-    # Check for Rust toolchain
-    find_program(Cargo_EXECUTABLE cargo)
+    # Check for Rust toolchain - prefer /snap/bin for newer Rust versions
+    find_program(Cargo_EXECUTABLE cargo PATHS /snap/bin NO_DEFAULT_PATH)
+    if(NOT Cargo_EXECUTABLE)
+        # Fallback to system cargo
+        find_program(Cargo_EXECUTABLE cargo)
+    endif()
+
     if(Cargo_EXECUTABLE)
         message(STATUS "Found Rust toolchain: ${Cargo_EXECUTABLE}")
         set(Lance_FOUND TRUE)
@@ -224,15 +238,19 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
     find_program(SNAP_RUSTC rustc PATHS /snap/bin NO_DEFAULT_PATH)
     if(SNAP_RUSTC)
         message(STATUS "Detected Rust from snap: ${SNAP_RUSTC}")
+        set(RUSTC_ENV_VAR "${SNAP_RUSTC}")
     else()
         message(STATUS "Using system Rust compiler")
+        find_program(RUSTC_ENV_VAR rustc)
     endif()
 
     # Build Rust FFI library using cargo
     # Note: Cargo target directory is set to build/rust to keep artifacts out of source tree
     # All build artifacts go to CMAKE_BINARY_DIR/rust, NOT source tree
     # On macOS, we specify the target triple to ensure correct output directory
-    set(CARGO_BUILD_CMD "${Cargo_EXECUTABLE}" build --release
+    # RUSTC env var ensures correct rustc version is used (snap vs system)
+    set(CARGO_BUILD_CMD "env" "RUSTC=${RUSTC_ENV_VAR}"
+            "${Cargo_EXECUTABLE}" build --release
             --manifest-path "${LANCE_FFI_DIR}/Cargo.toml"
             --target-dir "${LANCE_FFI_BUILD_DIR}")
 
@@ -331,6 +349,7 @@ target_link_libraries(tpch_core PUBLIC
     Arrow::arrow
     Arrow::parquet
     dbgen_objs
+    uuid
 )
 
 # Link xsimd if available (header-only library)

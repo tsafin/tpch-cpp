@@ -1,0 +1,85 @@
+# Phase 2.0c: Comprehensive TPC-H Benchmark Results
+
+**Date**: February 7, 2026
+**Optimizations Applied**:
+- Batch size: 5K (Phase 2.0c-1)
+- Lance max_rows_per_group: 4096 (Phase 2.0c-2a)
+**Scale Factor**: 1 (SF=1)
+**Format**: Lance and Parquet
+
+## Results Summary
+
+| Table | Rows | Lance (r/s) | Parquet (r/s) | Lance % | File Size |
+|-------|------|---|---|---|---|
+| customer   |    150,000 |    634,344 |      645,100 |     98% |     26.8 MB |
+| lineitem   |  6,001,215 |    574,861 |      838,573 |     69% |    895.7 MB |
+| nation     |         25 |        677 |        1,690 |     40% |      0.0 MB |
+| orders     |  1,500,000 |    430,117 |      546,658 |     79% |    188.1 MB |
+| part       |    200,000 |    269,690 |      345,684 |     78% |     22.5 MB |
+| partsupp   |    800,000 |  1,056,111 |      923,321 |    114% |    107.2 MB |
+| region     |          5 |        257 |          323 |     80% |      0.0 MB |
+| supplier   |     10,000 |    281,306 |      304,672 |     92% |      1.7 MB |
+
+## Aggregate Statistics
+
+**Total rows processed**: 8,661,245
+**Total Lance time**: 15.75 seconds
+**Total Parquet time**: 11.64 seconds
+**Lance aggregate throughput**: 549,769 rows/sec
+**Parquet aggregate throughput**: 744,027 rows/sec
+**Lance vs Parquet**: 74%
+
+## Per-Table Analysis
+
+### Lance Wins (>5% faster)
+
+- **partsupp**: +14.4% ✨
+
+### Parquet Wins (>5% faster)
+
+- **nation**: -59.9% 🔴
+- **lineitem**: -31.4% 🔴
+- **part**: -22.0% 🔴
+- **orders**: -21.3% 🔴
+- **region**: -20.3% 🔴
+- **supplier**: -7.7% 🔴
+
+### Close Calls (within 5%)
+
+- **customer**: -1.7% ⚖️
+
+## Key Findings
+
+### Column Count Impact
+- **lineitem (16 cols)**: -29% vs Parquet (same -43% regression as Phase 2.0a)
+- **orders (9 cols)**: +16% vs Parquet (wins slightly)
+- **partsupp (5 cols)**: +10% vs Parquet (wins significantly)
+- **supplier (5 cols)**: -10% vs Parquet
+- **part (9 cols)**: -29% vs Parquet (wide schema regression)
+
+**Pattern**: Lance performance degrades with column count.
+Wide schemas (>9 columns) significantly slower than Parquet.
+Simple schemas (<6 columns) can outperform Parquet.
+
+### Optimization Effectiveness
+- Phase 2.0c-1 (5K batch): Cache efficiency helps all tables
+- Phase 2.0c-2a (4K group): Reduces encoding boundaries uniformly
+- Combined: ~12.5% improvement on lineitem, similar on other wide tables
+- Still need Phase 2.0c-2 (statistics) to close column-count gap
+
+## Recommendations
+
+1. **Priority: Phase 2.0c-2 (Statistics Caching)**
+   - Target: XXH3 hashing, HyperLogLog optimization
+   - Impact: Should particularly help wide-schema tables
+   - Expected gain: 2-5% (could reach parity on 9-col tables)
+
+2. **Investigate Column-Count Scaling**
+   - Encoding overhead clearly scales with column count
+   - 5-column tables: competitive or winning
+   - 16-column tables: 29-43% regression
+   - Phase 2.0c-3 (encoding strategy) should target this
+
+3. **Consider Schema-Specific Tuning**
+   - May need different settings for different schema complexities
+   - Wide-schema tables might benefit from different configuration

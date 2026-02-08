@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <utility>
 #include <arrow/record_batch.h>
 
 #include "writer_interface.hpp"
@@ -23,24 +24,24 @@ namespace tpch {
  *
  * Output is a directory containing a complete Lance dataset.
  *
- * Current implementation (stub/placeholder):
- *   - Creates dataset_path directory with data/ subdirectory
- *   - Communicates with Rust FFI library (liblance_ffi.a) via opaque pointers
+ * Phase 1 Implementation (Streaming via Rust FFI):
+ *   - Batches are streamed directly to Rust writer (no C++ accumulation)
+ *   - Uses Arrow C Data Interface for zero-copy batch passing
+ *   - Rust writer handles Lance format writing and metadata creation
  *   - Proper lifecycle management of opaque Rust pointers
- *   - Full Lance data writing and metadata file creation implemented in future phases
  *
  * Implementation Details:
- *   - Uses Arrow C Data Interface (opaque pointers) for passing data to Rust layer
+ *   - Uses Arrow C Data Interface structs (ArrowArray, ArrowSchema) for FFI
  *   - Communicates with Rust FFI library (liblance_ffi.a)
- *   - Proper lifecycle management of opaque Rust pointers
- *   - Currently stores writer state without writing to Lance format
+ *   - Converts Arrow RecordBatch to C Data Interface format
+ *   - Streams each batch to Rust for immediate writing (no accumulation)
  */
 class LanceWriter : public WriterInterface {
 public:
     /**
      * Create Lance dataset writer.
      *
-     * @param dataset_path Directory path for the Lance dataset (NOT a file!)
+     * @param dataset_path Directory path for the Lance dataset (should end with .lance)
      * @param dataset_name Logical dataset name (used in metadata, default: "tpch_dataset")
      *
      * The directory will be created if it doesn't exist.
@@ -55,8 +56,7 @@ public:
      *
      * On first call, initializes Lance writer and locks schema.
      * Subsequent batches must match the locked schema exactly.
-     *
-     * Uses Arrow C Data Interface for zero-copy data transfer to Rust layer.
+     * Batches are streamed directly to Rust writer (no C++ accumulation).
      *
      * @param batch Arrow RecordBatch to write
      * @throws std::runtime_error if batch schema doesn't match or write fails
@@ -66,7 +66,7 @@ public:
     /**
      * Finalize the Lance dataset.
      *
-     * Closes the Rust writer and creates dataset metadata files.
+     * Flushes remaining batches, creates metadata files, and closes the writer.
      * Must be called before reading the dataset with other tools.
      */
     void close() override;
@@ -90,22 +90,16 @@ private:
 
     /**
      * Convert Arrow RecordBatch to Arrow C Data Interface format.
-     * Creates C-compatible FFI structures for passing to Rust layer.
      *
      * @param batch RecordBatch to convert
-     * @return Pair of (ArrowArray pointer, ArrowSchema pointer) for FFI
+     * @return Pair of (ArrowArray pointer, ArrowSchema pointer) allocated with new
      *
-     * Note: These pointers must be freed after use.
+     * NOTE: Ownership of returned pointers is transferred to Rust FFI layer via
+     * lance_writer_write_batch(). Rust calls FFI_ArrowSchema::from_raw() which takes
+     * ownership and is responsible for calling release callbacks via Drop trait.
+     * C++ must NOT call release() or delete these pointers.
      */
     std::pair<void*, void*> batch_to_ffi(const std::shared_ptr<arrow::RecordBatch>& batch);
-
-    /**
-     * Free Arrow C Data Interface structures created by batch_to_ffi().
-     *
-     * @param array_ptr Pointer to ArrowArray FFI structure
-     * @param schema_ptr Pointer to ArrowSchema FFI structure
-     */
-    void free_ffi_structures(void* array_ptr, void* schema_ptr);
 };
 
 }  // namespace tpch
