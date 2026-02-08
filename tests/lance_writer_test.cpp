@@ -9,7 +9,6 @@
 #include <arrow/record_batch.h>
 
 namespace tpch {
-namespace test {
 
 namespace fs = std::filesystem;
 
@@ -340,5 +339,4 @@ TEST_F(LanceWriterDataTypeTest, Boolean) {
     });
 }
 
-}  // namespace test
 }  // namespace tpch

@@ -4,22 +4,22 @@ if(TPCH_BUILD_TESTS)
     # Enable testing
     enable_testing()
 
-    # Find or fetch Google Test
-    find_package(GTest QUIET)
-
-    if(NOT GTest_FOUND)
-        # Fetch Google Test from GitHub if not found
-        include(FetchContent)
-        FetchContent_Declare(
-            googletest
-            URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
-        )
-
-        # For Windows: Prevent overriding the parent project's compiler/linker settings
-        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-
-        FetchContent_MakeAvailable(googletest)
+    # Use vendored Google Test only
+    set(GTEST_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/googletest")
+    if(NOT EXISTS "${GTEST_VENDOR_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR "Vendored googletest not found at ${GTEST_VENDOR_DIR}. "
+                            "Run: git submodule update --init --recursive")
     endif()
+
+    # For Windows: Prevent overriding the parent project's compiler/linker settings
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    add_subdirectory(
+        "${GTEST_VENDOR_DIR}"
+        "${CMAKE_BINARY_DIR}/_deps/googletest-build"
+        EXCLUDE_FROM_ALL
+    )
+
+    include(GoogleTest)
 
     # Buffer lifetime manager unit tests
     add_executable(buffer_lifetime_manager_test
@@ -95,8 +95,7 @@ if(TPCH_BUILD_TESTS)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../include
         )
 
-        # Add single test registration for lance writer
-        add_test(NAME lance_writer_test COMMAND lance_writer_test)
+        gtest_discover_tests(lance_writer_test)
     endif()
 
     message(STATUS "Test targets configured successfully")
