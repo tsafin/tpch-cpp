@@ -305,6 +305,13 @@ impl LanceWriterHandle {
     /// Implements the Arrow C Data Interface specification to convert FFI_ArrowArray
     /// and FFI_ArrowSchema pointers to a valid Arrow RecordBatch with actual data.
     ///
+    /// # Ownership
+    /// This function takes OWNERSHIP of the FFI structures:
+    /// - Calls FFI_ArrowSchema::from_raw() which takes ownership
+    /// - Will call the release() callback when ffi_schema is dropped
+    /// - C++ caller must NOT call release() or delete after passing pointers here
+    /// Reference: Arrow C Data Interface specification
+    ///
     /// # Safety
     /// Caller must ensure the FFI pointers are valid and properly initialized
     fn import_ffi_batch(
@@ -312,7 +319,7 @@ impl LanceWriterHandle {
         arrow_schema_ptr: *mut FFI_ArrowSchema,
     ) -> Result<RecordBatch, String> {
         unsafe {
-            // Import FFI schema
+            // Import FFI schema - takes ownership (will call release() on drop)
             let ffi_schema = FFI_ArrowSchema::from_raw(arrow_schema_ptr);
             let schema = Schema::try_from(&ffi_schema)
                 .map_err(|e| format!("Failed to convert FFI_ArrowSchema to Schema: {}", e))?;
