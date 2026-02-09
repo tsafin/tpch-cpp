@@ -7,6 +7,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 use std::slice;
 use std::pin::Pin;
+use std::collections::HashMap;
 
 use arrow::ffi::{FFI_ArrowSchema, FFI_ArrowArray};
 use arrow::record_batch::RecordBatch;
@@ -177,6 +178,27 @@ fn import_string_array(safe_array: &SafeArrowArray, _field: &Field) -> Result<Ar
     }
 }
 
+fn apply_compression_metadata(schema: &Schema) -> Schema {
+    let fields: Vec<Field> = schema.fields().iter().map(|field| {
+        let mut metadata = field.metadata().clone();
+        
+        // Use lz4 for fast compression (quick and effective)
+        metadata.insert("lance-encoding:compression".to_string(), "lz4".to_string());
+        
+        // Enable Byte Stream Split for better float compression
+        match field.data_type() {
+            DataType::Float16 | DataType::Float32 | DataType::Float64 => {
+                 metadata.insert("lance-encoding:bss".to_string(), "auto".to_string());
+            },
+            _ => {}
+        }
+        
+        field.as_ref().clone().with_metadata(metadata)
+    }).collect();
+    
+    Schema::new(fields).with_metadata(schema.metadata().clone())
+}
+
 enum WriterBackend {
     Buffered {
         batches: Vec<RecordBatch>,
@@ -240,24 +262,21 @@ impl LanceWriterHandle {
 
     fn import_ffi_batch(arrow_array_ptr: *mut FFI_ArrowArray, arrow_schema_ptr: *mut FFI_ArrowSchema) -> Result<RecordBatch, String> {
         unsafe {
+            // TAKING OWNERSHIP: We convert raw pointers to unsafe FFI structs.
+            // These structs implement Drop and will automatically call the C-side release() callback
+            // when they go out of scope, decrementing refcounts on the buffers.
+            let ffi_array = FFI_ArrowArray::from_raw(arrow_array_ptr);
             let ffi_schema = FFI_ArrowSchema::from_raw(arrow_schema_ptr);
-            let schema = Schema::try_from(&ffi_schema).map_err(|e| e.to_string())?;
-            let safe_array = SafeArrowArray { ffi: arrow_array_ptr as *mut CDataArrowArray };
 
-            let mut arrays: Vec<Arc<dyn Array>> = Vec::new();
-            for (i, field) in schema.fields().iter().enumerate() {
-                let child_array_ptr = safe_array.child(i).ok_or_else(|| format!("Missing child {} ({})", i, field.name()))?;
-                let child_safe = SafeArrowArray { ffi: child_array_ptr };
-
-                let array = match field.data_type() {
-                    DataType::Int64 | DataType::Float64 | DataType::Int32 | DataType::Float32 |
-                    DataType::Date32 | DataType::Boolean => import_primitive_array(&child_safe, field)?,
-                    DataType::Utf8 => import_string_array(&child_safe, field)?,
-                    dt => return Err(format!("Unsupported type {}: {}", field.name(), dt)),
-                };
-                arrays.push(array);
-            }
-            RecordBatch::try_new(Arc::new(schema), arrays).map_err(|e| e.to_string())
+            // Import using Arrow's official Zero-Copy FFI integration
+            // This verifies the schema and array consistency and creates Arrow Arrays restricted to the FFI buffers.
+            let array_data = arrow::ffi::from_ffi(ffi_array, &ffi_schema).map_err(|e| e.to_string())?;
+            
+            // RecordBatches are exported as a single StructArray from C++
+            let struct_array = arrow::array::StructArray::from(array_data);
+            
+            // Convert back to RecordBatch (Zero-Copy)
+            Ok(RecordBatch::from(&struct_array))
         }
     }
 
@@ -374,8 +393,19 @@ pub extern "C" fn lance_writer_write_batch(writer_ptr: *mut LanceWriterHandle, a
         let writer = unsafe { &mut *writer_ptr };
         if writer.closed { return 2; }
 
-        let record_batch = match LanceWriterHandle::import_ffi_batch(arrow_array_ptr as *mut _, arrow_schema_ptr as *mut _) {
+        let raw_batch = match LanceWriterHandle::import_ffi_batch(arrow_array_ptr as *mut _, arrow_schema_ptr as *mut _) {
             Ok(b) => b, Err(e) => { eprintln!("FFI Import Error: {}", e); return 4; }
+        };
+
+        // Apply automatic compression settings (LZ4 + BSS)
+        // We must re-wrap the batch with the new schema containing metadata
+        let compressed_schema = Arc::new(apply_compression_metadata(raw_batch.schema().as_ref()));
+        
+        // This is a zero-copy schema replacement (buffers are shared)
+        let columns = raw_batch.columns().to_vec();
+        let record_batch = match RecordBatch::try_new(compressed_schema, columns) {
+             Ok(b) => b,
+             Err(e) => { eprintln!("Compression schema update error: {}", e); return 4; }
         };
 
         if writer.schema.is_none() { writer.schema = Some(record_batch.schema().as_ref().clone()); }
