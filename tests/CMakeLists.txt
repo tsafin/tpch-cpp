@@ -56,7 +56,9 @@ if(TPCH_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/../include
     )
 
-    gtest_discover_tests(dbgen_batch_iterator_test)
+    gtest_discover_tests(dbgen_batch_iterator_test
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    )
 
     # Paimon writer tests (only if Paimon is enabled)
     if(TPCH_ENABLE_PAIMON)
