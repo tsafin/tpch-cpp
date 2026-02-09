@@ -71,11 +71,22 @@ public:
      */
     void close() override;
 
+    /**
+     * Enable streaming write mode (Phase 2).
+     *
+     * If enabled, uses a background task and channels in Rust to write data concurrently
+     * without blocking the main C++ thread. Backpressure is applied if the channel fills up.
+     *
+     * @param enabled True to enable streaming mode
+     */
+    void enable_streaming_write(bool enabled) { streaming_enabled_ = enabled; }
+
 private:
     std::string dataset_path_;
     std::string dataset_name_;
     std::shared_ptr<arrow::Schema> schema_;
     bool schema_locked_ = false;
+    bool streaming_enabled_ = false;
     int64_t row_count_ = 0;
     int32_t batch_count_ = 0;
 
