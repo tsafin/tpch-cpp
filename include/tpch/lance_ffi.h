@@ -19,13 +19,16 @@ typedef struct LanceWriter LanceWriter;
  * @param uri Path to write to (e.g., "/tmp/dataset" or "s3://bucket/path")
  * @param arrow_schema_ptr Opaque pointer to Arrow C Data Interface ArrowSchema struct
  *        (Can be NULL; schema will be inferred from first batch)
+ * @param use_streaming Boolean flag (1=true, 0=false) to enable streaming write mode
+ *        If true, uses backpressure-controlled streaming writer.
+ *        If false, accumulates batches in memory (buffered mode).
  *
  * @return Opaque pointer to LanceWriter on success, NULL on error
  *
  * The returned pointer must be passed to lance_writer_write_batch(),
  * lance_writer_close(), and eventually lance_writer_destroy().
  */
-LanceWriter* lance_writer_create(const char* uri, const void* arrow_schema_ptr);
+LanceWriter* lance_writer_create(const char* uri, const void* arrow_schema_ptr, int use_streaming);
 
 /**
  * Write a batch of records to the Lance dataset.

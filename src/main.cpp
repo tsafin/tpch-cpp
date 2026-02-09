@@ -1047,6 +1047,14 @@ int generate_all_tables_parallel_v2(const Options& opts) {
                 // Create writer
                 auto writer = create_writer(opts.format, output_path);
 
+#ifdef TPCH_ENABLE_LANCE
+                if (opts.zero_copy || opts.true_zero_copy) {
+                    if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+                        lance_writer->enable_streaming_write(true);
+                    }
+                }
+#endif
+
                 // Generate table
                 size_t total_rows = 0;
                 Options child_opts = opts;
@@ -1274,6 +1282,18 @@ int main(int argc, char* argv[]) {
 
         // Create writer
         auto writer = create_writer(opts.format, output_path);
+
+#ifdef TPCH_ENABLE_LANCE
+        // Phase 2.0c: Enable streaming mode for Lance if zero-copy is requested
+        if (opts.zero_copy || opts.true_zero_copy) {
+            if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+                lance_writer->enable_streaming_write(true);
+                if (opts.verbose) {
+                    std::cout << "Lance streaming write mode enabled (zero-copy)\n";
+                }
+            }
+        }
+#endif
 
         // Set async context if available
         if (async_context) {

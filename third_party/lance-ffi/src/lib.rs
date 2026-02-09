@@ -1,20 +1,12 @@
 //! Lance FFI Bridge (Phase 2 - Native Lance Writing via Arrow FFI)
-//!
-//! This FFI provides Lance dataset writing with Arrow C Data Interface integration.
-//! Data flows as zero-copy Arrow batches from C++ and is written directly as native
-//! Lance format using the Lance Rust API, with no C++ post-processing required.
-//!
-//! Key features:
-//! - Arrow C Data Interface import: FFI_ArrowArray/FFI_ArrowSchema conversion
-//! - Batch accumulation for efficient Lance dataset writing
-//! - Tokio async runtime for Lance write operations
-//! - Comprehensive error handling and logging
+//! FFI Bridge for Arrow -> Lance
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 use std::slice;
+use std::pin::Pin;
 
 use arrow::ffi::{FFI_ArrowSchema, FFI_ArrowArray};
 use arrow::record_batch::RecordBatch;
@@ -22,11 +14,19 @@ use arrow::array::{RecordBatchIterator, Array, Int64Array, Float64Array, Int32Ar
 use arrow::datatypes::{Schema, DataType, Field};
 use arrow::buffer::Buffer;
 use arrow::array::ArrayData;
+use arrow::error::ArrowError;
 use tokio::runtime::Runtime;
-use lance::dataset::{WriteParams, WriteMode};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use futures::StreamExt;
 
-/// C Data Interface ArrowArray structure - matches the C specification
-/// This allows us to access the FFI_ArrowArray fields directly
+// Lance Dependencies
+use lance::dataset::{WriteParams, WriteMode};
+use lance::deps::datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+use lance::deps::datafusion::physical_plan::RecordBatchStream;
+use lance::deps::datafusion::error::DataFusionError;
+
+/// C Data Interface ArrowArray structure
 #[repr(C)]
 struct CDataArrowArray {
     length: i64,
@@ -42,781 +42,395 @@ struct CDataArrowArray {
 }
 
 /// Safe wrapper around FFI_ArrowArray C structure
-/// Provides methods to safely read buffer pointers and child arrays
 struct SafeArrowArray {
     ffi: *mut CDataArrowArray,
 }
 
 impl SafeArrowArray {
-    /// Read buffer pointer at index
-    /// Returns the pointer if valid, None otherwise
     unsafe fn buffer_ptr(&self, index: usize) -> Option<*const u8> {
-        if self.ffi.is_null() {
-            return None;
-        }
-
+        if self.ffi.is_null() { return None; }
         let ffi_array = &*self.ffi;
-        if index >= ffi_array.n_buffers as usize {
-            return None;
-        }
-
-        if ffi_array.buffers.is_null() {
-            return None;
-        }
-
+        if index >= ffi_array.n_buffers as usize { return None; }
+        if ffi_array.buffers.is_null() { return None; }
         let buffer_ptr = *ffi_array.buffers.add(index);
-        if buffer_ptr.is_null() {
-            None
-        } else {
-            Some(buffer_ptr as *const u8)
-        }
+        if buffer_ptr.is_null() { None } else { Some(buffer_ptr as *const u8) }
     }
 
-    /// Read child array pointer at index
     unsafe fn child(&self, index: usize) -> Option<*mut CDataArrowArray> {
-        if self.ffi.is_null() {
-            return None;
-        }
-
+        if self.ffi.is_null() { return None; }
         let ffi_array = &*self.ffi;
-        if index >= ffi_array.n_children as usize {
-            return None;
-        }
-
-        if ffi_array.children.is_null() {
-            return None;
-        }
-
+        if index >= ffi_array.n_children as usize { return None; }
+        if ffi_array.children.is_null() { return None; }
         Some(*ffi_array.children.add(index) as *mut CDataArrowArray)
     }
 
-    /// Get array length
     unsafe fn length(&self) -> i64 {
-        if self.ffi.is_null() {
-            0
-        } else {
-            (*self.ffi).length
-        }
+        if self.ffi.is_null() { 0 } else { (*self.ffi).length }
     }
 
-    /// Get null count
     unsafe fn null_count(&self) -> i64 {
-        if self.ffi.is_null() {
-            0
-        } else {
-            (*self.ffi).null_count
-        }
+        if self.ffi.is_null() { 0 } else { (*self.ffi).null_count }
     }
 }
 
-/// Import a primitive type array (Int64, Float64, Int32, Float32, Date32, Boolean)
-fn import_primitive_array(
-    safe_array: &SafeArrowArray,
-    field: &Field,
-) -> Result<Arc<dyn Array>, String> {
+fn import_primitive_array(safe_array: &SafeArrowArray, field: &Field) -> Result<Arc<dyn Array>, String> {
     unsafe {
         let length = safe_array.length() as usize;
-        if length == 0 {
-            return Err("Cannot import array with 0 length".to_string());
-        }
-
-        // For primitive types coming from FFI:
-        // - If field is nullable: [validity_bitmap, data]
-        // - If field is non-nullable: [data]
-        // The field's nullable flag determines buffer layout, not actual null values
+        if length == 0 { return Err("Cannot import array with 0 length".to_string()); }
         let null_count = safe_array.null_count() as usize;
 
-        let (null_bitmap, data_buffer_index) = if field.is_nullable() {
-            // Field is nullable, so expect validity buffer at 0, data at 1
+        let (_null_bitmap, data_buffer_index) = if field.is_nullable() {
             let null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
-                let byte_count = (length + 7) / 8; // Ceiling division
+                let byte_count = (length + 7) / 8;
                 let slice = slice::from_raw_parts(ptr, byte_count);
                 Some(Buffer::from_slice_ref(slice))
-            } else {
-                None
-            };
-            // Data is at buffer 1 for nullable fields
+            } else { None };
             (null_bitmap, 1)
-        } else {
-            // Field is non-nullable, data is at buffer 0
-            (None, 0)
-        };
+        } else { (None, 0) };
 
-        // Data buffer is at the computed index
-        let data_ptr = safe_array
-            .buffer_ptr(data_buffer_index)
-            .ok_or("Missing data buffer for primitive array")?;
+        let data_ptr = safe_array.buffer_ptr(data_buffer_index).ok_or("Missing data buffer")?;
 
         match field.data_type() {
             DataType::Int64 => {
-                let value_count = length;
-                let byte_count = value_count * std::mem::size_of::<i64>();
+                let byte_count = length * std::mem::size_of::<i64>();
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let data_buffer = Buffer::from_slice_ref(slice);
-
-                // For primitive arrays, only pass the data buffer in buffers list
-                // Arrow's ArrayData stores the null bitmap separately via null_count
                 let array_data = ArrayData::builder(DataType::Int64)
-                    .len(length)
-                    .buffers(vec![data_buffer])
-                    .null_count(null_count)
-                    .build()
-                    .map_err(|e| format!("Failed to build Int64Array: {}", e))?;
-
+                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
+                    .map_err(|e| e.to_string())?;
                 Ok(Arc::new(Int64Array::from(array_data)))
             }
             DataType::Float64 => {
-                let value_count = length;
-                let byte_count = value_count * std::mem::size_of::<f64>();
+                let byte_count = length * std::mem::size_of::<f64>();
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let data_buffer = Buffer::from_slice_ref(slice);
-
                 let array_data = ArrayData::builder(DataType::Float64)
-                    .len(length)
-                    .buffers(vec![data_buffer])
-                    .null_count(null_count)
-                    .build()
-                    .map_err(|e| format!("Failed to build Float64Array: {}", e))?;
-
+                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
+                    .map_err(|e| e.to_string())?;
                 Ok(Arc::new(Float64Array::from(array_data)))
             }
             DataType::Int32 => {
-                let value_count = length;
-                let byte_count = value_count * std::mem::size_of::<i32>();
+                let byte_count = length * std::mem::size_of::<i32>();
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let data_buffer = Buffer::from_slice_ref(slice);
-
                 let array_data = ArrayData::builder(DataType::Int32)
-                    .len(length)
-                    .buffers(vec![data_buffer])
-                    .null_count(null_count)
-                    .build()
-                    .map_err(|e| format!("Failed to build Int32Array: {}", e))?;
-
+                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
+                    .map_err(|e| e.to_string())?;
                 Ok(Arc::new(Int32Array::from(array_data)))
             }
             DataType::Float32 => {
-                let value_count = length;
-                let byte_count = value_count * std::mem::size_of::<f32>();
+                let byte_count = length * std::mem::size_of::<f32>();
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let data_buffer = Buffer::from_slice_ref(slice);
-
                 let array_data = ArrayData::builder(DataType::Float32)
-                    .len(length)
-                    .buffers(vec![data_buffer])
-                    .null_count(null_count)
-                    .build()
-                    .map_err(|e| format!("Failed to build Float32Array: {}", e))?;
-
-                use arrow::array::Float32Array;
-                Ok(Arc::new(Float32Array::from(array_data)))
+                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
+                    .map_err(|e| e.to_string())?;
+                Ok(Arc::new(arrow::array::Float32Array::from(array_data)))
             }
             DataType::Date32 => {
-                let value_count = length;
-                let byte_count = value_count * std::mem::size_of::<i32>();
+                let byte_count = length * std::mem::size_of::<i32>();
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let data_buffer = Buffer::from_slice_ref(slice);
-
                 let array_data = ArrayData::builder(DataType::Date32)
-                    .len(length)
-                    .buffers(vec![data_buffer])
-                    .null_count(null_count)
-                    .build()
-                    .map_err(|e| format!("Failed to build Date32Array: {}", e))?;
-
-                use arrow::array::Date32Array;
-                Ok(Arc::new(Date32Array::from(array_data)))
+                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
+                    .map_err(|e| e.to_string())?;
+                Ok(Arc::new(arrow::array::Date32Array::from(array_data)))
             }
             DataType::Boolean => {
-                let value_count = length;
-                let byte_count = (value_count + 7) / 8; // Boolean is bit-packed
+                let byte_count = (length + 7) / 8;
                 let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let data_buffer = Buffer::from_slice_ref(slice);
-
                 let array_data = ArrayData::builder(DataType::Boolean)
-                    .len(length)
-                    .buffers(vec![data_buffer])
-                    .null_count(null_count)
-                    .build()
-                    .map_err(|e| format!("Failed to build BooleanArray: {}", e))?;
-
-                use arrow::array::BooleanArray;
-                Ok(Arc::new(BooleanArray::from(array_data)))
+                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
+                    .map_err(|e| e.to_string())?;
+                Ok(Arc::new(arrow::array::BooleanArray::from(array_data)))
             }
-            other => Err(format!(
-                "Unsupported primitive type in FFI import: {}",
-                other
-            )),
+            dt => Err(format!("Unsupported primitive type: {}", dt)),
         }
     }
 }
 
-/// Import a string/binary type array
-fn import_string_array(
-    safe_array: &SafeArrowArray,
-    _field: &Field,
-) -> Result<Arc<dyn Array>, String> {
+fn import_string_array(safe_array: &SafeArrowArray, _field: &Field) -> Result<Arc<dyn Array>, String> {
     unsafe {
         let length = safe_array.length() as usize;
-        if length == 0 {
-            return Err("Cannot import array with 0 length".to_string());
-        }
+        if length == 0 { return Err("Cannot import array with 0 length".to_string()); }
 
-        // Buffer 0: Null bitmap (validity buffer for null handling)
-        let null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
+        let _null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
             let byte_count = (length + 7) / 8;
             let slice = slice::from_raw_parts(ptr, byte_count);
             Some(Buffer::from_slice_ref(slice))
-        } else {
-            None
-        };
+        } else { None };
 
-        // Buffer 1: Offsets (int32 per element + 1)
-        let offset_ptr = safe_array
-            .buffer_ptr(1)
-            .ok_or("Missing offset buffer for string array")?;
+        let offset_ptr = safe_array.buffer_ptr(1).ok_or("Missing offset buffer")?;
         let offset_byte_count = (length + 1) * std::mem::size_of::<i32>();
         let offset_slice = slice::from_raw_parts(offset_ptr, offset_byte_count);
         let offset_buffer = Buffer::from_slice_ref(offset_slice);
 
-        // Buffer 2: Data bytes
-        let data_ptr = safe_array
-            .buffer_ptr(2)
-            .ok_or("Missing data buffer for string array")?;
-
-        // Get total byte length from last offset
+        let data_ptr = safe_array.buffer_ptr(2).ok_or("Missing data buffer")?;
         let offset_i32_slice = slice::from_raw_parts(offset_ptr as *const i32, length + 1);
-        let data_byte_count = if !offset_i32_slice.is_empty() {
-            offset_i32_slice[length] as usize
-        } else {
-            0
-        };
-
+        let data_byte_count = if !offset_i32_slice.is_empty() { offset_i32_slice[length] as usize } else { 0 };
         let data_slice = slice::from_raw_parts(data_ptr, data_byte_count);
         let data_buffer = Buffer::from_slice_ref(data_slice);
 
-        // String arrays need [offsets, data] buffers in ArrayData
-        // Validity/null bitmap is handled separately via null_count, not in buffers list
-        let buffers = vec![offset_buffer, data_buffer];
-
         let array_data = ArrayData::builder(DataType::Utf8)
             .len(length)
-            .buffers(buffers)
+            .buffers(vec![offset_buffer, data_buffer])
             .null_count(safe_array.null_count() as usize)
             .build()
-            .map_err(|e| format!("Failed to build Utf8Array: {}", e))?;
+            .map_err(|e| e.to_string())?;
 
         Ok(Arc::new(StringArray::from(array_data)))
     }
 }
 
-/// Opaque handle to a Lance writer
-/// Accumulates Arrow batches and writes them as Lance dataset on close
+enum WriterBackend {
+    Buffered {
+        batches: Vec<RecordBatch>,
+        dataset_initialized: bool,
+        fragment_count: usize,
+        pending_row_count: usize,
+    },
+    Streaming {
+        // Use Option<Sender> to allow closing the channel
+        sender: Option<mpsc::Sender<Result<RecordBatch, ArrowError>>>,
+        // Receiver held here until the first batch arrives (lazy init)
+        receiver: Option<mpsc::Receiver<Result<RecordBatch, ArrowError>>>,
+        // Background task handle
+        task: Option<tokio::task::JoinHandle<Result<(), lance::Error>>>,
+    },
+}
+
 pub struct LanceWriterHandle {
     uri: String,
     schema: Option<arrow::datatypes::Schema>,
-    batches: Vec<RecordBatch>,
     batch_count: usize,
     row_count: usize,
-    pending_row_count: usize,
     closed: bool,
     runtime: Runtime,
-    fragment_count: usize,  // Track number of fragments written
-    dataset_initialized: bool,  // True after first fragment write
-    temp_fragment_uris: Vec<String>,  // Track temporary fragment files for merging
+    backend: WriterBackend,
 }
 
-/// Phase 3.0: Batch-flush pattern constants
-/// Flush accumulated batches after reaching threshold to reduce memory pressure
-const FLUSH_BATCH_THRESHOLD: usize = 200;  // ~1M rows at 5K rows/batch
-const FLUSH_ROW_THRESHOLD: usize = 1_000_000;  // Alternative: flush after 1M rows
+const FLUSH_BATCH_THRESHOLD: usize = 200;
+const FLUSH_ROW_THRESHOLD: usize = 1_000_000;
 
 impl LanceWriterHandle {
-    fn new(uri: String) -> Result<Self, String> {
+    fn new(uri: String, use_streaming: bool) -> Result<Self, String> {
         let runtime = Runtime::new().map_err(|e| format!("Failed to create Tokio runtime: {}", e))?;
+
+        let backend = if use_streaming {
+            let (sender, receiver) = mpsc::channel(100);
+            WriterBackend::Streaming {
+                sender: Some(sender),
+                receiver: Some(receiver),
+                task: None, // Lazy init
+            }
+        } else {
+            WriterBackend::Buffered {
+                batches: Vec::new(),
+                dataset_initialized: false,
+                fragment_count: 0,
+                pending_row_count: 0,
+            }
+        };
 
         Ok(LanceWriterHandle {
             uri,
             schema: None,
-            batches: Vec::new(),
             batch_count: 0,
             row_count: 0,
-            pending_row_count: 0,
             closed: false,
             runtime,
-            fragment_count: 0,
-            dataset_initialized: false,
-            temp_fragment_uris: Vec::new(),
+            backend,
         })
     }
 
-    /// Convert Arrow C Data Interface structures to RecordBatch
-    ///
-    /// Implements the Arrow C Data Interface specification to convert FFI_ArrowArray
-    /// and FFI_ArrowSchema pointers to a valid Arrow RecordBatch with actual data.
-    ///
-    /// # Ownership
-    /// This function takes OWNERSHIP of the FFI structures:
-    /// - Calls FFI_ArrowSchema::from_raw() which takes ownership
-    /// - Will call the release() callback when ffi_schema is dropped
-    /// - C++ caller must NOT call release() or delete after passing pointers here
-    /// Reference: Arrow C Data Interface specification
-    ///
-    /// # Safety
-    /// Caller must ensure the FFI pointers are valid and properly initialized
-    fn import_ffi_batch(
-        arrow_array_ptr: *mut FFI_ArrowArray,
-        arrow_schema_ptr: *mut FFI_ArrowSchema,
-    ) -> Result<RecordBatch, String> {
+    fn import_ffi_batch(arrow_array_ptr: *mut FFI_ArrowArray, arrow_schema_ptr: *mut FFI_ArrowSchema) -> Result<RecordBatch, String> {
         unsafe {
-            // Import FFI schema - takes ownership (will call release() on drop)
             let ffi_schema = FFI_ArrowSchema::from_raw(arrow_schema_ptr);
-            let schema = Schema::try_from(&ffi_schema)
-                .map_err(|e| format!("Failed to convert FFI_ArrowSchema to Schema: {}", e))?;
+            let schema = Schema::try_from(&ffi_schema).map_err(|e| e.to_string())?;
+            let safe_array = SafeArrowArray { ffi: arrow_array_ptr as *mut CDataArrowArray };
 
-            // Create safe wrapper for root array
-            let safe_array = SafeArrowArray {
-                ffi: arrow_array_ptr as *mut CDataArrowArray,
-            };
-
-            // Import each field as separate array
             let mut arrays: Vec<Arc<dyn Array>> = Vec::new();
-
             for (i, field) in schema.fields().iter().enumerate() {
-                // Get child array for this field
-                let child_array_ptr = safe_array.child(i).ok_or_else(|| {
-                    format!("Missing child array for field {}: {}", i, field.name())
-                })?;
+                let child_array_ptr = safe_array.child(i).ok_or_else(|| format!("Missing child {} ({})", i, field.name()))?;
+                let child_safe = SafeArrowArray { ffi: child_array_ptr };
 
-                let child_safe = SafeArrowArray {
-                    ffi: child_array_ptr,
-                };
-
-                // Import array based on type
                 let array = match field.data_type() {
-                    DataType::Int64
-                    | DataType::Float64
-                    | DataType::Int32
-                    | DataType::Float32
-                    | DataType::Date32
-                    | DataType::Boolean => {
-                        import_primitive_array(&child_safe, field)?
-                    }
+                    DataType::Int64 | DataType::Float64 | DataType::Int32 | DataType::Float32 |
+                    DataType::Date32 | DataType::Boolean => import_primitive_array(&child_safe, field)?,
                     DataType::Utf8 => import_string_array(&child_safe, field)?,
-                    dt => {
-                        return Err(format!(
-                            "Unsupported type for field {}: {}",
-                            field.name(),
-                            dt
-                        ))
-                    }
+                    dt => return Err(format!("Unsupported type {}: {}", field.name(), dt)),
                 };
-
                 arrays.push(array);
             }
-
-            // Note: FFI_ArrowSchema and FFI_ArrowArray have private fields in Arrow 57,
-            // so we cannot access their release callbacks directly. Arrow will handle
-            // releasing these structures through the Drop trait implementation.
-
-            // Create and return RecordBatch
-            RecordBatch::try_new(Arc::new(schema), arrays)
-                .map_err(|e| format!("Failed to create RecordBatch: {}", e))
+            RecordBatch::try_new(Arc::new(schema), arrays).map_err(|e| e.to_string())
         }
     }
 
-    /// Phase 3.0: No-op flush function (automatic fragmentation via Lance)
-    ///
-    /// Batches are no longer manually flushed. Instead, Lance's max_rows_per_file
-    /// parameter automatically creates fragments, bounding memory usage.
-    #[allow(dead_code)]
     fn flush_batches(&mut self) -> Result<(), String> {
-        if self.batches.is_empty() {
-            return Ok(());
+        match &mut self.backend {
+            WriterBackend::Buffered { batches, dataset_initialized, fragment_count, pending_row_count } => {
+                if batches.is_empty() { return Ok(()); }
+                let uri = self.uri.clone();
+                let drain_batches = std::mem::take(batches);
+                let flush_batch_count = drain_batches.len();
+                let flush_row_count = *pending_row_count;
+                let schema_ref = drain_batches[0].schema();
+                
+                let mode = if *dataset_initialized { WriteMode::Append } else { WriteMode::Overwrite };
+                let write_params = WriteParams {
+                    max_rows_per_group: 1024, max_rows_per_file: 2_000_000, mode, ..Default::default()
+                };
+
+                let result = self.runtime.block_on(async {
+                    let batch_iter = RecordBatchIterator::new(drain_batches.into_iter().map(Ok), schema_ref);
+                    lance::Dataset::write(batch_iter, &uri, Some(write_params)).await
+                });
+
+                match result {
+                    Ok(_) => {
+                        *dataset_initialized = true;
+                        *pending_row_count = 0;
+                        *fragment_count += 1;
+                        eprintln!("Lance FFI: Wrote {} buffered batches ({} rows)", flush_batch_count, flush_row_count);
+                        Ok(())
+                    }
+                    Err(e) => Err(format!("Failed to write: {}", e)),
+                }
+            },
+            WriterBackend::Streaming { .. } => Ok(()),
         }
+    }
 
-        let uri = self.uri.clone();
-        let batches = std::mem::take(&mut self.batches);
-        let flush_batch_count = batches.len();
-        let flush_row_count = self.pending_row_count;
+    fn send_batch(&mut self, batch: RecordBatch) -> Result<(), String> {
+        match &mut self.backend {
+            WriterBackend::Streaming { sender, receiver, task } => {
+                // Lazy init
+                if task.is_none() {
+                     let rx = receiver.take().ok_or("Receiver is missing in streaming backend")?;
+                     let schema = batch.schema();
+                     let uri_clone = self.uri.clone();
+                     
+                     eprintln!("Lance FFI: Starting streaming background task with schema...");
 
-        let original_schema = batches[0].schema();
+                     let task_handle = self.runtime.spawn(async move {
+                         // Convert Receiver into Stream<Item=Result<RecordBatch, DataFusionError>>
+                         let receiver_stream = ReceiverStream::new(rx);
+                         let mapped_stream = receiver_stream.map(|res| res.map_err(DataFusionError::from));
+                         
+                         // Create Adapter
+                         let stream_adapter = RecordBatchStreamAdapter::new(schema, mapped_stream);
+                         let source: Pin<Box<dyn RecordBatchStream + Send>> = Box::pin(stream_adapter);
+                         
+                         let write_params = WriteParams {
+                            max_rows_per_group: 1024,
+                            max_rows_per_file: 2_000_000,
+                            mode: WriteMode::Create,
+                            ..Default::default()
+                        };
 
-        // Phase 2.0c-3: Pre-compute encoding strategies once for all batches
-        let strategies = compute_encoding_strategies(&original_schema);
+                        lance::dataset::InsertBuilder::new(&uri_clone)
+                            .with_params(&write_params)
+                            .execute_stream(source)
+                            .await
+                            .map(|_| ())
+                     });
 
-        // Phase 2.0c-2/2.0c-3: Apply pre-computed encoding hints
-        let optimized_schema = create_schema_with_hints(&original_schema, &strategies);
-        let schema_ref = Arc::new(optimized_schema);
-
-        // Use Tokio runtime to execute async Lance write
-        let mode = if self.dataset_initialized {
-            WriteMode::Append
-        } else {
-            WriteMode::Overwrite
-        };
-
-        let write_params = WriteParams {
-            max_rows_per_group: 1_000,  // Phase 3.0: Reduced from 4096 to force frequent flush
-            max_rows_per_file: 2_000_000,  // Phase 3.0: Fragment at 2M rows (~15 fragments for SF=5)
-            mode,
-            ..Default::default()
-        };
-
-        let result = self.runtime.block_on(async {
-            let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), schema_ref);
-            eprintln!(
-                "Lance FFI: Phase 3.0 - Writing with streaming fragmentation (2M rows/fragment)..."
-            );
-            lance::Dataset::write(batch_iter, &uri, Some(write_params)).await
-        });
-
-        match result {
-            Ok(_) => {
-                self.dataset_initialized = true;
-                self.pending_row_count = 0;
-                self.fragment_count += 1;
-                eprintln!(
-                    "Lance FFI: Wrote {} batches ({} rows) to: {}",
-                    flush_batch_count, flush_row_count, uri
-                );
-                Ok(())
-            }
-            Err(e) => Err(format!("Failed to write Lance dataset: {}", e)),
+                     *task = Some(task_handle);
+                }
+                
+                if let Some(tx) = sender {
+                    let result = self.runtime.block_on(async {
+                        tx.send(Ok(batch)).await
+                    });
+                    if result.is_err() {
+                        Err("Failed to send batch: receiver dropped".to_string())
+                    } else {
+                        Ok(())
+                    }
+                } else {
+                    Err("Sender is closed".to_string())
+                }
+            },
+            _ => Ok(())
         }
     }
 }
 
-/// Create a new Lance writer for writing to the specified URI.
-///
-/// # Arguments
-/// * `uri_ptr` - C-string path to write to (e.g., "/tmp/dataset.lance")
-/// * `arrow_schema_ptr` - Pointer to Arrow C Data Interface FFI_ArrowSchema struct (optional)
-///
-/// # Returns
-/// Opaque pointer to LanceWriterHandle, or null on error
-///
-/// # Safety
-/// The caller must:
-/// - Ensure uri_ptr is a valid null-terminated C string
-/// - Call lance_writer_destroy() on the returned pointer when done
+// C Interface Exports
+
 #[no_mangle]
-pub extern "C" fn lance_writer_create(
-    uri_ptr: *const c_char,
-    _arrow_schema_ptr: *const c_void,
-) -> *mut LanceWriterHandle {
+pub extern "C" fn lance_writer_create(uri_ptr: *const c_char, _arrow_schema_ptr: *const c_void, use_streaming: c_int) -> *mut LanceWriterHandle {
     catch_unwind(AssertUnwindSafe(|| {
-        if uri_ptr.is_null() {
-            eprintln!("Lance FFI Error: uri_ptr is null");
-            return std::ptr::null_mut();
-        }
-
+        if uri_ptr.is_null() { return std::ptr::null_mut(); }
         let uri = match unsafe { CStr::from_ptr(uri_ptr) }.to_str() {
-            Ok(s) => s.to_string(),
-            Err(_) => {
-                eprintln!("Lance FFI Error: uri_ptr is not valid UTF-8");
-                return std::ptr::null_mut();
-            }
+            Ok(s) => s.to_string(), Err(_) => return std::ptr::null_mut(),
         };
-
-        match LanceWriterHandle::new(uri.clone()) {
-            Ok(handle) => {
-                eprintln!("Lance FFI: Writer created for URI: {}", uri);
-                Box::into_raw(Box::new(handle))
-            }
-            Err(e) => {
-                eprintln!("Lance FFI Error: Failed to create writer: {}", e);
-                std::ptr::null_mut()
-            }
+        match LanceWriterHandle::new(uri, use_streaming != 0) {
+            Ok(handle) => Box::into_raw(Box::new(handle)),
+            Err(e) => { eprintln!("Lance FFI Create Error: {}", e); std::ptr::null_mut() }
         }
-    }))
-    .unwrap_or_else(|_| {
-        eprintln!("Lance FFI Error: Panic in lance_writer_create");
-        std::ptr::null_mut()
-    })
+    })).unwrap_or(std::ptr::null_mut())
 }
 
-/// Write a batch of records to the Lance dataset.
-///
-/// Imports Arrow C Data Interface structures and accumulates batches for
-/// efficient Lance dataset writing.
-///
-/// # Arguments
-/// * `writer_ptr` - Pointer to LanceWriterHandle from lance_writer_create()
-/// * `arrow_array_ptr` - Pointer to Arrow C Data Interface FFI_ArrowArray struct
-/// * `arrow_schema_ptr` - Pointer to Arrow C Data Interface FFI_ArrowSchema struct
-///
-/// # Returns
-/// 0 on success, non-zero error code on failure:
-///   1 = writer_ptr is null
-///   2 = Writer is already closed
-///   3 = arrow_array_ptr or arrow_schema_ptr is null
-///   4 = Failed to import Arrow C Data Interface
-///   5 = Failed to flush accumulated batches
-///   7 = Panic in lance_writer_write_batch
-///
-/// # Safety
-/// The caller must:
-/// - Ensure writer_ptr is valid and not null
-/// - Not call this after lance_writer_close() has been called
 #[no_mangle]
-pub extern "C" fn lance_writer_write_batch(
-    writer_ptr: *mut LanceWriterHandle,
-    arrow_array_ptr: *const c_void,
-    arrow_schema_ptr: *const c_void,
-) -> c_int {
+pub extern "C" fn lance_writer_write_batch(writer_ptr: *mut LanceWriterHandle, arrow_array_ptr: *const c_void, arrow_schema_ptr: *const c_void) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
-        if writer_ptr.is_null() {
-            eprintln!("Lance FFI Error: writer_ptr is null");
-            return 1;
-        }
-
-        if arrow_array_ptr.is_null() || arrow_schema_ptr.is_null() {
-            eprintln!("Lance FFI Error: arrow_array_ptr or arrow_schema_ptr is null");
-            return 3;
-        }
-
+        if writer_ptr.is_null() || arrow_array_ptr.is_null() || arrow_schema_ptr.is_null() { return 3; }
         let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
 
-        if writer.closed {
-            eprintln!("Lance FFI Error: Writer is already closed");
-            return 2;
-        }
-
-        // Import the FFI structures as a RecordBatch with actual data
-        // SAFETY: Pointers are validated as non-null above
-        let record_batch = match LanceWriterHandle::import_ffi_batch(
-            arrow_array_ptr as *mut FFI_ArrowArray,
-            arrow_schema_ptr as *mut FFI_ArrowSchema,
-        ) {
-            Ok(batch) => batch,
-            Err(e) => {
-                eprintln!("Lance FFI Error: Failed to import FFI batch: {}", e);
-                return 4; // Error code 4 = FFI import failure
-            }
+        let record_batch = match LanceWriterHandle::import_ffi_batch(arrow_array_ptr as *mut _, arrow_schema_ptr as *mut _) {
+            Ok(b) => b, Err(e) => { eprintln!("FFI Import Error: {}", e); return 4; }
         };
 
-        // Store schema from first batch
-        if writer.schema.is_none() {
-            writer.schema = Some(record_batch.schema().as_ref().clone());
-        }
-
-        // Accumulate batch and update counters
+        if writer.schema.is_none() { writer.schema = Some(record_batch.schema().as_ref().clone()); }
         writer.row_count += record_batch.num_rows();
-        writer.pending_row_count += record_batch.num_rows();
-        writer.batches.push(record_batch);
         writer.batch_count += 1;
 
-        // Log progress
+        match &mut writer.backend {
+            WriterBackend::Buffered { batches, pending_row_count, .. } => {
+                *pending_row_count += record_batch.num_rows();
+                batches.push(record_batch);
+                if batches.len() >= FLUSH_BATCH_THRESHOLD || *pending_row_count >= FLUSH_ROW_THRESHOLD {
+                    if let Err(e) = writer.flush_batches() { eprintln!("Flush Error: {}", e); return 5; }
+                }
+            },
+            WriterBackend::Streaming { .. } => {
+                if let Err(e) = writer.send_batch(record_batch) { eprintln!("Stream Send Error: {}", e); return 5; }
+            }
+        }
         if writer.batch_count % 100 == 0 || writer.batch_count <= 3 {
-            eprintln!(
-                "Lance FFI: Streamed batch {} ({} rows total)",
-                writer.batch_count, writer.row_count
-            );
+             eprintln!("Lance FFI: Batch {} ({} rows)", writer.batch_count, writer.row_count);
         }
-
-        if writer.batches.len() >= FLUSH_BATCH_THRESHOLD
-            || writer.pending_row_count >= FLUSH_ROW_THRESHOLD {
-            eprintln!(
-                "Lance FFI: Phase 3.0 - Flush threshold reached ({} batches, {} rows pending)",
-                writer.batches.len(),
-                writer.pending_row_count
-            );
-
-            if let Err(e) = writer.flush_batches() {
-                eprintln!("Lance FFI Error: {}", e);
-                return 5;
-            }
-        }
-
-        0 // Success
-    }))
-    .unwrap_or_else(|_| {
-        eprintln!("Lance FFI Error: Panic in lance_writer_write_batch");
-        7
-    })
+        0
+    })).unwrap_or(7)
 }
 
-/// Finalize and close the Lance writer.
-///
-/// Writes all accumulated batches to the Lance dataset as a single dataset write,
-/// creating the full Lance metadata and fragment structure.
-///
-/// Phase 2.0c-3: Encoding Strategy Simplification
-///
-/// Pre-computed encoding strategies for each column type.
-/// Avoids repeated strategy evaluation per-batch (19,200 evaluations for lineitem).
-/// Target: +3-8% improvement by eliminating encoding strategy overhead.
-#[derive(Debug, Clone)]
-struct EncodingStrategy {
-    column_name: String,
-    data_type: String,
-    strategy: String,      // "fixed-width", "dictionary", etc.
-    is_fast_path: bool,   // True if no complex evaluation needed
-}
-
-impl EncodingStrategy {
-    /// Create encoding strategy for a single column
-    /// Fast-path columns (int/float/date) skip all evaluation overhead
-    fn for_column(field: &Field) -> Self {
-        let (strategy, is_fast_path) = match field.data_type() {
-            // Integer types: Always fixed-width, no alternatives (FAST PATH)
-            DataType::Int64 | DataType::Int32 | DataType::Int16 | DataType::Int8 |
-            DataType::UInt64 | DataType::UInt32 | DataType::UInt16 | DataType::UInt8 => {
-                ("fixed-width", true)
-            }
-            // Float types: Always fixed-width (FAST PATH)
-            DataType::Float64 | DataType::Float32 => ("fixed-width", true),
-            // Decimal: Always fixed-width (FAST PATH)
-            DataType::Decimal128(_, _) => ("fixed-width", true),
-            // Date/Time: Always fixed-width (FAST PATH)
-            DataType::Date32 | DataType::Date64 => ("fixed-width", true),
-            // String: Try dictionary heuristic (not fast path - needs cardinality check)
-            DataType::Utf8 | DataType::LargeUtf8 => ("dictionary", false),
-            // Other types: Use default strategy
-            _ => ("variable-width", false),
-        };
-
-        EncodingStrategy {
-            column_name: field.name().to_string(),
-            data_type: format!("{:?}", field.data_type()),
-            strategy: strategy.to_string(),
-            is_fast_path,
-        }
-    }
-}
-
-/// Phase 2.0c-3: Pre-compute encoding strategies at schema creation time
-/// Instead of evaluating per-batch (1,200 times for lineitem),
-/// compute once and reuse for all batches.
-fn compute_encoding_strategies(schema: &Schema) -> Vec<EncodingStrategy> {
-    let strategies: Vec<_> = schema.fields()
-        .iter()
-        .map(|field| EncodingStrategy::for_column(field))
-        .collect();
-
-    // Count fast-path columns for logging
-    let fast_path_count = strategies.iter().filter(|s| s.is_fast_path).count();
-    eprintln!(
-        "Lance FFI: Computed encoding strategies (Phase 2.0c-3): {} columns, {} fast-path",
-        strategies.len(),
-        fast_path_count
-    );
-
-    strategies
-}
-
-/// # Arguments
-/// * `writer_ptr` - Pointer to LanceWriterHandle from lance_writer_create()
-///
-/// Phase 2.0c-2: Generate encoding hints for schema columns
-/// Phase 2.0c-3: Use pre-computed strategies to reduce evaluation overhead
-///
-/// Creates Arrow schema metadata with encoding hints to optimize Lance
-/// statistics computation and encoding strategy selection.
-/// These hints guide Lance's encoding decisions without requiring explicit statistics.
-fn create_schema_with_hints(schema: &Schema, strategies: &[EncodingStrategy]) -> Schema {
-    let mut metadata = schema.metadata().clone();
-
-    // Apply pre-computed strategies as encoding hints
-    // Fast-path columns avoid all strategy evaluation overhead
-    for (field, strategy) in schema.fields().iter().zip(strategies.iter()) {
-        // Only add hints for fast-path columns (simple types with no alternatives)
-        // Complex types are left for Lance's adaptive strategy selection
-        if strategy.is_fast_path {
-            metadata.insert(
-                format!("lance-encoding:{}", field.name()),
-                strategy.strategy.clone(),
-            );
-        }
-    }
-
-    // Create new schema with metadata hints
-    Schema::new_with_metadata(schema.fields().clone(), metadata)
-}
-
-/// # Returns
-/// 0 on success, non-zero error code on failure:
-///   1 = writer_ptr is null
-///   2 = Writer is already closed
-///   5 = Failed to write Lance dataset
-///   3 = Panic in lance_writer_close
-///
-/// # Safety
-/// The caller must:
-/// - Ensure writer_ptr is valid and not null
-/// - Not call this multiple times on the same pointer
-/// - Call lance_writer_destroy() after this function returns
 #[no_mangle]
 pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
-        if writer_ptr.is_null() {
-            eprintln!("Lance FFI Error: writer_ptr is null");
-            return 1;
-        }
-
+        if writer_ptr.is_null() { return 1; }
         let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
 
-        if writer.closed {
-            eprintln!("Lance FFI Error: Writer is already closed");
-            return 2;
-        }
-
-        // Phase 3.0: Write all accumulated batches to Lance dataset
-        if !writer.batches.is_empty() {
-            eprintln!(
-                "Lance FFI: Phase 3.0 - Closing writer, writing {} accumulated batches...",
-                writer.batches.len()
-            );
-
-            if let Err(e) = writer.flush_batches() {
-                eprintln!("Lance FFI Error: {}", e);
-                return 5;
+        let res = match &mut writer.backend {
+            WriterBackend::Buffered { .. } => writer.flush_batches(),
+            WriterBackend::Streaming { sender, task, .. } => {
+                // Close channel
+                *sender = None;
+                if let Some(handle) = task.take() {
+                    match writer.runtime.block_on(handle) {
+                         Ok(Ok(_)) => Ok(()),
+                         Ok(Err(e)) => Err(format!("Lance Task Error: {}", e)),
+                         Err(e) => Err(format!("Task Join Error: {}", e)),
+                    }
+                } else { Ok(()) }
             }
+        };
 
-            eprintln!(
-                "Lance FFI: Successfully wrote Lance dataset to: {} ({} batches, {} rows)",
-                writer.uri, writer.batch_count, writer.row_count
-            );
-        } else {
-            eprintln!(
-                "Lance FFI: Closed writer for URI: {} (no data to write)",
-                writer.uri
-            );
+        match res {
+            Ok(_) => { eprintln!("Lance FFI: Closed {}", writer.uri); writer.closed = true; 0 },
+            Err(e) => { eprintln!("Close Error: {}", e); 5 }
         }
-
-        writer.closed = true;
-        0 // Success
-    }))
-    .unwrap_or_else(|_| {
-        eprintln!("Lance FFI Error: Panic in lance_writer_close");
-        3
-    })
+    })).unwrap_or(3)
 }
 
-/// Destroy and deallocate the Lance writer.
-///
-/// Frees all resources associated with the writer.
-/// Do not use the writer_ptr after calling this function.
-///
-/// # Arguments
-/// * `writer_ptr` - Pointer to LanceWriterHandle from lance_writer_create()
-///
-/// # Safety
-/// The caller must:
-/// - Ensure writer_ptr is a valid pointer returned from lance_writer_create()
-/// - Not call this multiple times on the same pointer
-/// - Not use the writer_ptr after calling this function
 #[no_mangle]
 pub extern "C" fn lance_writer_destroy(writer_ptr: *mut LanceWriterHandle) {
-    catch_unwind(AssertUnwindSafe(|| {
-        if !writer_ptr.is_null() {
-            unsafe {
-                let _ = Box::from_raw(writer_ptr);
-            }
-        }
-    }))
-    .unwrap_or_else(|_| {
-        eprintln!("Lance FFI Error: Panic in lance_writer_destroy");
-    })
+    if !writer_ptr.is_null() { unsafe { let _ = Box::from_raw(writer_ptr); } }
 }

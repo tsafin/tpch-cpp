@@ -53,7 +53,7 @@ void LanceWriter::initialize_lance_dataset(
     }
 
     // Initialize Rust FFI writer
-    auto* raw_writer = lance_writer_create(dataset_path_.c_str(), nullptr);
+    auto* raw_writer = lance_writer_create(dataset_path_.c_str(), nullptr, streaming_enabled_ ? 1 : 0);
     rust_writer_ = reinterpret_cast<void*>(raw_writer);
 
     if (rust_writer_ == nullptr) {
