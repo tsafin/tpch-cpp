@@ -15,7 +15,6 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 use std::slice;
-use std::collections::HashMap;
 
 use arrow::ffi::{FFI_ArrowSchema, FFI_ArrowArray};
 use arrow::record_batch::RecordBatch;
@@ -24,7 +23,7 @@ use arrow::datatypes::{Schema, DataType, Field};
 use arrow::buffer::Buffer;
 use arrow::array::ArrayData;
 use tokio::runtime::Runtime;
-use lance::dataset::WriteParams;
+use lance::dataset::{WriteParams, WriteMode};
 
 /// C Data Interface ArrowArray structure - matches the C specification
 /// This allows us to access the FFI_ArrowArray fields directly
@@ -319,9 +318,18 @@ pub struct LanceWriterHandle {
     batches: Vec<RecordBatch>,
     batch_count: usize,
     row_count: usize,
+    pending_row_count: usize,
     closed: bool,
     runtime: Runtime,
+    fragment_count: usize,  // Track number of fragments written
+    dataset_initialized: bool,  // True after first fragment write
+    temp_fragment_uris: Vec<String>,  // Track temporary fragment files for merging
 }
+
+/// Phase 3.0: Batch-flush pattern constants
+/// Flush accumulated batches after reaching threshold to reduce memory pressure
+const FLUSH_BATCH_THRESHOLD: usize = 200;  // ~1M rows at 5K rows/batch
+const FLUSH_ROW_THRESHOLD: usize = 1_000_000;  // Alternative: flush after 1M rows
 
 impl LanceWriterHandle {
     fn new(uri: String) -> Result<Self, String> {
@@ -333,8 +341,12 @@ impl LanceWriterHandle {
             batches: Vec::new(),
             batch_count: 0,
             row_count: 0,
+            pending_row_count: 0,
             closed: false,
             runtime,
+            fragment_count: 0,
+            dataset_initialized: false,
+            temp_fragment_uris: Vec::new(),
         })
     }
 
@@ -412,6 +424,67 @@ impl LanceWriterHandle {
                 .map_err(|e| format!("Failed to create RecordBatch: {}", e))
         }
     }
+
+    /// Phase 3.0: No-op flush function (automatic fragmentation via Lance)
+    ///
+    /// Batches are no longer manually flushed. Instead, Lance's max_rows_per_file
+    /// parameter automatically creates fragments, bounding memory usage.
+    #[allow(dead_code)]
+    fn flush_batches(&mut self) -> Result<(), String> {
+        if self.batches.is_empty() {
+            return Ok(());
+        }
+
+        let uri = self.uri.clone();
+        let batches = std::mem::take(&mut self.batches);
+        let flush_batch_count = batches.len();
+        let flush_row_count = self.pending_row_count;
+
+        let original_schema = batches[0].schema();
+
+        // Phase 2.0c-3: Pre-compute encoding strategies once for all batches
+        let strategies = compute_encoding_strategies(&original_schema);
+
+        // Phase 2.0c-2/2.0c-3: Apply pre-computed encoding hints
+        let optimized_schema = create_schema_with_hints(&original_schema, &strategies);
+        let schema_ref = Arc::new(optimized_schema);
+
+        // Use Tokio runtime to execute async Lance write
+        let mode = if self.dataset_initialized {
+            WriteMode::Append
+        } else {
+            WriteMode::Overwrite
+        };
+
+        let write_params = WriteParams {
+            max_rows_per_group: 1_000,  // Phase 3.0: Reduced from 4096 to force frequent flush
+            max_rows_per_file: 2_000_000,  // Phase 3.0: Fragment at 2M rows (~15 fragments for SF=5)
+            mode,
+            ..Default::default()
+        };
+
+        let result = self.runtime.block_on(async {
+            let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), schema_ref);
+            eprintln!(
+                "Lance FFI: Phase 3.0 - Writing with streaming fragmentation (2M rows/fragment)..."
+            );
+            lance::Dataset::write(batch_iter, &uri, Some(write_params)).await
+        });
+
+        match result {
+            Ok(_) => {
+                self.dataset_initialized = true;
+                self.pending_row_count = 0;
+                self.fragment_count += 1;
+                eprintln!(
+                    "Lance FFI: Wrote {} batches ({} rows) to: {}",
+                    flush_batch_count, flush_row_count, uri
+                );
+                Ok(())
+            }
+            Err(e) => Err(format!("Failed to write Lance dataset: {}", e)),
+        }
+    }
 }
 
 /// Create a new Lance writer for writing to the specified URI.
@@ -479,6 +552,7 @@ pub extern "C" fn lance_writer_create(
 ///   2 = Writer is already closed
 ///   3 = arrow_array_ptr or arrow_schema_ptr is null
 ///   4 = Failed to import Arrow C Data Interface
+///   5 = Failed to flush accumulated batches
 ///   7 = Panic in lance_writer_write_batch
 ///
 /// # Safety
@@ -529,15 +603,30 @@ pub extern "C" fn lance_writer_write_batch(
 
         // Accumulate batch and update counters
         writer.row_count += record_batch.num_rows();
+        writer.pending_row_count += record_batch.num_rows();
         writer.batches.push(record_batch);
         writer.batch_count += 1;
 
         // Log progress
         if writer.batch_count % 100 == 0 || writer.batch_count <= 3 {
             eprintln!(
-                "Lance FFI: Accumulated batch {} ({} rows total)",
+                "Lance FFI: Streamed batch {} ({} rows total)",
                 writer.batch_count, writer.row_count
             );
+        }
+
+        if writer.batches.len() >= FLUSH_BATCH_THRESHOLD
+            || writer.pending_row_count >= FLUSH_ROW_THRESHOLD {
+            eprintln!(
+                "Lance FFI: Phase 3.0 - Flush threshold reached ({} batches, {} rows pending)",
+                writer.batches.len(),
+                writer.pending_row_count
+            );
+
+            if let Err(e) = writer.flush_batches() {
+                eprintln!("Lance FFI Error: {}", e);
+                return 5;
+            }
         }
 
         0 // Success
@@ -673,59 +762,25 @@ pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_in
             return 2;
         }
 
-        // Write all accumulated batches to Lance dataset
+        // Phase 3.0: Write all accumulated batches to Lance dataset
         if !writer.batches.is_empty() {
-            let uri = writer.uri.clone();
-            let batches = std::mem::take(&mut writer.batches);
-            let batch_count = writer.batch_count;
-            let row_count = writer.row_count;
+            eprintln!(
+                "Lance FFI: Phase 3.0 - Closing writer, writing {} accumulated batches...",
+                writer.batches.len()
+            );
 
-            // Use Tokio runtime to execute async Lance write
-            // with optimized WriteParams for better performance
-            let result = writer.runtime.block_on(async {
-                let original_schema = batches[0].schema();
-
-                // Phase 2.0c-3: Pre-compute encoding strategies once for all batches
-                // This eliminates repeated strategy evaluation (19,200× for lineitem 6M rows ÷ 5K batch)
-                // Target: -70% on encoding strategy evaluation overhead
-                let strategies = compute_encoding_strategies(&original_schema);
-
-                // Phase 2.0c-2/2.0c-3: Apply pre-computed encoding hints
-                // Use strategies to guide Lance encoding decisions without explicit statistics
-                let optimized_schema = create_schema_with_hints(&original_schema, &strategies);
-
-                // Create batch iterator with optimized schema
-                let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), Arc::new(optimized_schema));
-
-                // Phase 2.0c-2a: Optimized Lance configuration
-                // Increase max_rows_per_group for reduced encoding overhead
-                let write_params = WriteParams {
-                    max_rows_per_group: 4096,  // 4× default (1024) for better cache locality
-                    ..Default::default()
-                };
-
-                eprintln!(
-                    "Lance FFI: Writing with pre-computed encoding strategies (Phase 2.0c-3)"
-                );
-
-                lance::Dataset::write(batch_iter, &uri, Some(write_params)).await
-            });
-
-            match result {
-                Ok(_) => {
-                    eprintln!(
-                        "Lance FFI: Successfully wrote Lance dataset to: {} ({} batches, {} rows)",
-                        uri, batch_count, row_count
-                    );
-                }
-                Err(e) => {
-                    eprintln!("Lance FFI Error: Failed to write Lance dataset: {}", e);
-                    return 5;
-                }
+            if let Err(e) = writer.flush_batches() {
+                eprintln!("Lance FFI Error: {}", e);
+                return 5;
             }
+
+            eprintln!(
+                "Lance FFI: Successfully wrote Lance dataset to: {} ({} batches, {} rows)",
+                writer.uri, writer.batch_count, writer.row_count
+            );
         } else {
             eprintln!(
-                "Lance FFI: Closed writer for URI: {} (no batches to write)",
+                "Lance FFI: Closed writer for URI: {} (no data to write)",
                 writer.uri
             );
         }
