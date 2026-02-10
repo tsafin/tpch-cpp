@@ -25,13 +25,19 @@ libtpch_core.a
 *.lib
 *.obj
 
+# CMake build artifacts in any subdirectory
+**/CMakeFiles/
+**/cmake_install.cmake
+**/CTestTestfile.cmake
+
 # Build artifacts in examples/ subdirectory (CMake output)
-examples/CMakeFiles/
 examples/Makefile
-examples/cmake_install.cmake
 examples/*.o
 examples/*.o.d
 examples/*.d
+
+# Build artifacts in third_party subdirectories
+third_party/dbgen/Makefile
 
 # Executables (generated from examples and main)
 /tpch_benchmark
