@@ -31,6 +31,9 @@
 #ifdef TPCH_ENABLE_ICEBERG
 #include "tpch/iceberg_writer.hpp"
 #endif
+#ifdef TPCH_ENABLE_LANCE
+#include "tpch/lance_writer.hpp"
+#endif
 
 namespace {
 
@@ -214,17 +217,16 @@ create_builders_from_schema(std::shared_ptr<arrow::Schema> schema) {
     for (const auto& field : schema->fields()) {
         if (field->type()->id() == arrow::Type::INT64) {
             auto builder = std::make_shared<arrow::Int64Builder>();
-            builder->Reserve(capacity);
+            (void)builder->Reserve(capacity);
             builders[field->name()] = builder;
         } else if (field->type()->id() == arrow::Type::DOUBLE) {
             auto builder = std::make_shared<arrow::DoubleBuilder>();
-            builder->Reserve(capacity);
+            (void)builder->Reserve(capacity);
             builders[field->name()] = builder;
         } else if (field->type()->id() == arrow::Type::STRING) {
             auto builder = std::make_shared<arrow::StringBuilder>();
-            // Reserve for values and estimate 50 bytes average string length
-            builder->Reserve(capacity);
-            builder->ReserveData(capacity * 50);
+            (void)builder->Reserve(capacity);
+            (void)builder->ReserveData(capacity * 50);
             builders[field->name()] = builder;
         } else {
             throw std::runtime_error("Unsupported type: " + field->type()->ToString());
@@ -1422,16 +1424,16 @@ int main(int argc, char* argv[]) {
             // Generate synthetic data
             for (long row_idx = 0; row_idx < opts.max_rows; ++row_idx) {
                 // Add synthetic data to builders
-                orderkey_builder->Append(row_idx + 1);
-                partkey_builder->Append((row_idx % 200000) + 1);
-                suppkey_builder->Append((row_idx % 10000) + 1);
-                linenumber_builder->Append((row_idx % 7) + 1);
-                quantity_builder->Append(10.0 + (row_idx % 50));
-                extprice_builder->Append((row_idx % 100) * 100.0);
-                discount_builder->Append((row_idx % 10) * 0.1);
-                tax_builder->Append((row_idx % 8) * 0.01);
-                returnflag_builder->Append(row_idx % 3 == 0 ? "R" : (row_idx % 2 == 0 ? "A" : "N"));
-                linestatus_builder->Append(row_idx % 2 == 0 ? "O" : "F");
+                (void)orderkey_builder->Append(row_idx + 1);
+                (void)partkey_builder->Append((row_idx % 200000) + 1);
+                (void)suppkey_builder->Append((row_idx % 10000) + 1);
+                (void)linenumber_builder->Append((row_idx % 7) + 1);
+                (void)quantity_builder->Append(10.0 + static_cast<double>(row_idx % 50));
+                (void)extprice_builder->Append(static_cast<double>(row_idx % 100) * 100.0);
+                (void)discount_builder->Append(static_cast<double>(row_idx % 10) * 0.1);
+                (void)tax_builder->Append(static_cast<double>(row_idx % 8) * 0.01);
+                (void)returnflag_builder->Append(row_idx % 3 == 0 ? "R" : (row_idx % 2 == 0 ? "A" : "N"));
+                (void)linestatus_builder->Append(row_idx % 2 == 0 ? "O" : "F");
 
                 rows_in_batch++;
                 total_rows++;
