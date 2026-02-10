@@ -69,6 +69,11 @@ __pycache__/
 *.deb
 *.rpm
 
+# Root-level documentation and text files (except README.md)
+/*.md
+!README.md
+/*.txt
+
 # Rust build artifacts
 # Note: Cargo target directory should be in CMAKE_BINARY_DIR (e.g., build/rust/)
 # NOT in the source tree. Ignore any in-source target/ directories.

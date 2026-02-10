@@ -5,16 +5,12 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
-use std::slice;
 use std::pin::Pin;
-use std::collections::HashMap;
 
 use arrow::ffi::{FFI_ArrowSchema, FFI_ArrowArray};
 use arrow::record_batch::RecordBatch;
-use arrow::array::{RecordBatchIterator, Array, Int64Array, Float64Array, Int32Array, StringArray};
+use arrow::array::RecordBatchIterator;
 use arrow::datatypes::{Schema, DataType, Field};
-use arrow::buffer::Buffer;
-use arrow::array::ArrayData;
 use arrow::error::ArrowError;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -26,157 +22,6 @@ use lance::dataset::{WriteParams, WriteMode};
 use lance::deps::datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use lance::deps::datafusion::physical_plan::RecordBatchStream;
 use lance::deps::datafusion::error::DataFusionError;
-
-/// C Data Interface ArrowArray structure
-#[repr(C)]
-struct CDataArrowArray {
-    length: i64,
-    null_count: i64,
-    offset: i64,
-    n_buffers: i64,
-    n_children: i64,
-    buffers: *const *const c_void,
-    children: *const *mut c_void,
-    dictionary: *mut c_void,
-    release: Option<extern "C" fn(*mut c_void)>,
-    private_data: *mut c_void,
-}
-
-/// Safe wrapper around FFI_ArrowArray C structure
-struct SafeArrowArray {
-    ffi: *mut CDataArrowArray,
-}
-
-impl SafeArrowArray {
-    unsafe fn buffer_ptr(&self, index: usize) -> Option<*const u8> {
-        if self.ffi.is_null() { return None; }
-        let ffi_array = &*self.ffi;
-        if index >= ffi_array.n_buffers as usize { return None; }
-        if ffi_array.buffers.is_null() { return None; }
-        let buffer_ptr = *ffi_array.buffers.add(index);
-        if buffer_ptr.is_null() { None } else { Some(buffer_ptr as *const u8) }
-    }
-
-    unsafe fn child(&self, index: usize) -> Option<*mut CDataArrowArray> {
-        if self.ffi.is_null() { return None; }
-        let ffi_array = &*self.ffi;
-        if index >= ffi_array.n_children as usize { return None; }
-        if ffi_array.children.is_null() { return None; }
-        Some(*ffi_array.children.add(index) as *mut CDataArrowArray)
-    }
-
-    unsafe fn length(&self) -> i64 {
-        if self.ffi.is_null() { 0 } else { (*self.ffi).length }
-    }
-
-    unsafe fn null_count(&self) -> i64 {
-        if self.ffi.is_null() { 0 } else { (*self.ffi).null_count }
-    }
-}
-
-fn import_primitive_array(safe_array: &SafeArrowArray, field: &Field) -> Result<Arc<dyn Array>, String> {
-    unsafe {
-        let length = safe_array.length() as usize;
-        if length == 0 { return Err("Cannot import array with 0 length".to_string()); }
-        let null_count = safe_array.null_count() as usize;
-
-        let (_null_bitmap, data_buffer_index) = if field.is_nullable() {
-            let null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
-                let byte_count = (length + 7) / 8;
-                let slice = slice::from_raw_parts(ptr, byte_count);
-                Some(Buffer::from_slice_ref(slice))
-            } else { None };
-            (null_bitmap, 1)
-        } else { (None, 0) };
-
-        let data_ptr = safe_array.buffer_ptr(data_buffer_index).ok_or("Missing data buffer")?;
-
-        match field.data_type() {
-            DataType::Int64 => {
-                let byte_count = length * std::mem::size_of::<i64>();
-                let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let array_data = ArrayData::builder(DataType::Int64)
-                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
-                    .map_err(|e| e.to_string())?;
-                Ok(Arc::new(Int64Array::from(array_data)))
-            }
-            DataType::Float64 => {
-                let byte_count = length * std::mem::size_of::<f64>();
-                let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let array_data = ArrayData::builder(DataType::Float64)
-                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
-                    .map_err(|e| e.to_string())?;
-                Ok(Arc::new(Float64Array::from(array_data)))
-            }
-            DataType::Int32 => {
-                let byte_count = length * std::mem::size_of::<i32>();
-                let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let array_data = ArrayData::builder(DataType::Int32)
-                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
-                    .map_err(|e| e.to_string())?;
-                Ok(Arc::new(Int32Array::from(array_data)))
-            }
-            DataType::Float32 => {
-                let byte_count = length * std::mem::size_of::<f32>();
-                let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let array_data = ArrayData::builder(DataType::Float32)
-                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
-                    .map_err(|e| e.to_string())?;
-                Ok(Arc::new(arrow::array::Float32Array::from(array_data)))
-            }
-            DataType::Date32 => {
-                let byte_count = length * std::mem::size_of::<i32>();
-                let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let array_data = ArrayData::builder(DataType::Date32)
-                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
-                    .map_err(|e| e.to_string())?;
-                Ok(Arc::new(arrow::array::Date32Array::from(array_data)))
-            }
-            DataType::Boolean => {
-                let byte_count = (length + 7) / 8;
-                let slice = slice::from_raw_parts(data_ptr, byte_count);
-                let array_data = ArrayData::builder(DataType::Boolean)
-                    .len(length).buffers(vec![Buffer::from_slice_ref(slice)]).null_count(null_count).build()
-                    .map_err(|e| e.to_string())?;
-                Ok(Arc::new(arrow::array::BooleanArray::from(array_data)))
-            }
-            dt => Err(format!("Unsupported primitive type: {}", dt)),
-        }
-    }
-}
-
-fn import_string_array(safe_array: &SafeArrowArray, _field: &Field) -> Result<Arc<dyn Array>, String> {
-    unsafe {
-        let length = safe_array.length() as usize;
-        if length == 0 { return Err("Cannot import array with 0 length".to_string()); }
-
-        let _null_bitmap = if let Some(ptr) = safe_array.buffer_ptr(0) {
-            let byte_count = (length + 7) / 8;
-            let slice = slice::from_raw_parts(ptr, byte_count);
-            Some(Buffer::from_slice_ref(slice))
-        } else { None };
-
-        let offset_ptr = safe_array.buffer_ptr(1).ok_or("Missing offset buffer")?;
-        let offset_byte_count = (length + 1) * std::mem::size_of::<i32>();
-        let offset_slice = slice::from_raw_parts(offset_ptr, offset_byte_count);
-        let offset_buffer = Buffer::from_slice_ref(offset_slice);
-
-        let data_ptr = safe_array.buffer_ptr(2).ok_or("Missing data buffer")?;
-        let offset_i32_slice = slice::from_raw_parts(offset_ptr as *const i32, length + 1);
-        let data_byte_count = if !offset_i32_slice.is_empty() { offset_i32_slice[length] as usize } else { 0 };
-        let data_slice = slice::from_raw_parts(data_ptr, data_byte_count);
-        let data_buffer = Buffer::from_slice_ref(data_slice);
-
-        let array_data = ArrayData::builder(DataType::Utf8)
-            .len(length)
-            .buffers(vec![offset_buffer, data_buffer])
-            .null_count(safe_array.null_count() as usize)
-            .build()
-            .map_err(|e| e.to_string())?;
-
-        Ok(Arc::new(StringArray::from(array_data)))
-    }
-}
 
 fn apply_compression_metadata(schema: &Schema) -> Schema {
     let fields: Vec<Field> = schema.fields().iter().map(|field| {
@@ -219,6 +64,8 @@ enum WriterBackend {
 pub struct LanceWriterHandle {
     uri: String,
     schema: Option<arrow::datatypes::Schema>,
+    /// Cached schema with compression metadata (computed once on first batch)
+    compressed_schema: Option<Arc<Schema>>,
     batch_count: usize,
     row_count: usize,
     closed: bool,
@@ -234,7 +81,7 @@ impl LanceWriterHandle {
         let runtime = Runtime::new().map_err(|e| format!("Failed to create Tokio runtime: {}", e))?;
 
         let backend = if use_streaming {
-            let (sender, receiver) = mpsc::channel(100);
+            let (sender, receiver) = mpsc::channel(500);
             WriterBackend::Streaming {
                 sender: Some(sender),
                 receiver: Some(receiver),
@@ -252,6 +99,7 @@ impl LanceWriterHandle {
         Ok(LanceWriterHandle {
             uri,
             schema: None,
+            compressed_schema: None,
             batch_count: 0,
             row_count: 0,
             closed: false,
@@ -292,7 +140,7 @@ impl LanceWriterHandle {
                 
                 let mode = if *dataset_initialized { WriteMode::Append } else { WriteMode::Overwrite };
                 let write_params = WriteParams {
-                    max_rows_per_group: 1024, max_rows_per_file: 2_000_000, mode, ..Default::default()
+                    max_rows_per_group: 8192, max_rows_per_file: 50_000_000, mode, ..Default::default()
                 };
 
                 let result = self.runtime.block_on(async {
@@ -336,9 +184,9 @@ impl LanceWriterHandle {
                          let source: Pin<Box<dyn RecordBatchStream + Send>> = Box::pin(stream_adapter);
                          
                          let write_params = WriteParams {
-                            max_rows_per_group: 1024,
-                            max_rows_per_file: 2_000_000,
-                            mode: WriteMode::Create,
+                            max_rows_per_group: 8192,
+                            max_rows_per_file: 50_000_000,
+                            mode: WriteMode::Overwrite,
                             ..Default::default()
                         };
 
@@ -397,11 +245,16 @@ pub extern "C" fn lance_writer_write_batch(writer_ptr: *mut LanceWriterHandle, a
             Ok(b) => b, Err(e) => { eprintln!("FFI Import Error: {}", e); return 4; }
         };
 
-        // Apply automatic compression settings (LZ4 + BSS)
-        // We must re-wrap the batch with the new schema containing metadata
-        let compressed_schema = Arc::new(apply_compression_metadata(raw_batch.schema().as_ref()));
-        
-        // This is a zero-copy schema replacement (buffers are shared)
+        // Apply compression metadata (cached - computed once on first batch)
+        let compressed_schema = if let Some(ref cached) = writer.compressed_schema {
+            cached.clone()
+        } else {
+            let schema = Arc::new(apply_compression_metadata(raw_batch.schema().as_ref()));
+            writer.compressed_schema = Some(schema.clone());
+            schema
+        };
+
+        // Zero-copy schema replacement (buffers are shared)
         let columns = raw_batch.columns().to_vec();
         let record_batch = match RecordBatch::try_new(compressed_schema, columns) {
              Ok(b) => b,
