@@ -17,32 +17,77 @@ concurrency:
 
 jobs:
   build-matrix:
-    name: Build (${{ matrix.artifact_name }})
+    name: Build (${{ matrix.config }})
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - artifact_name: tpch-benchmark-orc-async
+          - config: base
+            enable_orc: OFF
+            enable_lance: OFF
+            enable_tests: ON
+            need_rust: false
+            submodules: selective
+          - config: orc
+            enable_orc: ON
+            enable_lance: OFF
+            enable_tests: ON
+            need_rust: false
+            submodules: selective
+          - config: lance
+            enable_orc: OFF
+            enable_lance: ON
+            enable_tests: ON
+            need_rust: true
+            submodules: recursive
 
     steps:
       - name: Checkout code with submodules
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: ${{ matrix.submodules }}
           fetch-depth: 1
 
-      - name: Install dependencies
+      - name: Checkout selective submodules (non-lance builds)
+        if: matrix.submodules == 'selective'
+        run: |
+          git submodule update --init --depth 1 -- third_party/tpch
+          git submodule update --init --depth 1 -- third_party/googletest
+
+      - name: Install system dependencies
         run: bash scripts/ci_install_deps.sh
+
+      - name: Install Rust toolchain (lance build only)
+        if: matrix.need_rust == true
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Verify Rust installation
+        if: matrix.need_rust == true
+        run: |
+          source $HOME/.cargo/env
+          rustc --version
+          cargo --version
 
       - name: Create cache directories
         run: |
           mkdir -p /home/runner/dependencies/{lib,include}/{cmake,pkgconfig}
           mkdir -p /home/runner/dependencies/include/{arrow,parquet,orc}
 
+      - name: Restore Cargo cache (lance build only)
+        if: matrix.need_rust == true
+        uses: actions/cache@v4
+        with:
+          path: build/rust/
+          key: cargo-cache-${{ hashFiles('third_party/lance-ffi/Cargo.lock') }}
+          restore-keys: cargo-cache-
+
       - name: Restore Arrow and ORC cache
+        if: matrix.enable_orc == 'ON'
         id: cache-arrow-orc
         uses: actions/cache@v4
         with:
@@ -60,49 +105,101 @@ jobs:
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
-      - name: Build Arrow and ORC from source
-        if: steps.cache-arrow-orc.outputs.cache-hit != 'true'
-        run: bash scripts/ci_build_arrow_and_orc.sh ON /home/runner/dependencies
-
-      - name: Cache Arrow and ORC libraries
+      - name: Restore Arrow and Parquet cache (non-ORC builds)
+        if: matrix.enable_orc == 'OFF'
+        id: cache-arrow-parquet
         uses: actions/cache@v4
         with:
           path: |
             /home/runner/dependencies/lib/libarrow*
             /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/liborc*
             /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/cmake/orc
             /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/lib/pkgconfig/liborc*
             /home/runner/dependencies/include/arrow
             /home/runner/dependencies/include/parquet
-            /home/runner/dependencies/include/orc
-          key: arrow-orc-cache-${{ github.sha }}
+          key: arrow-parquet-cache-${{ github.sha }}
+          restore-keys: arrow-parquet-cache-
+
+      - name: Build Arrow and ORC from source
+        if: matrix.enable_orc == 'ON' && steps.cache-arrow-orc.outputs.cache-hit != 'true'
+        run: bash scripts/ci_build_arrow_and_orc.sh ON /home/runner/dependencies
+
+      - name: Build Arrow and Parquet from source (non-ORC builds)
+        if: matrix.enable_orc == 'OFF' && steps.cache-arrow-parquet.outputs.cache-hit != 'true'
+        run: bash scripts/ci_build_arrow_and_orc.sh OFF /home/runner/dependencies
 
       - name: Configure CMake
         run: |
+          source $HOME/.cargo/env 2>/dev/null || true
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=/home/runner/dependencies \
-            -DTPCH_ENABLE_ORC=ON \
+            -DTPCH_ENABLE_ORC=${{ matrix.enable_orc }} \
+            -DTPCH_ENABLE_LANCE=${{ matrix.enable_lance }} \
             -DTPCH_ENABLE_ASYNC_IO=ON \
             -DTPCH_ENABLE_ASAN=OFF \
-            -DTPCH_BUILD_TESTS=OFF
+            -DTPCH_BUILD_TESTS=${{ matrix.enable_tests }}
 
       - name: Build project
-        run: cmake --build build -j$(nproc)
+        run: |
+          source $HOME/.cargo/env 2>/dev/null || true
+          cmake --build build -j$(nproc)
 
-      - name: Verify executable
-        run: test -f build/tpch_benchmark && echo "✓ Executable created successfully"
+      - name: Verify executable and tests
+        run: |
+          test -f build/tpch_benchmark && echo "✓ tpch_benchmark created"
+          test -f build/tests/buffer_lifetime_manager_test && echo "✓ buffer_lifetime_manager_test created" || true
+          test -f build/tests/dbgen_batch_iterator_test && echo "✓ dbgen_batch_iterator_test created" || true
+          if [ "${{ matrix.enable_lance }}" = "ON" ]; then
+            test -f build/tests/lance_writer_test && echo "✓ lance_writer_test created" || echo "✗ lance_writer_test missing"
+          fi
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: build/tpch_benchmark
+          name: tpch-benchmark-${{ matrix.config }}
+          path: |
+            build/tpch_benchmark
+            build/tests/*_test
           retention-days: 1
           if-no-files-found: error
+
+  unit-tests:
+    name: Unit Tests (${{ matrix.config }})
+    runs-on: ubuntu-22.04
+    needs: build-matrix
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [base, orc, lance]
+
+    steps:
+      - name: Checkout code (for dists.dss)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout tpch submodule (for dists.dss)
+        run: git submodule update --init --depth 1 -- third_party/tpch
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tpch-benchmark-${{ matrix.config }}
+          path: build
+
+      - name: Setup test executables
+        run: |
+          chmod +x build/tests/*_test 2>/dev/null || true
+          # Copy dists.dss to build directory for tests
+          cp -r third_party/tpch/dbgen/dists.dss build/
+
+      - name: Run unit tests
+        run: |
+          cd build
+          ctest --output-on-failure --verbose
 
   benchmark-suite:
     name: Benchmark Suite
@@ -114,40 +211,76 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # CSV format - all tables
           - format: csv
             table: lineitem
+            build: base
           - format: csv
             table: orders
+            build: base
           - format: csv
             table: customer
+            build: base
           - format: csv
             table: part
+            build: base
           - format: csv
             table: partsupp
+            build: base
           - format: csv
             table: supplier
+            build: base
           - format: csv
             table: nation
+            build: base
           - format: csv
             table: region
+            build: base
+          # Parquet format - all tables
           - format: parquet
             table: lineitem
+            build: base
           - format: parquet
             table: orders
+            build: base
           - format: parquet
             table: customer
+            build: base
           - format: parquet
             table: part
+            build: base
           - format: parquet
             table: partsupp
+            build: base
           - format: parquet
             table: supplier
+            build: base
           - format: parquet
             table: nation
+            build: base
           - format: parquet
             table: region
+            build: base
+          # ORC format - lineitem, customer, orders
           - format: orc
             table: lineitem
+            build: orc
+          - format: orc
+            table: customer
+            build: orc
+          - format: orc
+            table: orders
+            build: orc
+          # Lance format - lineitem, customer, orders
+          - format: lance
+            table: lineitem
+            build: lance
+          - format: lance
+            table: customer
+            build: lance
+          - format: lance
+            table: orders
+            build: lance
 
     steps:
       - name: Checkout code (for dists.dss and scripts)
@@ -166,7 +299,8 @@ jobs:
           mkdir -p /home/runner/dependencies/{lib,include}/{cmake,pkgconfig}
           mkdir -p /home/runner/dependencies/include/{arrow,parquet,orc}
 
-      - name: Restore Arrow and ORC cache
+      - name: Restore Arrow and ORC cache (ORC builds)
+        if: matrix.build == 'orc'
         uses: actions/cache@v4
         with:
           path: |
@@ -183,10 +317,24 @@ jobs:
           key: arrow-orc-cache-${{ github.sha }}
           restore-keys: arrow-orc-cache-
 
+      - name: Restore Arrow and Parquet cache (non-ORC builds)
+        if: matrix.build != 'orc'
+        uses: actions/cache@v4
+        with:
+          path: |
+            /home/runner/dependencies/lib/libarrow*
+            /home/runner/dependencies/lib/libparquet*
+            /home/runner/dependencies/lib/cmake/arrow
+            /home/runner/dependencies/lib/pkgconfig/arrow*
+            /home/runner/dependencies/include/arrow
+            /home/runner/dependencies/include/parquet
+          key: arrow-parquet-cache-${{ github.sha }}
+          restore-keys: arrow-parquet-cache-
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: tpch-benchmark-orc-async
+          name: tpch-benchmark-${{ matrix.build }}
           path: .
 
       - name: Setup benchmark executable
@@ -235,7 +383,7 @@ jobs:
           if-no-files-found: ignore
 
   optimization-benchmarks:
-    name: Optimization Benchmarks (${{ matrix.mode }})
+    name: Optimization Benchmarks (${{ matrix.format }}-${{ matrix.mode }})
     runs-on: ubuntu-22.04
     needs: build-matrix
     timeout-minutes: 20
@@ -243,6 +391,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        format: [parquet, lance]
         mode: [baseline, zero-copy, true-zero-copy]
         table: [lineitem, orders, part]
 
@@ -263,27 +412,23 @@ jobs:
           mkdir -p /home/runner/dependencies/{lib,include}/{cmake,pkgconfig}
           mkdir -p /home/runner/dependencies/include/{arrow,parquet,orc}
 
-      - name: Restore Arrow and ORC cache
+      - name: Restore Arrow and Parquet cache
         uses: actions/cache@v4
         with:
           path: |
             /home/runner/dependencies/lib/libarrow*
             /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/liborc*
             /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/cmake/orc
             /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/lib/pkgconfig/liborc*
             /home/runner/dependencies/include/arrow
             /home/runner/dependencies/include/parquet
-            /home/runner/dependencies/include/orc
-          key: arrow-orc-cache-${{ github.sha }}
-          restore-keys: arrow-orc-cache-
+          key: arrow-parquet-cache-${{ github.sha }}
+          restore-keys: arrow-parquet-cache-
 
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: tpch-benchmark-orc-async
+          name: tpch-benchmark-${{ matrix.format == 'parquet' && 'base' || 'lance' }}
           path: .
 
       - name: Setup benchmark executable
@@ -293,17 +438,6 @@ jobs:
           # Setup library path to use cached dependencies
           export LD_LIBRARY_PATH=/home/runner/dependencies/lib:$LD_LIBRARY_PATH
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
-
-      - name: Verify library installation
-        run: |
-          echo "=== Current LD_LIBRARY_PATH ==="
-          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-          echo ""
-          echo "=== Searching for libparquet ==="
-          find /home/runner/dependencies -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found"
-          echo ""
-          echo "=== Searching for liborc ==="
-          find /home/runner/dependencies -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found"
 
       - name: Run optimization benchmark
         continue-on-error: true
@@ -318,14 +452,14 @@ jobs:
           timeout 600 ./tpch_benchmark \
             --use-dbgen \
             --scale-factor 1 \
-            --format parquet \
+            --format ${{ matrix.format }} \
             --table ${{ matrix.table }} \
             --output-dir benchmark-results/ \
             $MODE_FLAGS \
-            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log"
+            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"
 
           # Fail if process dumped core
-          if grep -q "dumped core" "benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log"; then
+          if grep -q "dumped core" "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"; then
             echo "ERROR: Benchmark crashed with core dump"
             exit 1
           fi
@@ -334,8 +468,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-logs-optimization-${{ matrix.mode }}-${{ matrix.table }}
-          path: benchmark-results/parquet_${{ matrix.table }}_${{ matrix.mode }}.log
+          name: benchmark-logs-optimization-${{ matrix.format }}-${{ matrix.mode }}-${{ matrix.table }}
+          path: benchmark-results/${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log
           retention-days: 30
           if-no-files-found: ignore
 
@@ -396,16 +530,18 @@ jobs:
   status-check:
     name: Status Check
     runs-on: ubuntu-22.04
-    needs: [build-matrix]
+    needs: [build-matrix, unit-tests]
     if: always()
 
     steps:
       - name: Check build status
         run: |
-          if [ "${{ needs.build-matrix.result }}" = "success" ]; then
-            echo "✓ All builds passed"
+          if [ "${{ needs.build-matrix.result }}" = "success" ] && [ "${{ needs.unit-tests.result }}" = "success" ]; then
+            echo "✓ All builds and tests passed"
             exit 0
           else
-            echo "✗ Some builds failed"
+            echo "✗ Some builds or tests failed"
+            echo "Build status: ${{ needs.build-matrix.result }}"
+            echo "Test status: ${{ needs.unit-tests.result }}"
             exit 1
           fi
