@@ -64,14 +64,17 @@ jobs:
         if: matrix.need_rust == true
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           # Install mold linker for faster Rust builds
           sudo apt-get update && sudo apt-get install -y mold
 
-      - name: Verify Rust installation
+      - name: Setup Rust environment (lance build only)
         if: matrix.need_rust == true
         run: |
           source $HOME/.cargo/env
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          # Export for use in this step and save to GITHUB_ENV for subsequent steps
+          echo "RUSTC=$(which rustc)" >> $GITHUB_ENV
+          echo "CARGO=$(which cargo)" >> $GITHUB_ENV
           rustc --version
           cargo --version
 
@@ -132,7 +135,13 @@ jobs:
 
       - name: Configure CMake
         run: |
-          source $HOME/.cargo/env 2>/dev/null || true
+          # Ensure Rust is available for lance builds
+          if [ "${{ matrix.need_rust }}" = "true" ]; then
+            export PATH="$HOME/.cargo/bin:$PATH"
+            echo "Rust toolchain check:"
+            rustc --version || { echo "ERROR: Rust not found!"; exit 1; }
+            cargo --version || { echo "ERROR: Cargo not found!"; exit 1; }
+          fi
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=/home/runner/dependencies \
@@ -144,7 +153,10 @@ jobs:
 
       - name: Build project
         run: |
-          source $HOME/.cargo/env 2>/dev/null || true
+          # Ensure Rust is available for lance builds
+          if [ "${{ matrix.need_rust }}" = "true" ]; then
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
           cmake --build build -j$(nproc)
 
       - name: Verify executable and tests
@@ -155,48 +167,6 @@ jobs:
           if [ "${{ matrix.enable_lance }}" = "ON" ]; then
             test -f build/tests/lance_writer_test && echo "✓ lance_writer_test created" || echo "✗ lance_writer_test missing"
           fi
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tpch-benchmark-${{ matrix.config }}
-          path: |
-            build/tpch_benchmark
-            build/tests/*_test
-          retention-days: 1
-          if-no-files-found: error
-
-  unit-tests:
-    name: Unit Tests (${{ matrix.config }})
-    runs-on: ubuntu-22.04
-    needs: build-matrix
-    timeout-minutes: 10
-
-    strategy:
-      fail-fast: false
-      matrix:
-        config: [base, orc, lance]
-
-    steps:
-      - name: Checkout code (for dists.dss)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Checkout tpch submodule (for dists.dss)
-        run: git submodule update --init --depth 1 -- third_party/tpch
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: tpch-benchmark-${{ matrix.config }}
-          path: build
-
-      - name: Setup test executables
-        run: |
-          chmod +x build/tests/*_test 2>/dev/null || true
-          # Copy dists.dss to build directory for tests
-          cp -r third_party/tpch/dbgen/dists.dss build/
 
       - name: Run unit tests
         run: |
@@ -235,6 +205,16 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpch-benchmark-${{ matrix.config }}
+          path: |
+            build/tpch_benchmark
+            build/tests/*_test
+          retention-days: 1
+          if-no-files-found: error
 
   benchmark-suite:
     name: Benchmark Suite
@@ -612,18 +592,17 @@ jobs:
   status-check:
     name: Status Check
     runs-on: ubuntu-22.04
-    needs: [build-matrix, unit-tests]
+    needs: [build-matrix]
     if: always()
 
     steps:
       - name: Check build status
         run: |
-          if [ "${{ needs.build-matrix.result }}" = "success" ] && [ "${{ needs.unit-tests.result }}" = "success" ]; then
+          if [ "${{ needs.build-matrix.result }}" = "success" ]; then
             echo "✓ All builds and tests passed"
             exit 0
           else
             echo "✗ Some builds or tests failed"
             echo "Build status: ${{ needs.build-matrix.result }}"
-            echo "Test status: ${{ needs.unit-tests.result }}"
             exit 1
           fi
