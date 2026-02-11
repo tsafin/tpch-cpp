@@ -19,7 +19,13 @@ jobs:
   build-matrix:
     name: Build (${{ matrix.config }})
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 20
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/tpch-cpp-${{ matrix.config }}:latest
+      options: --user root
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     strategy:
       fail-fast: false
@@ -29,131 +35,43 @@ jobs:
             enable_orc: OFF
             enable_lance: OFF
             enable_tests: ON
-            need_rust: false
-            submodules: selective
+            deps_path: /opt/dependencies
           - config: orc
             enable_orc: ON
             enable_lance: OFF
             enable_tests: ON
-            need_rust: false
-            submodules: selective
+            deps_path: /opt/dependencies
           - config: lance
             enable_orc: OFF
             enable_lance: ON
             enable_tests: ON
-            need_rust: true
-            submodules: recursive
+            deps_path: /opt/dependencies
 
     steps:
       - name: Checkout code with submodules
         uses: actions/checkout@v4
         with:
-          submodules: ${{ matrix.submodules }}
+          submodules: recursive
           fetch-depth: 1
 
-      - name: Checkout selective submodules (non-lance builds)
-        if: matrix.submodules == 'selective'
+      - name: Verify pre-compiled dependencies
         run: |
-          git submodule update --init --depth 1 -- third_party/tpch
-          git submodule update --init --depth 1 -- third_party/googletest
-
-      - name: Install system dependencies
-        run: bash scripts/ci_install_deps.sh
-
-      - name: Install Rust toolchain (lance build only)
-        if: matrix.need_rust == true
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0
-          # Install mold linker for faster Rust builds
-          sudo apt-get update && sudo apt-get install -y mold
-
-      - name: Setup Rust environment (lance build only)
-        if: matrix.need_rust == true
-        run: |
-          source $HOME/.cargo/env
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          # Export for use in this step and save to GITHUB_ENV for subsequent steps
-          echo "RUSTC=$(which rustc)" >> $GITHUB_ENV
-          echo "CARGO=$(which cargo)" >> $GITHUB_ENV
-          rustc --version
-          cargo --version
-
-      - name: Create cache directories
-        run: |
-          mkdir -p /home/runner/dependencies/{lib,include}/{cmake,pkgconfig}
-          mkdir -p /home/runner/dependencies/include/{arrow,parquet,orc}
-
-      - name: Restore Lance FFI library cache (lance build only)
-        if: matrix.need_rust == true
-        id: cache-lance-lib
-        uses: actions/cache@v4
-        with:
-          path: build/rust/release/liblance_ffi.a
-          key: lance-lib-cache-${{ hashFiles('third_party/lance-ffi/Cargo.lock', 'third_party/lance-ffi/src/**') }}
-          restore-keys: lance-lib-cache-
-
-      - name: Update cached library timestamp (lance build only)
-        if: matrix.need_rust == true && steps.cache-lance-lib.outputs.cache-hit == 'true'
-        run: |
-          echo "Cache hit - updating library timestamp to skip rebuild"
-          mkdir -p build/rust/release
-          touch build/rust/release/liblance_ffi.a
-          ls -lh build/rust/release/liblance_ffi.a
-
-      - name: Restore Arrow and ORC cache
-        if: matrix.enable_orc == 'ON'
-        id: cache-arrow-orc
-        uses: actions/cache@v4
-        with:
-          path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/liborc*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/cmake/orc
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/lib/pkgconfig/liborc*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
-            /home/runner/dependencies/include/orc
-          key: arrow-orc-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
-          restore-keys: arrow-orc-cache-
-
-      - name: Restore Arrow and Parquet cache (non-ORC builds)
-        if: matrix.enable_orc == 'OFF'
-        id: cache-arrow-parquet
-        uses: actions/cache@v4
-        with:
-          path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
-          key: arrow-parquet-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
-          restore-keys: arrow-parquet-cache-
-
-      - name: Build Arrow and ORC from source
-        if: matrix.enable_orc == 'ON' && steps.cache-arrow-orc.outputs.cache-hit != 'true'
-        run: bash scripts/ci_build_arrow_and_orc.sh ON /home/runner/dependencies
-
-      - name: Build Arrow and Parquet from source (non-ORC builds)
-        if: matrix.enable_orc == 'OFF' && steps.cache-arrow-parquet.outputs.cache-hit != 'true'
-        run: bash scripts/ci_build_arrow_and_orc.sh OFF /home/runner/dependencies
+          echo "=== Checking pre-compiled dependencies in Docker image ==="
+          ls -lh /opt/dependencies/lib/libarrow* /opt/dependencies/lib/libparquet* || true
+          if [ "${{ matrix.config }}" = "orc" ]; then
+            ls -lh /opt/dependencies/lib/liborc* || true
+          fi
+          if [ "${{ matrix.config }}" = "lance" ]; then
+            ls -lh /opt/dependencies/lib/liblance_ffi.a || true
+            rustc --version
+            cargo --version
+          fi
 
       - name: Configure CMake
         run: |
-          # Ensure Rust is available for lance builds
-          if [ "${{ matrix.need_rust }}" = "true" ]; then
-            export PATH="$HOME/.cargo/bin:$PATH"
-            echo "Rust toolchain check:"
-            rustc --version || { echo "ERROR: Rust not found!"; exit 1; }
-            cargo --version || { echo "ERROR: Cargo not found!"; exit 1; }
-          fi
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=/home/runner/dependencies \
+            -DCMAKE_PREFIX_PATH=${{ matrix.deps_path }} \
             -DTPCH_ENABLE_ORC=${{ matrix.enable_orc }} \
             -DTPCH_ENABLE_LANCE=${{ matrix.enable_lance }} \
             -DTPCH_ENABLE_ASYNC_IO=ON \
@@ -161,12 +79,7 @@ jobs:
             -DTPCH_BUILD_TESTS=${{ matrix.enable_tests }}
 
       - name: Build project
-        run: |
-          # Ensure Rust is available for lance builds
-          if [ "${{ matrix.need_rust }}" = "true" ]; then
-            export PATH="$HOME/.cargo/bin:$PATH"
-          fi
-          cmake --build build -j$(nproc)
+        run: cmake --build build -j$(nproc)
 
       - name: Verify executable and tests
         run: |
@@ -319,24 +232,24 @@ jobs:
 
       - name: Create cache directories
         run: |
-          mkdir -p /home/runner/dependencies/{lib,include}/{cmake,pkgconfig}
-          mkdir -p /home/runner/dependencies/include/{arrow,parquet,orc}
+          mkdir -p /opt/dependencies/{lib,include}/{cmake,pkgconfig}
+          mkdir -p /opt/dependencies/include/{arrow,parquet,orc}
 
       - name: Restore Arrow and ORC cache (ORC builds)
         if: matrix.build == 'orc'
         uses: actions/cache@v4
         with:
           path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/liborc*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/cmake/orc
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/lib/pkgconfig/liborc*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
-            /home/runner/dependencies/include/orc
+            /opt/dependencies/lib/libarrow*
+            /opt/dependencies/lib/libparquet*
+            /opt/dependencies/lib/liborc*
+            /opt/dependencies/lib/cmake/arrow
+            /opt/dependencies/lib/cmake/orc
+            /opt/dependencies/lib/pkgconfig/arrow*
+            /opt/dependencies/lib/pkgconfig/liborc*
+            /opt/dependencies/include/arrow
+            /opt/dependencies/include/parquet
+            /opt/dependencies/include/orc
           key: arrow-orc-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
           restore-keys: arrow-orc-cache-
 
@@ -345,12 +258,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
+            /opt/dependencies/lib/libarrow*
+            /opt/dependencies/lib/libparquet*
+            /opt/dependencies/lib/cmake/arrow
+            /opt/dependencies/lib/pkgconfig/arrow*
+            /opt/dependencies/include/arrow
+            /opt/dependencies/include/parquet
           key: arrow-parquet-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
           restore-keys: arrow-parquet-cache-
 
@@ -365,7 +278,7 @@ jobs:
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
           # Setup library path to use cached dependencies
-          export LD_LIBRARY_PATH=/home/runner/dependencies/lib:$LD_LIBRARY_PATH
+          export LD_LIBRARY_PATH=/opt/dependencies/lib:$LD_LIBRARY_PATH
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Verify executable supports required format
@@ -390,10 +303,10 @@ jobs:
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
           echo ""
           echo "=== Searching for libparquet ==="
-          find /home/runner/dependencies -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found"
+          find /opt/dependencies -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found"
           echo ""
           echo "=== Searching for liborc ==="
-          find /home/runner/dependencies -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found"
+          find /opt/dependencies -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found"
 
       - name: Run format coverage benchmark
         run: |
@@ -456,19 +369,19 @@ jobs:
 
       - name: Create cache directories
         run: |
-          mkdir -p /home/runner/dependencies/{lib,include}/{cmake,pkgconfig}
-          mkdir -p /home/runner/dependencies/include/{arrow,parquet,orc}
+          mkdir -p /opt/dependencies/{lib,include}/{cmake,pkgconfig}
+          mkdir -p /opt/dependencies/include/{arrow,parquet,orc}
 
       - name: Restore Arrow and Parquet cache
         uses: actions/cache@v4
         with:
           path: |
-            /home/runner/dependencies/lib/libarrow*
-            /home/runner/dependencies/lib/libparquet*
-            /home/runner/dependencies/lib/cmake/arrow
-            /home/runner/dependencies/lib/pkgconfig/arrow*
-            /home/runner/dependencies/include/arrow
-            /home/runner/dependencies/include/parquet
+            /opt/dependencies/lib/libarrow*
+            /opt/dependencies/lib/libparquet*
+            /opt/dependencies/lib/cmake/arrow
+            /opt/dependencies/lib/pkgconfig/arrow*
+            /opt/dependencies/include/arrow
+            /opt/dependencies/include/parquet
           key: arrow-parquet-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
           restore-keys: arrow-parquet-cache-
 
@@ -483,7 +396,7 @@ jobs:
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
           # Setup library path to use cached dependencies
-          export LD_LIBRARY_PATH=/home/runner/dependencies/lib:$LD_LIBRARY_PATH
+          export LD_LIBRARY_PATH=/opt/dependencies/lib:$LD_LIBRARY_PATH
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Verify executable supports required format

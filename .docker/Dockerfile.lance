@@ -1,0 +1,42 @@
+# Lance Docker image extending base with Rust and Lance FFI for TPC-H benchmarks
+FROM ghcr.io/tsafin/tpch-cpp-base:latest
+
+LABEL org.opencontainers.image.source="https://github.com/tsafin/tpch-cpp"
+LABEL org.opencontainers.image.description="TPC-H C++ Lance Build Environment with Arrow/Parquet/Lance"
+LABEL maintainer="tsafin"
+
+ENV INSTALL_PREFIX=/opt/dependencies
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+ENV RUST_VERSION=1.93.0
+
+# Install Rust toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain ${RUST_VERSION} --profile minimal --no-modify-path && \
+    chmod -R a+w ${RUSTUP_HOME} ${CARGO_HOME}
+
+# Install mold linker for faster Rust builds
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends mold && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy Lance FFI source
+WORKDIR /tmp/build
+COPY third_party/lance-ffi third_party/lance-ffi
+
+# Build Lance FFI library
+RUN cd third_party/lance-ffi && \
+    cargo build --release && \
+    mkdir -p ${INSTALL_PREFIX}/lib && \
+    cp target/release/liblance_ffi.a ${INSTALL_PREFIX}/lib/ && \
+    cd /tmp && \
+    rm -rf /tmp/build third_party/lance-ffi/target
+
+# Verify installation
+RUN ls -lh ${INSTALL_PREFIX}/lib/liblance_ffi.a && \
+    rustc --version && \
+    cargo --version && \
+    echo "✓ Lance image with Arrow/Parquet/Lance FFI compiled successfully"
+
+WORKDIR /workspace
