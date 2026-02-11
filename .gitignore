@@ -54,6 +54,7 @@ third_party/dbgen/Makefile
 *~
 .DS_Store
 *.user
+*.code-workspace
 
 # Output files
 *.parquet
