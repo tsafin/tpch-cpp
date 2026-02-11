@@ -163,9 +163,6 @@ jobs:
           path: |
             build/tpch_benchmark
             build/tests/*_test
-            build/CTestTestfile.cmake
-            build/tests/CTestTestfile.cmake
-            build/tests/*_include.cmake
           retention-days: 1
           if-no-files-found: error
 
@@ -203,8 +200,41 @@ jobs:
 
       - name: Run unit tests
         run: |
-          cd build
-          ctest --output-on-failure --verbose
+          cd build/tests
+          
+          # Define which tests to run for each configuration
+          case "${{ matrix.config }}" in
+            base)
+              # Run common/core tests only in base build
+              TESTS="buffer_lifetime_manager_test dbgen_batch_iterator_test"
+              ;;
+            orc)
+              # ORC doesn't have format-specific tests yet, skip to avoid redundancy
+              TESTS=""
+              echo "No ORC-specific tests to run (common tests run in base config)"
+              ;;
+            lance)
+              # Run Lance-specific tests only
+              TESTS="lance_writer_test"
+              ;;
+            *)
+              echo "Unknown config: ${{ matrix.config }}"
+              exit 1
+              ;;
+          esac
+          
+          # Run the specified tests
+          for test_name in $TESTS; do
+            if [ -x "$test_name" ]; then
+              echo "============================"
+              echo "Running: $test_name"
+              echo "============================"
+              "./$test_name" --gtest_output=xml:"${test_name}_results.xml" || exit 1
+            else
+              echo "ERROR: Expected test executable not found: $test_name"
+              exit 1
+            fi
+          done
 
   benchmark-suite:
     name: Benchmark Suite
@@ -350,6 +380,22 @@ jobs:
           export LD_LIBRARY_PATH=/home/runner/dependencies/lib:$LD_LIBRARY_PATH
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
+      - name: Verify executable supports required format
+        run: |
+          echo "=== Verifying build artifact ==="
+          echo "Expected format: ${{ matrix.format }}"
+          echo "Expected build: ${{ matrix.build }}"
+          ./tpch_benchmark --help | head -20 || true
+          
+          # Verify the build supports the expected format
+          if [ "${{ matrix.format }}" = "lance" ]; then
+            if ./tpch_benchmark --format lance --help 2>&1 | grep -qi "unknown format"; then
+              echo "ERROR: Downloaded executable does not support lance format"
+              echo "This indicates the wrong build artifact was used"
+              exit 1
+            fi
+          fi
+
       - name: Verify library installation
         run: |
           echo "=== Current LD_LIBRARY_PATH ==="
@@ -451,6 +497,21 @@ jobs:
           # Setup library path to use cached dependencies
           export LD_LIBRARY_PATH=/home/runner/dependencies/lib:$LD_LIBRARY_PATH
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Verify executable supports required format
+        run: |
+          echo "=== Verifying build artifact ==="
+          echo "Expected format: ${{ matrix.format }}"
+          ./tpch_benchmark --help | head -20 || true
+          
+          # Verify the build supports the expected format
+          if [ "${{ matrix.format }}" = "lance" ]; then
+            if ./tpch_benchmark --format lance --help 2>&1 | grep -qi "unknown format"; then
+              echo "ERROR: Downloaded executable does not support lance format"
+              echo "This indicates the wrong build artifact was used"
+              exit 1
+            fi
+          fi
 
       - name: Run optimization benchmark
         run: |
