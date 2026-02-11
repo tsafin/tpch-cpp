@@ -104,7 +104,7 @@ jobs:
             /home/runner/dependencies/include/arrow
             /home/runner/dependencies/include/parquet
             /home/runner/dependencies/include/orc
-          key: arrow-orc-cache-${{ github.sha }}
+          key: arrow-orc-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
           restore-keys: arrow-orc-cache-
 
       - name: Restore Arrow and Parquet cache (non-ORC builds)
@@ -119,7 +119,7 @@ jobs:
             /home/runner/dependencies/lib/pkgconfig/arrow*
             /home/runner/dependencies/include/arrow
             /home/runner/dependencies/include/parquet
-          key: arrow-parquet-cache-${{ github.sha }}
+          key: arrow-parquet-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
           restore-keys: arrow-parquet-cache-
 
       - name: Build Arrow and ORC from source
@@ -163,6 +163,8 @@ jobs:
           path: |
             build/tpch_benchmark
             build/tests/*_test
+            build/CTestTestfile.cmake
+            build/tests/CTestTestfile.cmake
           retention-days: 1
           if-no-files-found: error
 
@@ -316,7 +318,7 @@ jobs:
             /home/runner/dependencies/include/arrow
             /home/runner/dependencies/include/parquet
             /home/runner/dependencies/include/orc
-          key: arrow-orc-cache-${{ github.sha }}
+          key: arrow-orc-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
           restore-keys: arrow-orc-cache-
 
       - name: Restore Arrow and Parquet cache (non-ORC builds)
@@ -330,7 +332,7 @@ jobs:
             /home/runner/dependencies/lib/pkgconfig/arrow*
             /home/runner/dependencies/include/arrow
             /home/runner/dependencies/include/parquet
-          key: arrow-parquet-cache-${{ github.sha }}
+          key: arrow-parquet-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
           restore-keys: arrow-parquet-cache-
 
       - name: Download build artifact
@@ -359,19 +361,27 @@ jobs:
           find /home/runner/dependencies -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found"
 
       - name: Run format coverage benchmark
-        continue-on-error: true
         run: |
-          timeout 600 ./tpch_benchmark \
+          if ! timeout 600 ./tpch_benchmark \
             --use-dbgen \
             --scale-factor 1 \
             --format ${{ matrix.format }} \
             --table ${{ matrix.table }} \
             --output-dir benchmark-results/ \
-            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"
+            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"; then
+            echo "ERROR: Benchmark failed with exit code $?"
+            exit 1
+          fi
 
           # Fail if process dumped core
           if grep -q "dumped core" "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"; then
             echo "ERROR: Benchmark crashed with core dump"
+            exit 1
+          fi
+
+          # Fail if unsupported format
+          if grep -qi "unknown format\|unsupported format\|not supported" "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log"; then
+            echo "ERROR: Format ${{ matrix.format }} not supported by this build"
             exit 1
           fi
 
@@ -424,7 +434,7 @@ jobs:
             /home/runner/dependencies/lib/pkgconfig/arrow*
             /home/runner/dependencies/include/arrow
             /home/runner/dependencies/include/parquet
-          key: arrow-parquet-cache-${{ github.sha }}
+          key: arrow-parquet-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
           restore-keys: arrow-parquet-cache-
 
       - name: Download build artifact
@@ -442,7 +452,6 @@ jobs:
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Run optimization benchmark
-        continue-on-error: true
         run: |
           MODE_FLAGS=""
           if [ "${{ matrix.mode }}" = "zero-copy" ]; then
@@ -451,18 +460,27 @@ jobs:
             MODE_FLAGS="--true-zero-copy"
           fi
 
-          timeout 600 ./tpch_benchmark \
+          if ! timeout 600 ./tpch_benchmark \
             --use-dbgen \
             --scale-factor 1 \
             --format ${{ matrix.format }} \
             --table ${{ matrix.table }} \
             --output-dir benchmark-results/ \
             $MODE_FLAGS \
-            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"
+            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"; then
+            echo "ERROR: Benchmark failed with exit code $?"
+            exit 1
+          fi
 
           # Fail if process dumped core
           if grep -q "dumped core" "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"; then
             echo "ERROR: Benchmark crashed with core dump"
+            exit 1
+          fi
+
+          # Fail if unsupported format
+          if grep -qi "unknown format\|unsupported format\|not supported" "benchmark-results/${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"; then
+            echo "ERROR: Format ${{ matrix.format }} not supported by this build"
             exit 1
           fi
 
