@@ -65,6 +65,8 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          # Install mold linker for faster Rust builds
+          sudo apt-get update && sudo apt-get install -y mold
 
       - name: Verify Rust installation
         if: matrix.need_rust == true
