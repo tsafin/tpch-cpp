@@ -165,6 +165,7 @@ jobs:
             build/tests/*_test
             build/CTestTestfile.cmake
             build/tests/CTestTestfile.cmake
+            build/tests/*_include.cmake
           retention-days: 1
           if-no-files-found: error
 
