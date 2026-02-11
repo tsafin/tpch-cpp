@@ -170,8 +170,6 @@ jobs:
 
       - name: Run unit tests
         run: |
-          cd build/tests
-          
           # Define which tests to run for each configuration
           case "${{ matrix.config }}" in
             base)
@@ -193,15 +191,16 @@ jobs:
               ;;
           esac
           
-          # Run the specified tests
+          # Run the specified tests from build directory (where dists.dss exists)
+          cd build
           for test_name in $TESTS; do
-            if [ -x "$test_name" ]; then
+            if [ -x "tests/$test_name" ]; then
               echo "============================"
               echo "Running: $test_name"
               echo "============================"
-              "./$test_name" --gtest_output=xml:"${test_name}_results.xml" || exit 1
+              "./tests/$test_name" --gtest_output=xml:"tests/${test_name}_results.xml" || exit 1
             else
-              echo "ERROR: Expected test executable not found: $test_name"
+              echo "ERROR: Expected test executable not found: tests/$test_name"
               exit 1
             fi
           done
