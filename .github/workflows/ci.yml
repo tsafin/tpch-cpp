@@ -83,13 +83,22 @@ jobs:
           mkdir -p /home/runner/dependencies/{lib,include}/{cmake,pkgconfig}
           mkdir -p /home/runner/dependencies/include/{arrow,parquet,orc}
 
-      - name: Restore Cargo cache (lance build only)
+      - name: Restore Lance FFI library cache (lance build only)
         if: matrix.need_rust == true
+        id: cache-lance-lib
         uses: actions/cache@v4
         with:
-          path: build/rust/
-          key: cargo-cache-${{ hashFiles('third_party/lance-ffi/Cargo.lock') }}
-          restore-keys: cargo-cache-
+          path: build/rust/release/liblance_ffi.a
+          key: lance-lib-cache-${{ hashFiles('third_party/lance-ffi/Cargo.lock', 'third_party/lance-ffi/src/**') }}
+          restore-keys: lance-lib-cache-
+
+      - name: Update cached library timestamp (lance build only)
+        if: matrix.need_rust == true && steps.cache-lance-lib.outputs.cache-hit == 'true'
+        run: |
+          echo "Cache hit - updating library timestamp to skip rebuild"
+          mkdir -p build/rust/release
+          touch build/rust/release/liblance_ffi.a
+          ls -lh build/rust/release/liblance_ffi.a
 
       - name: Restore Arrow and ORC cache
         if: matrix.enable_orc == 'ON'
