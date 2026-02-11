@@ -1,0 +1,96 @@
+# Base Docker image with Arrow/Parquet pre-compiled for TPC-H benchmarks
+# This image includes all system dependencies and pre-built Arrow + Parquet libraries
+FROM ubuntu:22.04
+
+LABEL org.opencontainers.image.source="https://github.com/tsafin/tpch-cpp"
+LABEL org.opencontainers.image.description="TPC-H C++ Base Build Environment with Arrow/Parquet"
+LABEL maintainer="tsafin"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV INSTALL_PREFIX=/opt/dependencies
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools
+    cmake \
+    build-essential \
+    git \
+    pkg-config \
+    wget \
+    ca-certificates \
+    # Arrow/Parquet dependencies
+    libboost-all-dev \
+    rapidjson-dev \
+    libbrotli-dev \
+    libthrift-dev \
+    libsnappy-dev \
+    liblz4-dev \
+    libzstd-dev \
+    zlib1g-dev \
+    # Protobuf (for ORC)
+    libprotobuf-dev \
+    protobuf-compiler \
+    libtool \
+    # Async I/O
+    liburing-dev \
+    # Additional dependencies
+    libre2-dev \
+    # Python for benchmark parsing
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create installation directory
+RUN mkdir -p ${INSTALL_PREFIX}/{lib,include}
+
+# Copy build scripts
+WORKDIR /tmp/build
+COPY scripts/build_arrow_from_source.sh scripts/build_arrow_from_source.sh
+COPY scripts/build_orc_from_source.sh scripts/build_orc_from_source.sh
+
+# Copy submodules (Arrow and xsimd)
+COPY third_party/arrow third_party/arrow
+COPY third_party/xsimd third_party/xsimd
+
+# Build and install xsimd
+RUN mkdir -p third_party/xsimd/build && \
+    cd third_party/xsimd/build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=/tmp/xsimd_install && \
+    make install
+
+# Build and install Arrow + Parquet (without protobuf to avoid ORC conflicts)
+RUN mkdir -p third_party/arrow/cpp/build && \
+    cd third_party/arrow/cpp/build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
+        -DCMAKE_PREFIX_PATH=/tmp/xsimd_install \
+        -DARROW_WITH_SNAPPY=ON \
+        -DARROW_WITH_ZSTD=ON \
+        -DARROW_WITH_LZ4=ON \
+        -DARROW_WITH_ZLIB=ON \
+        -DARROW_PARQUET=ON \
+        -DARROW_BUILD_TESTS=OFF \
+        -DARROW_COMPUTE=ON \
+        -DARROW_FILESYSTEM=ON \
+        -DARROW_CSV=ON \
+        -DARROW_WITH_PROTOBUF=OFF \
+        -DARROW_ORC=OFF \
+        -DARROW_FLIGHT=OFF \
+        -DARROW_SUBSTRAIT=OFF && \
+    make -j$(nproc) && \
+    make install && \
+    cd /tmp && \
+    rm -rf /tmp/build /tmp/xsimd_install
+
+# Set up library path
+ENV LD_LIBRARY_PATH=${INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}
+ENV PKG_CONFIG_PATH=${INSTALL_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}
+ENV CMAKE_PREFIX_PATH=${INSTALL_PREFIX}
+
+WORKDIR /workspace
+
+# Verify installation
+RUN ldconfig && \
+    ls -lh ${INSTALL_PREFIX}/lib/libarrow* ${INSTALL_PREFIX}/lib/libparquet* && \
+    echo "✓ Base image with Arrow/Parquet compiled successfully"
