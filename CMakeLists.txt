@@ -239,63 +239,79 @@ configure_file(
 )
 message(STATUS "Copied dists.dss to build directory")
 
-# Build Rust FFI library for Lance support (if enabled)
+# Build or find Rust FFI library for Lance support (if enabled)
 if(TPCH_ENABLE_LANCE AND Lance_FOUND)
     set(LANCE_FFI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lance-ffi")
-    set(LANCE_FFI_BUILD_DIR "${CMAKE_BINARY_DIR}/rust")
-
-    # Determine output library path based on platform and Rust target
-    if(APPLE)
-        set(RUST_TARGET "aarch64-apple-darwin")
-        set(LANCE_FFI_LIB "${LANCE_FFI_BUILD_DIR}/${RUST_TARGET}/release/liblance_ffi.a")
-    else()
-        # Use default native build for Linux (x86_64-unknown-linux-gnu)
-        set(RUST_TARGET "")
-        set(LANCE_FFI_LIB "${LANCE_FFI_BUILD_DIR}/release/liblance_ffi.a")
-    endif()
-
     set(LANCE_FFI_LIB_FINAL "${CMAKE_BINARY_DIR}/liblance_ffi.a")
 
-    # Check for snap Rust - both cargo and rustc should come from snap together
-    find_program(SNAP_RUSTC rustc PATHS /snap/bin NO_DEFAULT_PATH)
-    if(SNAP_RUSTC)
-        message(STATUS "Detected Rust from snap: ${SNAP_RUSTC}")
-        set(RUSTC_ENV_VAR "${SNAP_RUSTC}")
+    # Check if pre-compiled library exists (e.g. in Docker CI image)
+    find_library(LANCE_FFI_PREBUILT lance_ffi PATHS "${CMAKE_PREFIX_PATH}/lib" NO_DEFAULT_PATH)
+
+    if(LANCE_FFI_PREBUILT)
+        message(STATUS "Using pre-compiled Lance FFI library: ${LANCE_FFI_PREBUILT}")
+        # Copy pre-compiled library to build directory for consistent path
+        add_custom_command(
+            OUTPUT "${LANCE_FFI_LIB_FINAL}"
+            COMMAND ${CMAKE_COMMAND} -E copy "${LANCE_FFI_PREBUILT}" "${LANCE_FFI_LIB_FINAL}"
+            DEPENDS "${LANCE_FFI_PREBUILT}"
+            COMMENT "Using pre-compiled Lance FFI library from ${LANCE_FFI_PREBUILT}"
+            VERBATIM
+        )
+        add_custom_target(lance_ffi ALL DEPENDS "${LANCE_FFI_LIB_FINAL}")
     else()
-        message(STATUS "Using system Rust compiler")
-        find_program(RUSTC_ENV_VAR rustc)
+        message(STATUS "Pre-compiled Lance FFI not found, building from source with Rust cargo")
+        set(LANCE_FFI_BUILD_DIR "${CMAKE_BINARY_DIR}/rust")
+
+        # Determine output library path based on platform and Rust target
+        if(APPLE)
+            set(RUST_TARGET "aarch64-apple-darwin")
+            set(LANCE_FFI_LIB "${LANCE_FFI_BUILD_DIR}/${RUST_TARGET}/release/liblance_ffi.a")
+        else()
+            # Use default native build for Linux (x86_64-unknown-linux-gnu)
+            set(RUST_TARGET "")
+            set(LANCE_FFI_LIB "${LANCE_FFI_BUILD_DIR}/release/liblance_ffi.a")
+        endif()
+
+        # Check for snap Rust - both cargo and rustc should come from snap together
+        find_program(SNAP_RUSTC rustc PATHS /snap/bin NO_DEFAULT_PATH)
+        if(SNAP_RUSTC)
+            message(STATUS "Detected Rust from snap: ${SNAP_RUSTC}")
+            set(RUSTC_ENV_VAR "${SNAP_RUSTC}")
+        else()
+            message(STATUS "Using system Rust compiler")
+            find_program(RUSTC_ENV_VAR rustc)
+        endif()
+
+        # Build Rust FFI library using cargo
+        # Note: Cargo target directory is set to build/rust to keep artifacts out of source tree
+        # RUSTC env var ensures correct rustc version is used (snap vs system)
+        set(CARGO_BUILD_CMD "env" "RUSTC=${RUSTC_ENV_VAR}"
+                "${Cargo_EXECUTABLE}" build --release
+                --manifest-path "${LANCE_FFI_DIR}/Cargo.toml"
+                --target-dir "${LANCE_FFI_BUILD_DIR}")
+
+        if(RUST_TARGET)
+            list(APPEND CARGO_BUILD_CMD --target "${RUST_TARGET}")
+        endif()
+
+        add_custom_command(
+            OUTPUT "${LANCE_FFI_LIB_FINAL}"
+            COMMAND ${CMAKE_COMMAND} -E echo "Building Lance FFI library with Rust cargo ..."
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${LANCE_FFI_BUILD_DIR}"
+            COMMAND ${CARGO_BUILD_CMD}
+            COMMAND ${CMAKE_COMMAND} -E copy "${LANCE_FFI_LIB}" "${LANCE_FFI_LIB_FINAL}"
+            WORKING_DIRECTORY "${LANCE_FFI_DIR}"
+            DEPENDS "${LANCE_FFI_DIR}/Cargo.toml"
+                    "${LANCE_FFI_DIR}/Cargo.lock"
+                    "${LANCE_FFI_DIR}/src/lib.rs"
+            COMMENT "Compiling Lance FFI library with Rust (target: ${RUST_TARGET})"
+            VERBATIM
+        )
+
+        add_custom_target(lance_ffi ALL DEPENDS "${LANCE_FFI_LIB_FINAL}")
+        message(STATUS "Rust FFI build configured for Lance support")
+        message(STATUS "  Rust target directory: ${LANCE_FFI_BUILD_DIR}")
     endif()
-
-    # Build Rust FFI library using cargo
-    # Note: Cargo target directory is set to build/rust to keep artifacts out of source tree
-    # All build artifacts go to CMAKE_BINARY_DIR/rust, NOT source tree
-    # On macOS, we specify the target triple to ensure correct output directory
-    # RUSTC env var ensures correct rustc version is used (snap vs system)
-    set(CARGO_BUILD_CMD "env" "RUSTC=${RUSTC_ENV_VAR}"
-            "${Cargo_EXECUTABLE}" build --release
-            --manifest-path "${LANCE_FFI_DIR}/Cargo.toml"
-            --target-dir "${LANCE_FFI_BUILD_DIR}")
-
-    if(RUST_TARGET)
-        list(APPEND CARGO_BUILD_CMD --target "${RUST_TARGET}")
-    endif()
-
-    add_custom_command(
-        OUTPUT "${LANCE_FFI_LIB_FINAL}"
-        COMMAND ${CMAKE_COMMAND} -E echo "Building Lance FFI library with Rust cargo ..."
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${LANCE_FFI_BUILD_DIR}"
-        COMMAND ${CARGO_BUILD_CMD}
-        COMMAND ${CMAKE_COMMAND} -E copy "${LANCE_FFI_LIB}" "${LANCE_FFI_LIB_FINAL}"
-        WORKING_DIRECTORY "${LANCE_FFI_DIR}"
-        DEPENDS "${LANCE_FFI_DIR}/Cargo.toml"
-                "${LANCE_FFI_DIR}/Cargo.lock"
-                "${LANCE_FFI_DIR}/src/lib.rs"
-        COMMENT "Compiling Lance FFI library with Rust (target: ${RUST_TARGET})"
-        VERBATIM
-    )
-
-    # Create custom target for Rust build
-    add_custom_target(lance_ffi ALL DEPENDS "${LANCE_FFI_LIB_FINAL}")
 
     # Import the Rust library as an external target
     add_library(lance_ffi_lib STATIC IMPORTED GLOBAL)
@@ -304,8 +320,6 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
     )
     add_dependencies(lance_ffi_lib lance_ffi)
 
-    message(STATUS "Rust FFI build configured for Lance support")
-    message(STATUS "  Rust target directory: ${LANCE_FFI_BUILD_DIR}")
     message(STATUS "  Output library: ${LANCE_FFI_LIB_FINAL}")
 endif()
 
