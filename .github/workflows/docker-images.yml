@@ -114,10 +114,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:latest
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:buildcache
             type=gha
           cache-to: |
-            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:latest,mode=max
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:buildcache,mode=max
             type=gha,mode=max
 
   build-orc:
@@ -170,11 +170,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.IMAGE_PREFIX }}-orc:latest
-            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:latest
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-orc:buildcache
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:buildcache
             type=gha
           cache-to: |
-            type=registry,ref=${{ env.IMAGE_PREFIX }}-orc:latest,mode=max
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-orc:buildcache,mode=max
             type=gha,mode=max
 
   build-lance:
@@ -227,9 +227,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.IMAGE_PREFIX }}-lance:latest
-            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:latest
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-lance:buildcache
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:buildcache
             type=gha
           cache-to: |
-            type=registry,ref=${{ env.IMAGE_PREFIX }}-lance:latest,mode=max
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-lance:buildcache,mode=max
             type=gha,mode=max
