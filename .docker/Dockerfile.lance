@@ -21,9 +21,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends mold && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy Lance FFI source
+# Copy Lance FFI source and Lance dependency
 WORKDIR /tmp/build
 COPY third_party/lance-ffi third_party/lance-ffi
+COPY third_party/lance third_party/lance
 
 # Build Lance FFI library
 RUN cd third_party/lance-ffi && \
