@@ -51,16 +51,19 @@ jobs:
               - 'scripts/build_arrow_from_source.sh'
               - 'third_party/arrow/**'
               - 'third_party/xsimd/**'
+              - '.github/workflows/docker-images.yml'
             orc:
               - '.docker/Dockerfile.orc'
               - '.docker/Dockerfile.base'
               - 'scripts/build_orc_from_source.sh'
               - 'third_party/orc/**'
+              - '.github/workflows/docker-images.yml'
             lance:
               - '.docker/Dockerfile.lance'
               - '.docker/Dockerfile.base'
               - 'third_party/lance-ffi/**'
               - 'third_party/lance/**'
+              - '.github/workflows/docker-images.yml'
 
   build-base:
     name: Build Base Image
