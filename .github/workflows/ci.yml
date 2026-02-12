@@ -112,7 +112,7 @@ jobs:
               exit 1
               ;;
           esac
-          
+
           # Run the specified tests from build directory (where dists.dss exists)
           cd build
           for test_name in $TESTS; do
@@ -142,6 +142,12 @@ jobs:
     runs-on: ubuntu-22.04
     needs: build-matrix
     timeout-minutes: 20
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/tpch-cpp-${{ matrix.build }}:latest
+      options: --user root
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     strategy:
       fail-fast: false
@@ -225,47 +231,9 @@ jobs:
           fetch-depth: 1
 
       - name: Checkout tpch submodule (for dists.dss)
-        run: git submodule update --init --depth 1 -- third_party/tpch
-
-      - name: Install dependencies
-        run: bash scripts/ci_install_deps.sh
-
-      - name: Create cache directories
         run: |
-          mkdir -p /opt/dependencies/{lib,include}/{cmake,pkgconfig}
-          mkdir -p /opt/dependencies/include/{arrow,parquet,orc}
-
-      - name: Restore Arrow and ORC cache (ORC builds)
-        if: matrix.build == 'orc'
-        uses: actions/cache@v4
-        with:
-          path: |
-            /opt/dependencies/lib/libarrow*
-            /opt/dependencies/lib/libparquet*
-            /opt/dependencies/lib/liborc*
-            /opt/dependencies/lib/cmake/arrow
-            /opt/dependencies/lib/cmake/orc
-            /opt/dependencies/lib/pkgconfig/arrow*
-            /opt/dependencies/lib/pkgconfig/liborc*
-            /opt/dependencies/include/arrow
-            /opt/dependencies/include/parquet
-            /opt/dependencies/include/orc
-          key: arrow-orc-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
-          restore-keys: arrow-orc-cache-
-
-      - name: Restore Arrow and Parquet cache (non-ORC builds)
-        if: matrix.build != 'orc'
-        uses: actions/cache@v4
-        with:
-          path: |
-            /opt/dependencies/lib/libarrow*
-            /opt/dependencies/lib/libparquet*
-            /opt/dependencies/lib/cmake/arrow
-            /opt/dependencies/lib/pkgconfig/arrow*
-            /opt/dependencies/include/arrow
-            /opt/dependencies/include/parquet
-          key: arrow-parquet-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
-          restore-keys: arrow-parquet-cache-
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule update --init --depth 1 -- third_party/tpch
 
       - name: Download build artifact
         uses: actions/download-artifact@v4
@@ -277,7 +245,6 @@ jobs:
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
-          # Setup library path to use cached dependencies
           export LD_LIBRARY_PATH=/opt/dependencies/lib:$LD_LIBRARY_PATH
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
@@ -287,29 +254,12 @@ jobs:
           echo "Expected format: ${{ matrix.format }}"
           echo "Expected build: ${{ matrix.build }}"
           ./tpch_benchmark --help | head -20 || true
-          
-          # Verify the build supports the expected format
-          if [ "${{ matrix.format }}" = "lance" ]; then
-            if ./tpch_benchmark --format lance --help 2>&1 | grep -qi "unknown format"; then
-              echo "ERROR: Downloaded executable does not support lance format"
-              echo "This indicates the wrong build artifact was used"
-              exit 1
-            fi
-          fi
-
-      - name: Verify library installation
-        run: |
-          echo "=== Current LD_LIBRARY_PATH ==="
-          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-          echo ""
-          echo "=== Searching for libparquet ==="
-          find /opt/dependencies -name "libparquet*" 2>/dev/null | head -5 || echo "libparquet not found"
-          echo ""
-          echo "=== Searching for liborc ==="
-          find /opt/dependencies -name "liborc*" 2>/dev/null | head -5 || echo "liborc not found"
 
       - name: Run format coverage benchmark
         run: |
+          # Copy dists.dss to current directory (required by dbgen)
+          cp third_party/tpch/dbgen/dists.dss . 2>/dev/null || true
+
           if ! timeout 600 ./tpch_benchmark \
             --use-dbgen \
             --scale-factor 1 \
@@ -347,13 +297,128 @@ jobs:
     runs-on: ubuntu-22.04
     needs: build-matrix
     timeout-minutes: 20
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/tpch-cpp-${{ matrix.image }}:latest
+      options: --user root
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     strategy:
       fail-fast: false
       matrix:
-        format: [parquet, lance]
-        mode: [baseline, zero-copy, true-zero-copy]
-        table: [lineitem, orders, part]
+        include:
+          # Parquet benchmarks use base image
+          - format: parquet
+            mode: baseline
+            table: lineitem
+            image: base
+          - format: parquet
+            mode: baseline
+            table: orders
+            image: base
+          - format: parquet
+            mode: baseline
+            table: part
+            image: base
+          - format: parquet
+            mode: zero-copy
+            table: lineitem
+            image: base
+          - format: parquet
+            mode: zero-copy
+            table: orders
+            image: base
+          - format: parquet
+            mode: zero-copy
+            table: part
+            image: base
+          - format: parquet
+            mode: true-zero-copy
+            table: lineitem
+            image: base
+          - format: parquet
+            mode: true-zero-copy
+            table: orders
+            image: base
+          - format: parquet
+            mode: true-zero-copy
+            table: part
+            image: base
+          # ORC benchmarks use orc image
+          - format: orc
+            mode: baseline
+            table: lineitem
+            image: orc
+          - format: orc
+            mode: baseline
+            table: orders
+            image: orc
+          - format: orc
+            mode: baseline
+            table: part
+            image: orc
+          - format: orc
+            mode: zero-copy
+            table: lineitem
+            image: orc
+          - format: orc
+            mode: zero-copy
+            table: orders
+            image: orc
+          - format: orc
+            mode: zero-copy
+            table: part
+            image: orc
+          - format: orc
+            mode: true-zero-copy
+            table: lineitem
+            image: orc
+          - format: orc
+            mode: true-zero-copy
+            table: orders
+            image: orc
+          - format: orc
+            mode: true-zero-copy
+            table: part
+            image: orc
+          # Lance benchmarks use lance image
+          - format: lance
+            mode: baseline
+            table: lineitem
+            image: lance
+          - format: lance
+            mode: baseline
+            table: orders
+            image: lance
+          - format: lance
+            mode: baseline
+            table: part
+            image: lance
+          - format: lance
+            mode: zero-copy
+            table: lineitem
+            image: lance
+          - format: lance
+            mode: zero-copy
+            table: orders
+            image: lance
+          - format: lance
+            mode: zero-copy
+            table: part
+            image: lance
+          - format: lance
+            mode: true-zero-copy
+            table: lineitem
+            image: lance
+          - format: lance
+            mode: true-zero-copy
+            table: orders
+            image: lance
+          - format: lance
+            mode: true-zero-copy
+            table: part
+            image: lance
 
     steps:
       - name: Checkout code (for dists.dss and scripts)
@@ -362,40 +427,20 @@ jobs:
           fetch-depth: 1
 
       - name: Checkout tpch submodule (for dists.dss)
-        run: git submodule update --init --depth 1 -- third_party/tpch
-
-      - name: Install dependencies
-        run: bash scripts/ci_install_deps.sh
-
-      - name: Create cache directories
         run: |
-          mkdir -p /opt/dependencies/{lib,include}/{cmake,pkgconfig}
-          mkdir -p /opt/dependencies/include/{arrow,parquet,orc}
-
-      - name: Restore Arrow and Parquet cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            /opt/dependencies/lib/libarrow*
-            /opt/dependencies/lib/libparquet*
-            /opt/dependencies/lib/cmake/arrow
-            /opt/dependencies/lib/pkgconfig/arrow*
-            /opt/dependencies/include/arrow
-            /opt/dependencies/include/parquet
-          key: arrow-parquet-cache-${{ hashFiles('.gitmodules', 'scripts/ci_build_arrow_and_orc.sh') }}
-          restore-keys: arrow-parquet-cache-
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule update --init --depth 1 -- third_party/tpch
 
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: tpch-benchmark-${{ matrix.format == 'parquet' && 'base' || 'lance' }}
+          name: tpch-benchmark-${{ matrix.image }}
           path: .
 
       - name: Setup benchmark executable
         run: |
           chmod +x tpch_benchmark
           mkdir -p benchmark-results
-          # Setup library path to use cached dependencies
           export LD_LIBRARY_PATH=/opt/dependencies/lib:$LD_LIBRARY_PATH
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
@@ -404,18 +449,12 @@ jobs:
           echo "=== Verifying build artifact ==="
           echo "Expected format: ${{ matrix.format }}"
           ./tpch_benchmark --help | head -20 || true
-          
-          # Verify the build supports the expected format
-          if [ "${{ matrix.format }}" = "lance" ]; then
-            if ./tpch_benchmark --format lance --help 2>&1 | grep -qi "unknown format"; then
-              echo "ERROR: Downloaded executable does not support lance format"
-              echo "This indicates the wrong build artifact was used"
-              exit 1
-            fi
-          fi
 
       - name: Run optimization benchmark
         run: |
+          # Copy dists.dss to current directory (required by dbgen)
+          cp third_party/tpch/dbgen/dists.dss . 2>/dev/null || true
+
           MODE_FLAGS=""
           if [ "${{ matrix.mode }}" = "zero-copy" ]; then
             MODE_FLAGS="--zero-copy"
