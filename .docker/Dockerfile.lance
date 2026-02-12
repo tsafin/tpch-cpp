@@ -11,15 +11,16 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
 ENV RUST_VERSION=1.93.0
 
-# Install Rust toolchain
-RUN wget -O - https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain ${RUST_VERSION} --profile minimal --no-modify-path && \
-    chmod -R a+w ${RUSTUP_HOME} ${CARGO_HOME}
-
 # Install mold linker for faster Rust builds
 RUN apt-get update && \
     apt-get install -y --no-install-recommends mold && \
     rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain with mold linker
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
+RUN wget -O - https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain ${RUST_VERSION} --profile minimal --no-modify-path && \
+    chmod -R a+w ${RUSTUP_HOME} ${CARGO_HOME}
 
 # Copy Lance FFI source and Lance dependency
 WORKDIR /tmp/build
