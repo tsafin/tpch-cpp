@@ -29,10 +29,49 @@ env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/tpch-cpp
 
 jobs:
+  check-changes:
+    name: Check Changed Files
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push'
+    outputs:
+      base: ${{ steps.filter.outputs.base }}
+      orc: ${{ steps.filter.outputs.orc }}
+      lance: ${{ steps.filter.outputs.lance }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check changed files
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            base:
+              - '.docker/Dockerfile.base'
+              - 'scripts/build_arrow_from_source.sh'
+              - 'third_party/arrow/**'
+              - 'third_party/xsimd/**'
+            orc:
+              - '.docker/Dockerfile.orc'
+              - '.docker/Dockerfile.base'
+              - 'scripts/build_orc_from_source.sh'
+              - 'third_party/orc/**'
+            lance:
+              - '.docker/Dockerfile.lance'
+              - '.docker/Dockerfile.base'
+              - 'third_party/lance-ffi/**'
+              - 'third_party/lance/**'
+
   build-base:
     name: Build Base Image
     runs-on: ubuntu-22.04
-    if: github.event_name == 'push' || github.event.inputs.image == 'all' || github.event.inputs.image == 'base'
+    needs: [check-changes]
+    if: |
+      always() &&
+      !cancelled() &&
+      (needs.check-changes.result == 'skipped' || needs.check-changes.outputs.base == 'true' ||
+       github.event.inputs.image == 'all' ||
+       github.event.inputs.image == 'base')
     permissions:
       contents: read
       packages: write
@@ -74,13 +113,21 @@ jobs:
           cache-from: |
             type=registry,ref=${{ env.IMAGE_PREFIX }}-base:latest
             type=gha
-          cache-to: type=gha,mode=max
+          cache-to: |
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-base:latest,mode=max
+            type=gha,mode=max
 
   build-orc:
     name: Build ORC Image
     runs-on: ubuntu-22.04
-    needs: build-base
-    if: github.event_name == 'push' || github.event.inputs.image == 'all' || github.event.inputs.image == 'orc'
+    needs: [check-changes, build-base]
+    if: |
+      always() &&
+      !cancelled() &&
+      (needs.check-changes.result == 'skipped' || needs.check-changes.outputs.orc == 'true' ||
+       github.event.inputs.image == 'all' ||
+       github.event.inputs.image == 'orc') &&
+      (needs.build-base.result == 'success' || needs.build-base.result == 'skipped')
     permissions:
       contents: read
       packages: write
@@ -123,13 +170,21 @@ jobs:
             type=registry,ref=${{ env.IMAGE_PREFIX }}-orc:latest
             type=registry,ref=${{ env.IMAGE_PREFIX }}-base:latest
             type=gha
-          cache-to: type=gha,mode=max
+          cache-to: |
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-orc:latest,mode=max
+            type=gha,mode=max
 
   build-lance:
     name: Build Lance Image
     runs-on: ubuntu-22.04
-    needs: build-base
-    if: github.event_name == 'push' || github.event.inputs.image == 'all' || github.event.inputs.image == 'lance'
+    needs: [check-changes, build-base]
+    if: |
+      always() &&
+      !cancelled() &&
+      (needs.check-changes.result == 'skipped' || needs.check-changes.outputs.lance == 'true' ||
+       github.event.inputs.image == 'all' ||
+       github.event.inputs.image == 'lance') &&
+      (needs.build-base.result == 'success' || needs.build-base.result == 'skipped')
     permissions:
       contents: read
       packages: write
@@ -172,4 +227,6 @@ jobs:
             type=registry,ref=${{ env.IMAGE_PREFIX }}-lance:latest
             type=registry,ref=${{ env.IMAGE_PREFIX }}-base:latest
             type=gha
-          cache-to: type=gha,mode=max
+          cache-to: |
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-lance:latest,mode=max
+            type=gha,mode=max
