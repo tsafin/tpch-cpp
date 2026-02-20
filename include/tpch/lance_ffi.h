@@ -31,6 +31,41 @@ typedef struct LanceWriter LanceWriter;
 LanceWriter* lance_writer_create(const char* uri, const void* arrow_schema_ptr, int use_streaming);
 
 /**
+ * Start a streaming write using an Arrow C Stream.
+ *
+ * This transfers ownership of the ArrowArrayStream pointer to the Rust FFI layer.
+ * The stream will be consumed until it signals end-of-stream.
+ *
+ * @param writer Pointer to LanceWriter from lance_writer_create()
+ * @param arrow_stream_ptr Pointer to ArrowArrayStream (C Stream Interface)
+ * @return 0 on success, non-zero error code on failure
+ *         1 = Null pointer
+ *         2 = Writer already closed
+ *         4 = Invalid stream
+ *         5 = Failed to start stream
+ */
+int lance_writer_start_stream(LanceWriter* writer, void* arrow_stream_ptr);
+
+/**
+ * Configure write parameters for Lance writes.
+ *
+ * Pass 0 for any numeric parameter to keep the default.
+ *
+ * @param writer Pointer to LanceWriter from lance_writer_create()
+ * @param max_rows_per_file Max rows per file (0 = default)
+ * @param max_rows_per_group Max rows per group (0 = default)
+ * @param max_bytes_per_file Max bytes per file (0 = default)
+ * @param skip_auto_cleanup 1 to skip auto cleanup on commit, 0 otherwise
+ * @return 0 on success, non-zero on failure
+ */
+int lance_writer_set_write_params(
+    LanceWriter* writer,
+    long long max_rows_per_file,
+    long long max_rows_per_group,
+    long long max_bytes_per_file,
+    int skip_auto_cleanup);
+
+/**
  * Write a batch of records to the Lance dataset.
  *
  * Imports Arrow C Data Interface structures and accumulates batches for

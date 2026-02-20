@@ -5,23 +5,18 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
-use std::pin::Pin;
 
 use arrow::ffi::{FFI_ArrowSchema, FFI_ArrowArray};
-use arrow::record_batch::RecordBatch;
+use arrow::ffi_stream::{FFI_ArrowArrayStream, ArrowArrayStreamReader};
+use arrow::record_batch::{RecordBatch, RecordBatchReader};
 use arrow::array::RecordBatchIterator;
 use arrow::datatypes::{Schema, DataType, Field};
 use arrow::error::ArrowError;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use futures::StreamExt;
 
 // Lance Dependencies
-use lance::dataset::{WriteParams, WriteMode};
-use lance::deps::datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-use lance::deps::datafusion::physical_plan::RecordBatchStream;
-use lance::deps::datafusion::error::DataFusionError;
+use lance::dataset::{WriteParams, WriteMode, CommitBuilder};
+use libc;
 
 fn apply_compression_metadata(schema: &Schema) -> Schema {
     let fields: Vec<Field> = schema.fields().iter().map(|field| {
@@ -52,11 +47,7 @@ enum WriterBackend {
         pending_row_count: usize,
     },
     Streaming {
-        // Use Option<Sender> to allow closing the channel
-        sender: Option<mpsc::Sender<Result<RecordBatch, ArrowError>>>,
-        // Receiver held here until the first batch arrives (lazy init)
-        receiver: Option<mpsc::Receiver<Result<RecordBatch, ArrowError>>>,
-        // Background task handle
+        // Background task handle (stream-based)
         task: Option<tokio::task::JoinHandle<Result<(), lance::Error>>>,
     },
 }
@@ -71,21 +62,38 @@ pub struct LanceWriterHandle {
     closed: bool,
     runtime: Runtime,
     backend: WriterBackend,
+    write_params: WriteParamsConfig,
 }
 
 const FLUSH_BATCH_THRESHOLD: usize = 200;
 const FLUSH_ROW_THRESHOLD: usize = 1_000_000;
+
+#[derive(Debug, Clone, Copy)]
+struct WriteParamsConfig {
+    max_rows_per_file: usize,
+    max_rows_per_group: usize,
+    max_bytes_per_file: usize,
+    skip_auto_cleanup: bool,
+}
+
+impl Default for WriteParamsConfig {
+    fn default() -> Self {
+        Self {
+            max_rows_per_file: 50_000_000,
+            max_rows_per_group: 8192,
+            max_bytes_per_file: 0,
+            skip_auto_cleanup: false,
+        }
+    }
+}
 
 impl LanceWriterHandle {
     fn new(uri: String, use_streaming: bool) -> Result<Self, String> {
         let runtime = Runtime::new().map_err(|e| format!("Failed to create Tokio runtime: {}", e))?;
 
         let backend = if use_streaming {
-            let (sender, receiver) = mpsc::channel(500);
             WriterBackend::Streaming {
-                sender: Some(sender),
-                receiver: Some(receiver),
-                task: None, // Lazy init
+                task: None, // Initialized when stream is provided
             }
         } else {
             WriterBackend::Buffered {
@@ -105,6 +113,7 @@ impl LanceWriterHandle {
             closed: false,
             runtime,
             backend,
+            write_params: WriteParamsConfig::default(),
         })
     }
 
@@ -129,6 +138,7 @@ impl LanceWriterHandle {
     }
 
     fn flush_batches(&mut self) -> Result<(), String> {
+        let config = self.write_params;
         match &mut self.backend {
             WriterBackend::Buffered { batches, dataset_initialized, fragment_count, pending_row_count } => {
                 if batches.is_empty() { return Ok(()); }
@@ -139,9 +149,7 @@ impl LanceWriterHandle {
                 let schema_ref = drain_batches[0].schema();
                 
                 let mode = if *dataset_initialized { WriteMode::Append } else { WriteMode::Overwrite };
-                let write_params = WriteParams {
-                    max_rows_per_group: 8192, max_rows_per_file: 50_000_000, mode, ..Default::default()
-                };
+                let write_params = build_write_params_from(config, mode);
 
                 let result = self.runtime.block_on(async {
                     let batch_iter = RecordBatchIterator::new(drain_batches.into_iter().map(Ok), schema_ref);
@@ -163,58 +171,116 @@ impl LanceWriterHandle {
         }
     }
 
-    fn send_batch(&mut self, batch: RecordBatch) -> Result<(), String> {
+    fn send_batch(&mut self, _batch: RecordBatch) -> Result<(), String> {
         match &mut self.backend {
-            WriterBackend::Streaming { sender, receiver, task } => {
-                // Lazy init
-                if task.is_none() {
-                     let rx = receiver.take().ok_or("Receiver is missing in streaming backend")?;
-                     let schema = batch.schema();
-                     let uri_clone = self.uri.clone();
-                     
-                     eprintln!("Lance FFI: Starting streaming background task with schema...");
-
-                     let task_handle = self.runtime.spawn(async move {
-                         // Convert Receiver into Stream<Item=Result<RecordBatch, DataFusionError>>
-                         let receiver_stream = ReceiverStream::new(rx);
-                         let mapped_stream = receiver_stream.map(|res| res.map_err(DataFusionError::from));
-                         
-                         // Create Adapter
-                         let stream_adapter = RecordBatchStreamAdapter::new(schema, mapped_stream);
-                         let source: Pin<Box<dyn RecordBatchStream + Send>> = Box::pin(stream_adapter);
-                         
-                         let write_params = WriteParams {
-                            max_rows_per_group: 8192,
-                            max_rows_per_file: 50_000_000,
-                            mode: WriteMode::Overwrite,
-                            ..Default::default()
-                        };
-
-                        lance::dataset::InsertBuilder::new(&uri_clone)
-                            .with_params(&write_params)
-                            .execute_stream(source)
-                            .await
-                            .map(|_| ())
-                     });
-
-                     *task = Some(task_handle);
-                }
-                
-                if let Some(tx) = sender {
-                    let result = self.runtime.block_on(async {
-                        tx.send(Ok(batch)).await
-                    });
-                    if result.is_err() {
-                        Err("Failed to send batch: receiver dropped".to_string())
-                    } else {
-                        Ok(())
-                    }
-                } else {
-                    Err("Sender is closed".to_string())
-                }
-            },
+            WriterBackend::Streaming { .. } => Err("Streaming backend expects ArrowArrayStream".to_string()),
             _ => Ok(())
         }
+    }
+
+    fn start_stream(&mut self, stream_ptr: *mut FFI_ArrowArrayStream) -> Result<(), String> {
+        let config = self.write_params;
+        match &mut self.backend {
+            WriterBackend::Streaming { task } => {
+                if task.is_some() {
+                    return Err("Streaming task already started".to_string());
+                }
+
+                if stream_ptr.is_null() {
+                    return Err("Null ArrowArrayStream".to_string());
+                }
+
+                let reader = unsafe { ArrowArrayStreamReader::from_raw(stream_ptr) }
+                    .map_err(|e| format!("Failed to import ArrowArrayStream: {}", e))?;
+                unsafe { libc::free(stream_ptr as *mut c_void) };
+
+                let compressed_schema = Arc::new(apply_compression_metadata(reader.schema().as_ref()));
+                let compression_reader = CompressionReader::new(reader, compressed_schema);
+                let source: Box<dyn RecordBatchReader + Send> = Box::new(compression_reader);
+                let uri_clone = self.uri.clone();
+                let write_params = build_write_params_from(config, WriteMode::Overwrite);
+
+                eprintln!("Lance FFI: Starting streaming background task with Arrow C Stream...");
+
+                let task_handle = self.runtime.spawn(async move {
+                    let transaction = lance::dataset::InsertBuilder::new(&uri_clone)
+                        .with_params(&write_params)
+                        .execute_uncommitted_stream(source)
+                        .await?;
+
+                    let mut commit_builder = CommitBuilder::new(&uri_clone)
+                        .use_stable_row_ids(write_params.enable_stable_row_ids)
+                        .enable_v2_manifest_paths(write_params.enable_v2_manifest_paths)
+                        .with_skip_auto_cleanup(write_params.skip_auto_cleanup);
+
+                    if let Some(version) = write_params.data_storage_version {
+                        commit_builder = commit_builder.with_storage_format(version);
+                    }
+                    if let Some(handler) = write_params.commit_handler.clone() {
+                        commit_builder = commit_builder.with_commit_handler(handler);
+                    }
+                    if let Some(store_params) = write_params.store_params.clone() {
+                        commit_builder = commit_builder.with_store_params(store_params);
+                    }
+                    if let Some(session) = write_params.session.clone() {
+                        commit_builder = commit_builder.with_session(session);
+                    }
+
+                    commit_builder.execute(transaction).await.map(|_| ())
+                });
+
+                *task = Some(task_handle);
+                Ok(())
+            },
+            _ => Err("Start stream only valid for streaming backend".to_string()),
+        }
+    }
+}
+
+fn build_write_params_from(config: WriteParamsConfig, mode: WriteMode) -> WriteParams {
+    let mut params = WriteParams {
+        mode,
+        ..Default::default()
+    };
+    if config.max_rows_per_file > 0 {
+        params.max_rows_per_file = config.max_rows_per_file;
+    }
+    if config.max_rows_per_group > 0 {
+        params.max_rows_per_group = config.max_rows_per_group;
+    }
+    if config.max_bytes_per_file > 0 {
+        params.max_bytes_per_file = config.max_bytes_per_file;
+    }
+    params.skip_auto_cleanup = config.skip_auto_cleanup;
+    params
+}
+
+struct CompressionReader {
+    inner: ArrowArrayStreamReader,
+    schema: Arc<Schema>,
+}
+
+impl CompressionReader {
+    fn new(inner: ArrowArrayStreamReader, schema: Arc<Schema>) -> Self {
+        Self { inner, schema }
+    }
+}
+
+impl RecordBatchReader for CompressionReader {
+    fn schema(&self) -> Arc<Schema> {
+        self.schema.clone()
+    }
+}
+
+impl Iterator for CompressionReader {
+    type Item = std::result::Result<RecordBatch, ArrowError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|res| {
+            res.and_then(|batch| {
+                RecordBatch::try_new(self.schema.clone(), batch.columns().to_vec())
+            })
+        })
     }
 }
 
@@ -285,6 +351,48 @@ pub extern "C" fn lance_writer_write_batch(writer_ptr: *mut LanceWriterHandle, a
 }
 
 #[no_mangle]
+pub extern "C" fn lance_writer_start_stream(writer_ptr: *mut LanceWriterHandle, arrow_stream_ptr: *const c_void) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if writer_ptr.is_null() || arrow_stream_ptr.is_null() { return 1; }
+        let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
+
+        let stream_ptr = arrow_stream_ptr as *mut FFI_ArrowArrayStream;
+        match writer.start_stream(stream_ptr) {
+            Ok(_) => 0,
+            Err(e) => { eprintln!("Stream Start Error: {}", e); 5 }
+        }
+    })).unwrap_or(3)
+}
+
+#[no_mangle]
+pub extern "C" fn lance_writer_set_write_params(
+    writer_ptr: *mut LanceWriterHandle,
+    max_rows_per_file: i64,
+    max_rows_per_group: i64,
+    max_bytes_per_file: i64,
+    skip_auto_cleanup: c_int,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if writer_ptr.is_null() { return 1; }
+        let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
+
+        if max_rows_per_file > 0 {
+            writer.write_params.max_rows_per_file = max_rows_per_file as usize;
+        }
+        if max_rows_per_group > 0 {
+            writer.write_params.max_rows_per_group = max_rows_per_group as usize;
+        }
+        if max_bytes_per_file > 0 {
+            writer.write_params.max_bytes_per_file = max_bytes_per_file as usize;
+        }
+        writer.write_params.skip_auto_cleanup = skip_auto_cleanup != 0;
+        0
+    })).unwrap_or(3)
+}
+
+#[no_mangle]
 pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         if writer_ptr.is_null() { return 1; }
@@ -293,9 +401,7 @@ pub extern "C" fn lance_writer_close(writer_ptr: *mut LanceWriterHandle) -> c_in
 
         let res = match &mut writer.backend {
             WriterBackend::Buffered { .. } => writer.flush_batches(),
-            WriterBackend::Streaming { sender, task, .. } => {
-                // Close channel
-                *sender = None;
+            WriterBackend::Streaming { task, .. } => {
                 if let Some(handle) = task.take() {
                     match writer.runtime.block_on(handle) {
                          Ok(Ok(_)) => Ok(()),
