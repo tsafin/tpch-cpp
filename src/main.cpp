@@ -7,6 +7,7 @@
 #include <getopt.h>
 #include <iomanip>
 #include <sys/stat.h>
+#include <filesystem>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -49,7 +50,18 @@ struct Options {
     bool zero_copy = false;  // Phase 13.4: Enable zero-copy optimizations
     bool true_zero_copy = false;  // DISABLED: Always false. Use --zero-copy instead (simpler, no Buffer::Wrap complexity)
     std::string table = "lineitem";
+    long lance_rows_per_file = 0;
+    long lance_rows_per_group = 0;
+    long lance_max_bytes_per_file = 0;
+    bool lance_skip_auto_cleanup = false;
+    long lance_stream_queue = 16;
 };
+
+constexpr int OPT_LANCE_ROWS_PER_FILE = 1000;
+constexpr int OPT_LANCE_ROWS_PER_GROUP = 1001;
+constexpr int OPT_LANCE_MAX_BYTES_PER_FILE = 1002;
+constexpr int OPT_LANCE_SKIP_AUTO_CLEANUP = 1003;
+constexpr int OPT_LANCE_STREAM_QUEUE = 1004;
 
 void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
@@ -80,6 +92,13 @@ void print_usage(const char* prog) {
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
+#ifdef TPCH_ENABLE_LANCE
+              << "  --lance-rows-per-file <N>   Lance max rows per file (default: use Lance defaults)\n"
+              << "  --lance-rows-per-group <N>  Lance max rows per group (default: use Lance defaults)\n"
+              << "  --lance-max-bytes-per-file <N>  Lance max bytes per file (default: use Lance defaults)\n"
+              << "  --lance-skip-auto-cleanup   Skip Lance auto cleanup during commit\n"
+              << "  --lance-stream-queue <N>    Lance streaming queue depth (default: 16)\n"
+#endif
               << "  --verbose             Verbose output\n"
               << "  --help                Show this help message\n";
 }
@@ -97,6 +116,13 @@ Options parse_args(int argc, char* argv[]) {
         {"parallel", no_argument, nullptr, 'p'},  // Phase 12.6: Fork-after-init
         {"zero-copy", no_argument, nullptr, 'z'},  // Phase 13.4: Zero-copy optimization
         // {"true-zero-copy", no_argument, nullptr, 'Z'},  // DISABLED: Removed to simplify
+#ifdef TPCH_ENABLE_LANCE
+        {"lance-rows-per-file", required_argument, nullptr, OPT_LANCE_ROWS_PER_FILE},
+        {"lance-rows-per-group", required_argument, nullptr, OPT_LANCE_ROWS_PER_GROUP},
+        {"lance-max-bytes-per-file", required_argument, nullptr, OPT_LANCE_MAX_BYTES_PER_FILE},
+        {"lance-skip-auto-cleanup", no_argument, nullptr, OPT_LANCE_SKIP_AUTO_CLEANUP},
+        {"lance-stream-queue", required_argument, nullptr, OPT_LANCE_STREAM_QUEUE},
+#endif
 #ifdef TPCH_ENABLE_ASYNC_IO
         {"async-io", no_argument, nullptr, 'a'},
 #endif
@@ -136,6 +162,21 @@ Options parse_args(int argc, char* argv[]) {
             case 'z':
                 opts.zero_copy = true;
                 break;
+            case OPT_LANCE_ROWS_PER_FILE:
+                opts.lance_rows_per_file = std::stol(optarg);
+                break;
+            case OPT_LANCE_ROWS_PER_GROUP:
+                opts.lance_rows_per_group = std::stol(optarg);
+                break;
+            case OPT_LANCE_MAX_BYTES_PER_FILE:
+                opts.lance_max_bytes_per_file = std::stol(optarg);
+                break;
+            case OPT_LANCE_SKIP_AUTO_CLEANUP:
+                opts.lance_skip_auto_cleanup = true;
+                break;
+            case OPT_LANCE_STREAM_QUEUE:
+                opts.lance_stream_queue = std::stol(optarg);
+                break;
             // case 'Z': DISABLED - true-zero-copy removed, use --zero-copy instead
 #ifdef TPCH_ENABLE_ASYNC_IO
             case 'a':
@@ -174,11 +215,31 @@ std::string get_output_filename(
 }
 
 long get_file_size(const std::string& filename) {
-    struct stat st;
-    if (stat(filename.c_str(), &st) != 0) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(filename, ec)) {
         return -1;
     }
-    return st.st_size;
+    if (fs::is_regular_file(filename, ec)) {
+        auto size = fs::file_size(filename, ec);
+        return ec ? -1 : static_cast<long>(size);
+    }
+    if (fs::is_directory(filename, ec)) {
+        uintmax_t total = 0;
+        for (const auto& entry : fs::recursive_directory_iterator(filename, ec)) {
+            if (ec) {
+                return -1;
+            }
+            if (entry.is_regular_file(ec)) {
+                total += entry.file_size(ec);
+                if (ec) {
+                    return -1;
+                }
+            }
+        }
+        return static_cast<long>(total);
+    }
+    return -1;
 }
 
 std::unique_ptr<tpch::WriterInterface> create_writer(
@@ -1297,9 +1358,18 @@ int main(int argc, char* argv[]) {
         auto writer = create_writer(opts.format, output_path);
 
 #ifdef TPCH_ENABLE_LANCE
-        // Phase 2.0c: Enable streaming mode for Lance if zero-copy is requested
-        if (opts.zero_copy || opts.true_zero_copy) {
-            if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+        if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+            lance_writer->set_write_params(
+                opts.lance_rows_per_file,
+                opts.lance_rows_per_group,
+                opts.lance_max_bytes_per_file,
+                opts.lance_skip_auto_cleanup);
+            if (opts.lance_stream_queue > 0) {
+                lance_writer->set_stream_queue_depth(static_cast<size_t>(opts.lance_stream_queue));
+            }
+
+            // Phase 2.0c: Enable streaming mode for Lance if zero-copy is requested
+            if (opts.zero_copy || opts.true_zero_copy) {
                 lance_writer->enable_streaming_write(true);
                 if (opts.verbose) {
                     std::cout << "Lance streaming write mode enabled (zero-copy)\n";

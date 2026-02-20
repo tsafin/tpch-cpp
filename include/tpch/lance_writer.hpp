@@ -5,12 +5,16 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <chrono>
 #include <arrow/record_batch.h>
 
 #include "writer_interface.hpp"
 #include "lance_ffi.h"
 
 namespace tpch {
+
+struct StreamState;
+class StreamRecordBatchReader;
 
 /**
  * Lance columnar format writer using Rust FFI bridge.
@@ -81,17 +85,49 @@ public:
      */
     void enable_streaming_write(bool enabled) { streaming_enabled_ = enabled; }
 
+    /**
+     * Configure Lance write parameters (optional).
+     *
+     * Pass 0 for any numeric value to keep Lance defaults.
+     */
+    void set_write_params(int64_t max_rows_per_file,
+                          int64_t max_rows_per_group,
+                          int64_t max_bytes_per_file,
+                          bool skip_auto_cleanup);
+
+    /**
+     * Configure the in-memory stream queue depth (backpressure).
+     */
+    void set_stream_queue_depth(size_t depth) { stream_queue_depth_ = depth; }
+
 private:
     std::string dataset_path_;
     std::string dataset_name_;
     std::shared_ptr<arrow::Schema> schema_;
     bool schema_locked_ = false;
     bool streaming_enabled_ = false;
+    bool streaming_started_ = false;
     int64_t row_count_ = 0;
     int32_t batch_count_ = 0;
+    int64_t total_byte_count_ = 0;
+    int64_t last_report_row_count_ = 0;
+    int32_t last_report_batch_count_ = 0;
+    int64_t last_report_byte_count_ = 0;
+    std::chrono::steady_clock::time_point start_time_;
+    std::chrono::steady_clock::time_point last_report_time_;
 
     // Opaque pointer to Rust LanceWriter (use void* to avoid type conflicts)
     void* rust_writer_ = nullptr;
+
+    // Lance write parameters (optional overrides)
+    int64_t max_rows_per_file_ = 0;
+    int64_t max_rows_per_group_ = 0;
+    int64_t max_bytes_per_file_ = 0;
+    bool skip_auto_cleanup_ = false;
+
+    size_t stream_queue_depth_ = 16;
+    std::shared_ptr<StreamState> stream_state_;
+    std::shared_ptr<StreamRecordBatchReader> stream_reader_;
 
     /**
      * Initialize Lance writer on first batch.
