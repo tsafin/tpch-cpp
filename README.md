@@ -1,6 +1,6 @@
 # TPC-H C++ Data Generator
 
-A high-performance TPC-H data generator with multiple output format support (Parquet, ORC, CSV, Paimon, Iceberg) and optional asynchronous I/O capabilities using Linux io_uring.
+A high-performance TPC-H data generator with multiple output format support (Parquet, ORC, CSV, Paimon, Iceberg, Lance) and optional asynchronous I/O capabilities using Linux io_uring.
 
 ## Features
 
@@ -10,6 +10,7 @@ A high-performance TPC-H data generator with multiple output format support (Par
   - CSV (row-oriented, human-readable)
   - Apache Paimon (lakehouse table format with metadata)
   - Apache Iceberg (industry-standard lakehouse format, compatible with Spark/Trino/DuckDB)
+  - Lance (modern columnar format with native indexing and versioning)
 
 - **Apache Arrow Integration**
   - Central in-memory columnar representation
@@ -84,30 +85,41 @@ Enable ORC format (requires liborc-dev):
 cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTPCH_ENABLE_ORC=ON ..
 ```
 
+Enable Lance format (requires Rust):
+```bash
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTPCH_ENABLE_LANCE=ON ..
+```
+
 ### Usage
 
 Generate TPC-H customer table in Parquet format:
 
 ```bash
-./tpch_benchmark --scale-factor 1 --format parquet --output data/ --use-dbgen --table customer
+./tpch_benchmark --scale-factor 1 --format parquet --output-dir data/ --use-dbgen --table customer
 ```
 
 Generate customer table in Iceberg format (with TPCH_ENABLE_ICEBERG=ON):
 
 ```bash
-./tpch_benchmark --scale-factor 1 --format iceberg --output data/ --use-dbgen --table customer
+./tpch_benchmark --scale-factor 1 --format iceberg --output-dir data/ --use-dbgen --table customer
 ```
 
 Generate customer table in Paimon format (with TPCH_ENABLE_PAIMON=ON):
 
 ```bash
-./tpch_benchmark --scale-factor 1 --format paimon --output data/ --use-dbgen --table customer
+./tpch_benchmark --scale-factor 1 --format paimon --output-dir data/ --use-dbgen --table customer
+```
+
+Generate customer table in Lance format (with TPCH_ENABLE_LANCE=ON):
+
+```bash
+./tpch_benchmark --scale-factor 1 --format lance --output-dir data/ --use-dbgen --table customer
 ```
 
 With async I/O (if enabled):
 
 ```bash
-./tpch_benchmark --scale-factor 1 --format parquet --output data/ --async-io --use-dbgen --table customer
+./tpch_benchmark --scale-factor 1 --format parquet --output-dir data/ --async-io --use-dbgen --table customer
 ```
 
 See `./tpch_benchmark --help` for all options.
@@ -122,19 +134,28 @@ tpch-cpp/
 ├── cmake/                      # CMake modules
 │   ├── FindArrow.cmake         # Apache Arrow discovery
 │   ├── FindORC.cmake           # Apache ORC discovery
+│   ├── FindPaimon.cmake        # Apache Paimon discovery
+│   ├── FindUring.cmake         # liburing discovery (async I/O)
+│   ├── FindThrift.cmake        # Apache Thrift discovery
 │   └── CompilerWarnings.cmake  # Compiler configuration
 ├── include/tpch/               # Public headers
 │   ├── writer_interface.hpp
 │   ├── parquet_writer.hpp
 │   ├── csv_writer.hpp
 │   ├── orc_writer.hpp
+│   ├── paimon_writer.hpp
+│   ├── iceberg_writer.hpp
+│   ├── lance_writer.hpp
 │   ├── async_io.hpp
 │   └── dbgen_wrapper.hpp
 ├── src/                        # Implementation
 │   ├── writers/
 │   │   ├── parquet_writer.cpp
 │   │   ├── csv_writer.cpp
-│   │   └── orc_writer.cpp
+│   │   ├── orc_writer.cpp
+│   │   ├── paimon_writer.cpp
+│   │   ├── iceberg_writer.cpp
+│   │   └── lance_writer.cpp
 │   ├── async/
 │   │   └── io_uring_context.cpp
 │   ├── dbgen/
@@ -145,9 +166,14 @@ tpch-cpp/
 │   ├── simple_csv.cpp
 │   ├── simple_orc.cpp
 │   ├── async_io_demo.cpp
+│   ├── multi_table_benchmark.cpp
 │   └── CMakeLists.txt
 ├── third_party/                # External dependencies
-│   └── dbgen/                  # TPC-H dbgen (git submodule)
+│   ├── dbgen/                  # TPC-H dbgen (git submodule)
+│   ├── lance-ffi/              # Lance FFI bridge (Rust)
+│   ├── googletest/             # Google Test framework
+│   ├── arrow/                  # Arrow (optional vendored)
+│   └── orc/                    # ORC (optional vendored)
 ├── tests/                      # Unit tests
 └── scripts/                    # Helper scripts
     ├── install_deps.sh         # Dependency installation
@@ -159,7 +185,7 @@ tpch-cpp/
 Configure with CMake:
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release \
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DTPCH_BUILD_EXAMPLES=ON \
       -DTPCH_ENABLE_ASAN=OFF \
       -DTPCH_ENABLE_ASYNC_IO=ON \
@@ -172,6 +198,10 @@ cmake -DCMAKE_BUILD_TYPE=Release \
 | `TPCH_BUILD_TESTS` | OFF | Build unit tests |
 | `TPCH_ENABLE_ASAN` | OFF | Enable AddressSanitizer |
 | `TPCH_ENABLE_ASYNC_IO` | OFF | Enable async I/O with io_uring |
+| `TPCH_ENABLE_ORC` | OFF | Enable ORC format support |
+| `TPCH_ENABLE_PAIMON` | OFF | Enable Apache Paimon format support |
+| `TPCH_ENABLE_ICEBERG` | OFF | Enable Apache Iceberg format support |
+| `TPCH_ENABLE_LANCE` | OFF | Enable Lance format support (requires Rust) |
 
 ## Dependencies
 
@@ -181,7 +211,6 @@ cmake -DCMAKE_BUILD_TYPE=Release \
 |---------|---------|----------------|
 | Apache Arrow | >= 10.0 | libarrow-dev |
 | Apache Parquet | >= 10.0 | libparquet-dev |
-| Apache ORC | >= 1.8 | liborc-dev |
 | CMake | >= 3.22 | cmake |
 | GCC/Clang | >= 11 | build-essential |
 
@@ -189,7 +218,8 @@ cmake -DCMAKE_BUILD_TYPE=Release \
 
 | Library | Version | Ubuntu Package | Purpose |
 |---------|---------|----------------|---------|
-| liburing | >= 2.1 | liburing-dev | Async I/O (optional) |
+| Apache ORC | >= 1.8 | liborc-dev | ORC format support (enable with TPCH_ENABLE_ORC=ON) |
+| liburing | >= 2.1 | liburing-dev | Async I/O support |
 
 ## Performance Targets
 
@@ -199,6 +229,32 @@ cmake -DCMAKE_BUILD_TYPE=Release \
 - **ORC write rate**: > 100 MB/second
 - **CSV write rate**: > 50 MB/second
 - **Async I/O improvement**: 20-50% over synchronous
+
+## Benchmark Results (SF=5, Zero-Copy, Maximum Values)
+
+Comprehensive benchmark of all 6 supported formats across 6 TPC-H tables with 3 runs each:
+
+| Format | lineitem | customer | orders | partsupp | part | supplier | **Avg Max** |
+|--------|----------|----------|--------|----------|------|----------|-------------|
+| **ORC** | 973,893 | 997,340 | 622,252 | 1,371,272 | 422,476 | 1,041,667 | **904,817** 🥇 |
+| **PARQUET** | 944,132 | 966,495 | 567,494 | 1,110,186 | 396,983 | 641,026 | **771,053** 🥈 |
+| **PAIMON** | 124,716 | 1,082,251 | 277,778 | 101,618 | 373,692 | 531,915 | **415,328** |
+| **LANCE** | 130,647 | 1,308,901 | 73,204 | 154,613 | 422,297 | 92,251 | **363,652** |
+| **ICEBERG** | 235,531 | 1,001,335 | 204,968 | 135,217 | 286,287 | 245,098 | **351,406** |
+| **CSV** | 329,824 | 191,034 | 297,030 | 350,939 | 213,538 | 28,588 | **235,159** |
+
+*All values in rows/second (maximum of 3 runs). ORC wins with 905K rows/sec average, 17% faster than Parquet.*
+
+![Performance Comparison](benchmark-results/benchmark_performance_chart.png)
+
+**Key Takeaways:**
+- 🏆 **ORC**: Fastest (905K r/s avg), most stable (9.8% variance)
+- ⭐ **Parquet**: Excellent performance (771K r/s), good stability (34% variance)
+- ⚠️ **Lance/Paimon/Iceberg**: High variance (60-177%), inconsistent performance
+- 📉 **CSV**: Slowest (235K r/s), I/O bound format
+
+For detailed performance benchmarks across all formats, see **[PERFORMANCE_CONSOLIDATED.md](benchmark-results/PERFORMANCE_CONSOLIDATED.md)** and **[BENCHMARK_COMPREHENSIVE_RESULTS_MAX.md](benchmark-results/BENCHMARK_COMPREHENSIVE_RESULTS_MAX.md)**.
+
 
 ## Development
 
@@ -249,10 +305,10 @@ Uses Arrow as the central in-memory columnar format:
 - Industry standard for analytics
 - Better memory efficiency than row-oriented
 
-### C++17 Standard
+### C++20 Standard
 
-- Full C++17 support in GCC 11.4
-- Modern features without C++20 complexity
+- C++20 required for std::span in zero-copy optimizations
+- Modern features including concepts, ranges, and coroutines
 - Smart pointers, optional, structured bindings
 
 ### CMake Build System
@@ -264,7 +320,7 @@ Uses Arrow as the central in-memory columnar format:
 ### Modular Writer Interface
 
 - Abstract `WriterInterface` base class
-- Format-specific implementations (Parquet, ORC, CSV)
+- Format-specific implementations (Parquet, ORC, CSV, Paimon, Iceberg, Lance)
 - Easy to extend with new formats
 - Runtime polymorphism for format selection
 
@@ -331,7 +387,7 @@ Eliminates per-row function call overhead by batching data extraction:
 
 ```bash
 ./tpch_benchmark --use-dbgen --table lineitem --max-rows 100000 \
-    --zero-copy --format parquet --output data/
+    --zero-copy --format parquet --output-dir data/
 ```
 
 **Performance**: 2.1× speedup over baseline
@@ -346,20 +402,22 @@ Eliminates per-row function call overhead by batching data extraction:
 | partsupp | 476K rows/sec | 678K rows/sec | 1.43× |
 | customer | 242K rows/sec | 349K rows/sec | 1.44× |
 
-### Phase 14.2.3: True Zero-Copy with Buffer::Wrap ✅ PRODUCTION READY
+### Phase 14.2.3: Zero-Copy with Buffer::Wrap ✅ PRODUCTION READY
 
-**Status**: Significant performance improvement confirmed (5-19% speedup)
+**Status**: Significant performance improvement confirmed (merged into `--zero-copy`)
+
+**Note**: The `--true-zero-copy` flag was removed and its optimizations were merged into the standard `--zero-copy` flag.
 
 Eliminates numeric data memcpy by wrapping vector memory with `arrow::Buffer::Wrap()`:
 
 ```bash
 ./tpch_benchmark --use-dbgen --table lineitem --max-rows 100000 \
-    --true-zero-copy --format parquet --output data/
+    --zero-copy --format parquet --output-dir data/
 ```
 
 **Performance Results** (no ASAN overhead):
-| Table | Phase 14.1 | Phase 14.2.3 | Improvement |
-|-------|-----------|-------------|-------------|
+| Table | Baseline | With --zero-copy | Improvement |
+|-------|----------|------------------|-------------|
 | lineitem | 872K | 1,037K rows/sec | **+19.0%** 🔥 |
 | orders | 385K | 429K rows/sec | **+11.4%** |
 | part | 308K | 328K rows/sec | **+6.6%** |
@@ -370,7 +428,7 @@ Eliminates numeric data memcpy by wrapping vector memory with `arrow::Buffer::Wr
 - Requires streaming write mode (constant memory usage)
 - String data still requires memcpy (non-contiguous in dbgen)
 - Bonus: 10× lower peak memory usage
-- **Performance vs Phase 14.1**: +4.6% average, up to +19% for numeric-heavy tables
+- **Performance**: +4.6% average, up to +19% for numeric-heavy tables
 
 **When to use**:
 - ✅ **Lineitem and numeric-heavy tables** (50%+ numeric columns) - 15-19% speedup
@@ -386,17 +444,11 @@ Eliminates numeric data memcpy by wrapping vector memory with `arrow::Buffer::Wr
 
 ### Recommendation
 
-**Use `--true-zero-copy` by default** (Phase 14.2.3):
+**Use `--zero-copy` by default**:
 - **4.6% average speedup** (real-world performance)
 - **19% speedup for numeric-heavy tables** (lineitem)
 - 10× lower peak memory usage
-- Worth the 600-line code addition
 - Proven safe (all tests passing)
-
-**Phase 14.1 (`--zero-copy`) still available** if you prefer:
-- Simpler implementation
-- When memory is very abundant
-- For compatibility with older versions
 
 ## Future Enhancements
 
