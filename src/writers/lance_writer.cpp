@@ -34,10 +34,6 @@ struct StreamState {
             auto waited = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end - wait_start).count();
             stall_ns_.fetch_add(static_cast<uint64_t>(waited), std::memory_order_relaxed);
             stall_count_.fetch_add(1, std::memory_order_relaxed);
-        } else {
-            not_full_cv_.wait(lock, [&] {
-                return closed_ || queue_.size() < max_queue_batches_ || !status_.ok();
-            });
         }
         if (!status_.ok()) {
             return;
