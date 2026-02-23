@@ -2,6 +2,7 @@
 #include "tpch/dbgen_wrapper.hpp"
 #include "tpch/performance_counters.hpp"
 #include "tpch/simd_string_utils.hpp"
+#include "tpch/zero_copy_converter.hpp"  // Phase 3.3: encode functions for dict columns
 
 #include <string>
 #include <stdexcept>
@@ -44,14 +45,13 @@ void append_lineitem_to_builders(
     static_cast<arrow::DoubleBuilder*>(builders["l_tax"].get())
         ->Append(static_cast<double>(line->tax) / 100.0);
 
-    // String fields: convert char arrays to UTF8
-    auto* rflag_builder = static_cast<arrow::StringBuilder*>(builders["l_returnflag"].get());
-    rflag_builder->Append(std::string(line->rflag, 1));
+    // Dict-encoded low-cardinality fields (Phase 3.3)
+    static_cast<arrow::Int8Builder*>(builders["l_returnflag"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_returnflag(line->rflag[0]));
+    static_cast<arrow::Int8Builder*>(builders["l_linestatus"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_linestatus(line->lstatus[0]));
 
-    auto* lstatus_builder = static_cast<arrow::StringBuilder*>(builders["l_linestatus"].get());
-    lstatus_builder->Append(std::string(line->lstatus, 1));
-
-    // Date fields: extract null-terminated strings using SIMD strlen
+    // Date fields: utf8 (high cardinality, kept as strings)
     auto* cdate_builder = static_cast<arrow::StringBuilder*>(builders["l_commitdate"].get());
     cdate_builder->Append(line->cdate, simd::strlen_sse42_unaligned(line->cdate));
 
@@ -61,14 +61,13 @@ void append_lineitem_to_builders(
     auto* rdate_builder = static_cast<arrow::StringBuilder*>(builders["l_receiptdate"].get());
     rdate_builder->Append(line->rdate, simd::strlen_sse42_unaligned(line->rdate));
 
-    // Ship instructions and mode (null-terminated, use SIMD strlen)
-    auto* shipinstruct_builder = static_cast<arrow::StringBuilder*>(builders["l_shipinstruct"].get());
-    shipinstruct_builder->Append(line->shipinstruct, simd::strlen_sse42_unaligned(line->shipinstruct));
+    // Dict-encoded ship instruction and mode
+    static_cast<arrow::Int8Builder*>(builders["l_shipinstruct"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_shipinstruct(line->shipinstruct));
+    static_cast<arrow::Int8Builder*>(builders["l_shipmode"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_shipmode(line->shipmode));
 
-    auto* shipmode_builder = static_cast<arrow::StringBuilder*>(builders["l_shipmode"].get());
-    shipmode_builder->Append(line->shipmode, simd::strlen_sse42_unaligned(line->shipmode));
-
-    // Comment: use clen to extract exact string length
+    // Comment: utf8 (high cardinality)
     auto* comment_builder = static_cast<arrow::StringBuilder*>(builders["l_comment"].get());
     comment_builder->Append(std::string(line->comment, line->clen));
 }
@@ -86,8 +85,8 @@ void append_orders_to_builders(
     static_cast<arrow::Int64Builder*>(builders["o_custkey"].get())
         ->Append(order->custkey);
 
-    auto* orderstatus_builder = static_cast<arrow::StringBuilder*>(builders["o_orderstatus"].get());
-    orderstatus_builder->Append(std::string(&order->orderstatus, 1));
+    static_cast<arrow::Int8Builder*>(builders["o_orderstatus"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_orderstatus(order->orderstatus));
 
     static_cast<arrow::DoubleBuilder*>(builders["o_totalprice"].get())
         ->Append(static_cast<double>(order->totalprice) / 100.0);
@@ -95,8 +94,8 @@ void append_orders_to_builders(
     auto* odate_builder = static_cast<arrow::StringBuilder*>(builders["o_orderdate"].get());
     odate_builder->Append(order->odate, simd::strlen_sse42_unaligned(order->odate));
 
-    auto* priority_builder = static_cast<arrow::StringBuilder*>(builders["o_orderpriority"].get());
-    priority_builder->Append(order->opriority, simd::strlen_sse42_unaligned(order->opriority));
+    static_cast<arrow::Int8Builder*>(builders["o_orderpriority"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_orderpriority(order->opriority));
 
     auto* clerk_builder = static_cast<arrow::StringBuilder*>(builders["o_clerk"].get());
     clerk_builder->Append(order->clerk, simd::strlen_sse42_unaligned(order->clerk));
@@ -132,8 +131,8 @@ void append_customer_to_builders(
     static_cast<arrow::DoubleBuilder*>(builders["c_acctbal"].get())
         ->Append(static_cast<double>(cust->acctbal) / 100.0);
 
-    auto* mktseg_builder = static_cast<arrow::StringBuilder*>(builders["c_mktsegment"].get());
-    mktseg_builder->Append(cust->mktsegment, simd::strlen_sse42_unaligned(cust->mktsegment));
+    static_cast<arrow::Int8Builder*>(builders["c_mktsegment"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_mktsegment(cust->mktsegment));
 
     auto* comment_builder = static_cast<arrow::StringBuilder*>(builders["c_comment"].get());
     comment_builder->Append(std::string(cust->comment, cust->clen));
@@ -151,11 +150,11 @@ void append_part_to_builders(
     auto* name_builder = static_cast<arrow::StringBuilder*>(builders["p_name"].get());
     name_builder->Append(part->name, simd::strlen_sse42_unaligned(part->name));
 
-    auto* mfgr_builder = static_cast<arrow::StringBuilder*>(builders["p_mfgr"].get());
-    mfgr_builder->Append(part->mfgr, simd::strlen_sse42_unaligned(part->mfgr));
+    static_cast<arrow::Int8Builder*>(builders["p_mfgr"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_mfgr(part->mfgr));
 
-    auto* brand_builder = static_cast<arrow::StringBuilder*>(builders["p_brand"].get());
-    brand_builder->Append(part->brand, simd::strlen_sse42_unaligned(part->brand));
+    static_cast<arrow::Int8Builder*>(builders["p_brand"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_brand(part->brand));
 
     auto* type_builder = static_cast<arrow::StringBuilder*>(builders["p_type"].get());
     type_builder->Append(std::string(part->type, part->tlen));
@@ -163,8 +162,8 @@ void append_part_to_builders(
     static_cast<arrow::Int64Builder*>(builders["p_size"].get())
         ->Append(part->size);
 
-    auto* container_builder = static_cast<arrow::StringBuilder*>(builders["p_container"].get());
-    container_builder->Append(part->container, simd::strlen_sse42_unaligned(part->container));
+    static_cast<arrow::Int8Builder*>(builders["p_container"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_container(part->container));
 
     static_cast<arrow::DoubleBuilder*>(builders["p_retailprice"].get())
         ->Append(static_cast<double>(part->retailprice) / 100.0);

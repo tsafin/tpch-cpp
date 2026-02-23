@@ -21,21 +21,25 @@ use libc;
 fn apply_compression_metadata(schema: &Schema) -> Schema {
     let fields: Vec<Field> = schema.fields().iter().map(|field| {
         let mut metadata = field.metadata().clone();
-        
-        // Use lz4 for fast compression (quick and effective)
-        metadata.insert("lance-encoding:compression".to_string(), "lz4".to_string());
-        
-        // Enable Byte Stream Split for better float compression
-        match field.data_type() {
-            DataType::Float16 | DataType::Float32 | DataType::Float64 => {
-                 metadata.insert("lance-encoding:bss".to_string(), "auto".to_string());
-            },
-            _ => {}
+
+        // Skip compression hints for dictionary fields — Lance handles them natively
+        // via DictionaryDataBlock where compute_stat() is a no-op (zero HLL overhead)
+        if !matches!(field.data_type(), DataType::Dictionary(_, _)) {
+            // Use lz4 for fast compression (quick and effective)
+            metadata.insert("lance-encoding:compression".to_string(), "lz4".to_string());
+
+            // Enable Byte Stream Split for better float compression
+            match field.data_type() {
+                DataType::Float16 | DataType::Float32 | DataType::Float64 => {
+                    metadata.insert("lance-encoding:bss".to_string(), "auto".to_string());
+                },
+                _ => {}
+            }
         }
-        
+
         field.as_ref().clone().with_metadata(metadata)
     }).collect();
-    
+
     Schema::new(fields).with_metadata(schema.metadata().clone())
 }
 

@@ -347,14 +347,15 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table) {
     using arrow::float64;
     using arrow::utf8;
 
+    // Dictionary type shorthand for low-cardinality string columns.
+    // Lance routes these to DictionaryDataBlock where compute_stat() is a no-op
+    // (zero HLL/XXH3 overhead). Indices stored as int8 (up to 127 values).
+    auto dict8 = arrow::dictionary(arrow::int8(), utf8());
+
     switch (table) {
         case TableType::LINEITEM:
-            // Cardinality counts from TPC-H spec / dists.dss:
-            //   l_returnflag: 3 values (R=returned, A=accepted, N=none)
-            //   l_linestatus: 2 values (O=open/ordered, F=filled)
-            //   l_shipinstruct (instruct): 4 values
-            //   l_shipmode (smode): 7 values
-            //   Date fields: bounded ~2555 unique dates (1992-01-01..1998-12-31)
+            // Low-cardinality columns use dict8 → zero statistics overhead in Lance.
+            // Date fields keep utf8+hint (2556 values exceed int8 range).
             return arrow::schema({
                 tpch_field("l_orderkey",       int64()),
                 tpch_field("l_partkey",        int64()),
@@ -364,59 +365,53 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table) {
                 tpch_field("l_extendedprice",  float64()),
                 tpch_field("l_discount",       float64()),
                 tpch_field("l_tax",            float64()),
-                tpch_field("l_returnflag",     utf8(),  3),
-                tpch_field("l_linestatus",     utf8(),  2),
+                tpch_field("l_returnflag",     dict8),       // 3 values: A/N/R
+                tpch_field("l_linestatus",     dict8),       // 2 values: F/O
                 tpch_field("l_commitdate",     utf8(),  2556),
                 tpch_field("l_shipdate",       utf8(),  2556),
                 tpch_field("l_receiptdate",    utf8(),  2556),
-                tpch_field("l_shipinstruct",   utf8(),  4),
-                tpch_field("l_shipmode",       utf8(),  7),
-                tpch_field("l_comment",        utf8()),  // high cardinality, skip hint
+                tpch_field("l_shipinstruct",   dict8),       // 4 values
+                tpch_field("l_shipmode",       dict8),       // 7 values
+                tpch_field("l_comment",        utf8()),      // high cardinality
             });
 
         case TableType::ORDERS:
-            // o_orderstatus: 3 values (O, F, P)
-            // o_orderpriority (o_oprio): 5 values (1-URGENT..5-LOW)
             return arrow::schema({
-                tpch_field("o_orderkey",     int64()),
-                tpch_field("o_custkey",      int64()),
-                tpch_field("o_orderstatus",  utf8(),  3),
-                tpch_field("o_totalprice",   float64()),
-                tpch_field("o_orderdate",    utf8(),  2556),
-                tpch_field("o_orderpriority",utf8(),  5),
-                tpch_field("o_clerk",        utf8()),   // Clerk#XXXXXX - high cardinality
-                tpch_field("o_shippriority", int64()),
-                tpch_field("o_comment",      utf8()),   // high cardinality
+                tpch_field("o_orderkey",      int64()),
+                tpch_field("o_custkey",       int64()),
+                tpch_field("o_orderstatus",   dict8),       // 3 values: F/O/P
+                tpch_field("o_totalprice",    float64()),
+                tpch_field("o_orderdate",     utf8(),  2556),
+                tpch_field("o_orderpriority", dict8),       // 5 values: 1-URGENT..5-LOW
+                tpch_field("o_clerk",         utf8()),      // high cardinality
+                tpch_field("o_shippriority",  int64()),
+                tpch_field("o_comment",       utf8()),      // high cardinality
             });
 
         case TableType::CUSTOMER:
-            // c_mktsegment (msegmnt): 5 values
             return arrow::schema({
                 tpch_field("c_custkey",     int64()),
-                tpch_field("c_name",        utf8()),   // Customer#XXXXXXXXX - high cardinality
-                tpch_field("c_address",     utf8()),   // high cardinality
+                tpch_field("c_name",        utf8()),        // high cardinality
+                tpch_field("c_address",     utf8()),        // high cardinality
                 tpch_field("c_nationkey",   int64()),
-                tpch_field("c_phone",       utf8()),   // unique per customer
+                tpch_field("c_phone",       utf8()),        // unique per customer
                 tpch_field("c_acctbal",     float64()),
-                tpch_field("c_mktsegment",  utf8(),  5),
-                tpch_field("c_comment",     utf8()),   // high cardinality
+                tpch_field("c_mktsegment",  dict8),        // 5 values
+                tpch_field("c_comment",     utf8()),        // high cardinality
             });
 
         case TableType::PART:
-            // p_mfgr: 5 values (Manufacturer#1..#5)
-            // p_brand: 25 values (Brand#11..#55)
-            // p_type (p_types): 150 values from dists.dss
-            // p_container (p_cntr): 40 values from dists.dss
+            // p_type has 150 values (exceeds int8 range) — keep utf8 with hint.
             return arrow::schema({
-                tpch_field("p_partkey",    int64()),
-                tpch_field("p_name",       utf8()),    // high cardinality
-                tpch_field("p_mfgr",       utf8(),  5),
-                tpch_field("p_brand",      utf8(),  25),
-                tpch_field("p_type",       utf8(),  150),
-                tpch_field("p_size",       int64()),
-                tpch_field("p_container",  utf8(),  40),
-                tpch_field("p_retailprice",float64()),
-                tpch_field("p_comment",    utf8()),    // high cardinality
+                tpch_field("p_partkey",     int64()),
+                tpch_field("p_name",        utf8()),        // high cardinality
+                tpch_field("p_mfgr",        dict8),        // 5 values
+                tpch_field("p_brand",       dict8),        // 25 values
+                tpch_field("p_type",        utf8(),  150), // 150 values, keep hint
+                tpch_field("p_size",        int64()),
+                tpch_field("p_container",   dict8),        // 40 values
+                tpch_field("p_retailprice", float64()),
+                tpch_field("p_comment",     utf8()),        // high cardinality
             });
 
         case TableType::PARTSUPP:
