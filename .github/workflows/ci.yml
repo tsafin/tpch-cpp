@@ -40,9 +40,9 @@ jobs:
         run: |
           IMAGE_PREFIX="ghcr.io/${{ github.repository_owner }}/tpch-cpp"
           # Sanitize branch name the same way docker/metadata-action does:
-          # replace / and non-alphanumeric with -, lowercase, trim leading -
+          # type=ref,event=branch replaces '/' with '-' and lowercases, keeps underscores
           BRANCH="${{ github.head_ref || github.ref_name }}"
-          BRANCH_TAG=$(echo "$BRANCH" | tr '/' '-' | tr -cs 'a-zA-Z0-9-' '-' | sed 's/^-*//' | tr '[:upper:]' '[:lower:]')
+          BRANCH_TAG=$(echo "$BRANCH" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
           echo "Branch: $BRANCH  →  tag: $BRANCH_TAG"
 
           for CONFIG in base orc lance; do
