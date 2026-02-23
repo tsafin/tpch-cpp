@@ -16,12 +16,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Resolve the best available Docker image tag for each config.
+  # Prefers a branch-specific tag (e.g. tsafin-lance_stream) over :latest so
+  # that PRs with updated lance-ffi/third_party sources automatically use the
+  # matching pre-compiled image built by the docker-images workflow.
+  resolve-images:
+    name: Resolve Docker image tags
+    runs-on: ubuntu-22.04
+    outputs:
+      base_image:  ${{ steps.resolve.outputs.base_image }}
+      orc_image:   ${{ steps.resolve.outputs.orc_image }}
+      lance_image: ${{ steps.resolve.outputs.lance_image }}
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: resolve
+        run: |
+          IMAGE_PREFIX="ghcr.io/${{ github.repository_owner }}/tpch-cpp"
+          # Sanitize branch name the same way docker/metadata-action does:
+          # replace / and non-alphanumeric with -, lowercase, trim leading -
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          BRANCH_TAG=$(echo "$BRANCH" | tr '/' '-' | tr -cs 'a-zA-Z0-9-' '-' | sed 's/^-*//' | tr '[:upper:]' '[:lower:]')
+          echo "Branch: $BRANCH  →  tag: $BRANCH_TAG"
+
+          for CONFIG in base orc lance; do
+            BRANCH_IMAGE="${IMAGE_PREFIX}-${CONFIG}:${BRANCH_TAG}"
+            LATEST_IMAGE="${IMAGE_PREFIX}-${CONFIG}:latest"
+            # Try to pull the branch-specific image; fall back to :latest
+            if docker manifest inspect "$BRANCH_IMAGE" > /dev/null 2>&1; then
+              echo "Using branch image: $BRANCH_IMAGE"
+              echo "${CONFIG}_image=$BRANCH_IMAGE" >> $GITHUB_OUTPUT
+            else
+              echo "Branch image not found, falling back to: $LATEST_IMAGE"
+              echo "${CONFIG}_image=$LATEST_IMAGE" >> $GITHUB_OUTPUT
+            fi
+          done
+
   build-matrix:
     name: Build (${{ matrix.config }})
     runs-on: ubuntu-22.04
+    needs: resolve-images
     timeout-minutes: 20
     container:
-      image: ghcr.io/${{ github.repository_owner }}/tpch-cpp-${{ matrix.config }}:latest
+      image: ${{ matrix.config == 'base' && needs.resolve-images.outputs.base_image || matrix.config == 'orc' && needs.resolve-images.outputs.orc_image || needs.resolve-images.outputs.lance_image }}
       options: --user root
       credentials:
         username: ${{ github.actor }}
@@ -140,10 +183,10 @@ jobs:
   benchmark-suite:
     name: Benchmark Suite
     runs-on: ubuntu-22.04
-    needs: build-matrix
+    needs: [resolve-images, build-matrix]
     timeout-minutes: 20
     container:
-      image: ghcr.io/${{ github.repository_owner }}/tpch-cpp-${{ matrix.build }}:latest
+      image: ${{ matrix.build == 'base' && needs.resolve-images.outputs.base_image || matrix.build == 'orc' && needs.resolve-images.outputs.orc_image || needs.resolve-images.outputs.lance_image }}
       options: --user root
       credentials:
         username: ${{ github.actor }}
@@ -295,10 +338,10 @@ jobs:
   optimization-benchmarks:
     name: Optimization Benchmarks (${{ matrix.format }}-${{ matrix.mode }})
     runs-on: ubuntu-22.04
-    needs: build-matrix
+    needs: [resolve-images, build-matrix]
     timeout-minutes: 20
     container:
-      image: ghcr.io/${{ github.repository_owner }}/tpch-cpp-${{ matrix.image }}:latest
+      image: ${{ matrix.image == 'base' && needs.resolve-images.outputs.base_image || matrix.image == 'orc' && needs.resolve-images.outputs.orc_image || needs.resolve-images.outputs.lance_image }}
       options: --user root
       credentials:
         username: ${{ github.actor }}

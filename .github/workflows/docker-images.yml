@@ -103,6 +103,7 @@ jobs:
           images: ${{ env.IMAGE_PREFIX }}-base
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
             type=sha,prefix={{branch}}-
 
       - name: Build and push base image
@@ -159,6 +160,7 @@ jobs:
           images: ${{ env.IMAGE_PREFIX }}-orc
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
             type=sha,prefix={{branch}}-
 
       - name: Build and push ORC image
@@ -216,6 +218,7 @@ jobs:
           images: ${{ env.IMAGE_PREFIX }}-lance
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
             type=sha,prefix={{branch}}-
 
       - name: Build and push Lance image
