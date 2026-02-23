@@ -1,5 +1,6 @@
 #include "tpch/dbgen_wrapper.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
@@ -342,7 +343,7 @@ static std::shared_ptr<arrow::Field> tpch_field(
     return arrow::field(name, type);
 }
 
-std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table) {
+std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table, double scale_factor) {
     using arrow::int64;
     using arrow::float64;
     using arrow::utf8;
@@ -351,6 +352,19 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table) {
     // Lance routes these to DictionaryDataBlock where compute_stat() is a no-op
     // (zero HLL/XXH3 overhead). Indices stored as int8 (up to 127 values).
     auto dict8 = arrow::dictionary(arrow::int8(), utf8());
+
+    // TPC-H row counts per SF=1 (from spec).  Multiplied by scale_factor to get
+    // per-run cardinality hints for high-cardinality utf8 columns.  The hint causes
+    // Lance to skip HyperLogLog computation and return the pre-known value directly.
+    int64_t sf        = static_cast<int64_t>(std::ceil(scale_factor));
+    int64_t lineitem  = 6'000'000LL * sf;
+    int64_t orders    = 1'500'000LL * sf;
+    int64_t customer  =   150'000LL * sf;
+    int64_t part      =   200'000LL * sf;
+    int64_t partsupp  =   800'000LL * sf;
+    int64_t supplier  =    10'000LL * sf;
+    // o_clerk: Clerk#XXXXXXXXX where X in [1, CLERK_SCALE * SF], CLERK_SCALE=1000
+    int64_t clerk_card = 1'000LL * sf;
 
     switch (table) {
         case TableType::LINEITEM:
@@ -365,53 +379,53 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table) {
                 tpch_field("l_extendedprice",  float64()),
                 tpch_field("l_discount",       float64()),
                 tpch_field("l_tax",            float64()),
-                tpch_field("l_returnflag",     dict8),       // 3 values: A/N/R
-                tpch_field("l_linestatus",     dict8),       // 2 values: F/O
+                tpch_field("l_returnflag",     dict8),              // 3 values: A/N/R
+                tpch_field("l_linestatus",     dict8),              // 2 values: F/O
                 tpch_field("l_commitdate",     utf8(),  2556),
                 tpch_field("l_shipdate",       utf8(),  2556),
                 tpch_field("l_receiptdate",    utf8(),  2556),
-                tpch_field("l_shipinstruct",   dict8),       // 4 values
-                tpch_field("l_shipmode",       dict8),       // 7 values
-                tpch_field("l_comment",        utf8()),      // high cardinality
+                tpch_field("l_shipinstruct",   dict8),              // 4 values
+                tpch_field("l_shipmode",       dict8),              // 7 values
+                tpch_field("l_comment",        utf8(),  lineitem),  // ~unique per row
             });
 
         case TableType::ORDERS:
             return arrow::schema({
                 tpch_field("o_orderkey",      int64()),
                 tpch_field("o_custkey",       int64()),
-                tpch_field("o_orderstatus",   dict8),       // 3 values: F/O/P
+                tpch_field("o_orderstatus",   dict8),              // 3 values: F/O/P
                 tpch_field("o_totalprice",    float64()),
                 tpch_field("o_orderdate",     utf8(),  2556),
-                tpch_field("o_orderpriority", dict8),       // 5 values: 1-URGENT..5-LOW
-                tpch_field("o_clerk",         utf8()),      // high cardinality
+                tpch_field("o_orderpriority", dict8),              // 5 values: 1-URGENT..5-LOW
+                tpch_field("o_clerk",         utf8(),  clerk_card), // SF*1000 unique clerks
                 tpch_field("o_shippriority",  int64()),
-                tpch_field("o_comment",       utf8()),      // high cardinality
+                tpch_field("o_comment",       utf8(),  orders),    // ~unique per row
             });
 
         case TableType::CUSTOMER:
             return arrow::schema({
                 tpch_field("c_custkey",     int64()),
-                tpch_field("c_name",        utf8()),        // high cardinality
-                tpch_field("c_address",     utf8()),        // high cardinality
+                tpch_field("c_name",        utf8(),  customer),  // Customer#XXXXXXXXX
+                tpch_field("c_address",     utf8(),  customer),  // unique per customer
                 tpch_field("c_nationkey",   int64()),
-                tpch_field("c_phone",       utf8()),        // unique per customer
+                tpch_field("c_phone",       utf8(),  customer),  // unique per customer
                 tpch_field("c_acctbal",     float64()),
-                tpch_field("c_mktsegment",  dict8),        // 5 values
-                tpch_field("c_comment",     utf8()),        // high cardinality
+                tpch_field("c_mktsegment",  dict8),             // 5 values
+                tpch_field("c_comment",     utf8(),  customer), // ~unique per row
             });
 
         case TableType::PART:
             // p_type has 150 values (exceeds int8 range) — keep utf8 with hint.
             return arrow::schema({
                 tpch_field("p_partkey",     int64()),
-                tpch_field("p_name",        utf8()),        // high cardinality
-                tpch_field("p_mfgr",        dict8),        // 5 values
-                tpch_field("p_brand",       dict8),        // 25 values
-                tpch_field("p_type",        utf8(),  150), // 150 values, keep hint
+                tpch_field("p_name",        utf8(),  part),    // unique per part
+                tpch_field("p_mfgr",        dict8),           // 5 values
+                tpch_field("p_brand",       dict8),           // 25 values
+                tpch_field("p_type",        utf8(),  150),    // 150 values, keep hint
                 tpch_field("p_size",        int64()),
-                tpch_field("p_container",   dict8),        // 40 values
+                tpch_field("p_container",   dict8),           // 40 values
                 tpch_field("p_retailprice", float64()),
-                tpch_field("p_comment",     utf8()),        // high cardinality
+                tpch_field("p_comment",     utf8(),  part),   // ~unique per row
             });
 
         case TableType::PARTSUPP:
@@ -420,36 +434,33 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table) {
                 tpch_field("ps_suppkey",    int64()),
                 tpch_field("ps_availqty",   int64()),
                 tpch_field("ps_supplycost", float64()),
-                tpch_field("ps_comment",    utf8()),   // high cardinality
+                tpch_field("ps_comment",    utf8(),  partsupp), // ~unique per row
             });
 
         case TableType::SUPPLIER:
-            // nations: 25 values
             return arrow::schema({
                 tpch_field("s_suppkey",   int64()),
-                tpch_field("s_name",      utf8()),    // Supplier#XXXXXXXXX - high cardinality
-                tpch_field("s_address",   utf8()),    // high cardinality
+                tpch_field("s_name",      utf8(),  supplier),  // Supplier#XXXXXXXXX
+                tpch_field("s_address",   utf8(),  supplier),  // unique per supplier
                 tpch_field("s_nationkey", int64()),
-                tpch_field("s_phone",     utf8()),    // unique per supplier
+                tpch_field("s_phone",     utf8(),  supplier),  // unique per supplier
                 tpch_field("s_acctbal",   float64()),
-                tpch_field("s_comment",   utf8()),    // high cardinality
+                tpch_field("s_comment",   utf8(),  supplier),  // ~unique per row
             });
 
         case TableType::NATION:
-            // nations: 25 values
             return arrow::schema({
                 tpch_field("n_nationkey", int64()),
                 tpch_field("n_name",      utf8(),  25),
                 tpch_field("n_regionkey", int64()),
-                tpch_field("n_comment",   utf8()),
+                tpch_field("n_comment",   utf8(),  25),
             });
 
         case TableType::REGION:
-            // regions: 5 values
             return arrow::schema({
                 tpch_field("r_regionkey", int64()),
                 tpch_field("r_name",      utf8(),  5),
-                tpch_field("r_comment",   utf8()),
+                tpch_field("r_comment",   utf8(),  5),
             });
 
         case TableType::COUNT_:
