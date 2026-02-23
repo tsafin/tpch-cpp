@@ -93,7 +93,24 @@ impl Default for WriteParamsConfig {
 
 impl LanceWriterHandle {
     fn new(uri: String, use_streaming: bool) -> Result<Self, String> {
-        let runtime = Runtime::new().map_err(|e| format!("Failed to create Tokio runtime: {}", e))?;
+        // Buffered path: all work happens synchronously inside block_on() calls.
+        // A single-threaded executor is sufficient and avoids thread pool overhead.
+        //
+        // Streaming path: exactly one background task runs the Lance consumer.
+        // More than 1 worker thread adds unnecessary context-switch overhead and
+        // cross-core cache coherency cost without any parallelism benefit.
+        let runtime = if use_streaming {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Failed to create Tokio runtime: {}", e))?
+        } else {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Failed to create Tokio runtime: {}", e))?
+        };
 
         let backend = if use_streaming {
             WriterBackend::Streaming {

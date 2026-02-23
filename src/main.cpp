@@ -1128,21 +1128,21 @@ int generate_all_tables_parallel_v2(const Options& opts) {
                 // Get schema for this table
                 std::shared_ptr<arrow::Schema> schema;
                 if (table == "lineitem") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM);
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM, opts.scale_factor);
                 } else if (table == "orders") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS);
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS, opts.scale_factor);
                 } else if (table == "customer") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER);
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER, opts.scale_factor);
                 } else if (table == "part") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART);
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART, opts.scale_factor);
                 } else if (table == "partsupp") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP);
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP, opts.scale_factor);
                 } else if (table == "supplier") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER);
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER, opts.scale_factor);
                 } else if (table == "nation") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION);
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION, opts.scale_factor);
                 } else if (table == "region") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION);
+                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION, opts.scale_factor);
                 } else {
                     std::cerr << "Unknown table: " << table << "\n";
                     exit(1);
@@ -1332,21 +1332,21 @@ int main(int argc, char* argv[]) {
         if (opts.use_dbgen) {
             // Use dbgen schema definitions
             if (opts.table == "lineitem") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM);
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM, opts.scale_factor);
             } else if (opts.table == "orders") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS);
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS, opts.scale_factor);
             } else if (opts.table == "customer") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER);
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER, opts.scale_factor);
             } else if (opts.table == "part") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART);
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART, opts.scale_factor);
             } else if (opts.table == "partsupp") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP);
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP, opts.scale_factor);
             } else if (opts.table == "supplier") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER);
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER, opts.scale_factor);
             } else if (opts.table == "nation") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION);
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION, opts.scale_factor);
             } else if (opts.table == "region") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION);
+                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION, opts.scale_factor);
             } else {
                 std::cerr << "Error: Unknown table '" << opts.table << "'\n";
                 return 1;
