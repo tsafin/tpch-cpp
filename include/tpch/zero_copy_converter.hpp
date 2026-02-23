@@ -223,6 +223,81 @@ public:
         const std::shared_ptr<arrow::Schema>& schema
     );
 
+    // ========================================================================
+    // Phase 3.3: Dictionary encode helpers for low-cardinality TPC-H columns
+    // ========================================================================
+    // O(1) switch-based encode functions — no hashing, no strcmp needed.
+    // Each returns an int8 index into the static dictionary for that column.
+
+    static inline int8_t encode_returnflag(char c) {
+        switch (c) { case 'A': return 0; case 'N': return 1; default: return 2; }  // R=2
+    }
+    static inline int8_t encode_linestatus(char c) {
+        return c == 'F' ? 0 : 1;  // F=0, O=1
+    }
+    static inline int8_t encode_shipinstruct(const char* s) {
+        // COLLECT COD=0, DELIVER IN PERSON=1, NONE=2, TAKE BACK RETURN=3
+        switch (s[0]) { case 'C': return 0; case 'D': return 1; case 'N': return 2; default: return 3; }
+    }
+    static inline int8_t encode_shipmode(const char* s) {
+        // AIR=0, FOB=1, MAIL=2, RAIL=3, REG AIR=4, SHIP=5, TRUCK=6
+        switch (s[0]) {
+            case 'A': return 0;
+            case 'F': return 1;
+            case 'M': return 2;
+            case 'R': return s[1] == 'A' ? 3 : 4;  // RAIL vs REG AIR
+            case 'S': return 5;
+            case 'T': return 6;
+            default:  return 0;
+        }
+    }
+    static inline int8_t encode_orderstatus(char c) {
+        switch (c) { case 'F': return 0; case 'O': return 1; default: return 2; }  // P=2
+    }
+    static inline int8_t encode_orderpriority(const char* s) {
+        return (int8_t)(s[0] - '1');  // "1-URGENT"=0 .. "5-LOW"=4
+    }
+    static inline int8_t encode_mktsegment(const char* s) {
+        // AUTOMOBILE=0, BUILDING=1, FURNITURE=2, HOUSEHOLD=3, MACHINERY=4
+        switch (s[0]) { case 'A': return 0; case 'B': return 1; case 'F': return 2; case 'H': return 3; default: return 4; }
+    }
+    static inline int8_t encode_mfgr(const char* s) {
+        return (int8_t)(s[13] - '1');  // "Manufacturer#N" → position 13
+    }
+    static inline int8_t encode_brand(const char* s) {
+        return (int8_t)((s[6] - '1') * 5 + (s[7] - '1'));  // "Brand#XY"
+    }
+    static inline int8_t encode_container(const char* s) {
+        // prefix: SM=0, MED=1, LG=2, JUMBO=3, WRAP=4
+        int8_t prefix;
+        switch (s[0]) {
+            case 'S': prefix = 0; break;
+            case 'M': prefix = 1; break;
+            case 'L': prefix = 2; break;
+            case 'J': prefix = 3; break;
+            default:  prefix = 4; break;  // WRAP
+        }
+        // size: BOX=0, BAG=1, JAR=2, PKG=3, PACK=4, CAN=5, DRUM=6, CUP=7
+        const char* sz = s;
+        while (*sz && *sz != ' ') sz++;
+        if (*sz == ' ') sz++;
+        int8_t size;
+        switch (sz[0]) {
+            case 'B': size = (sz[1] == 'O') ? 0 : 1; break;  // BOX vs BAG
+            case 'J': size = 2; break;
+            case 'P': size = (sz[1] == 'K') ? 3 : 4; break;  // PKG vs PACK
+            case 'C': size = (sz[1] == 'A') ? 5 : 7; break;  // CAN vs CUP
+            default:  size = 6; break;  // DRUM
+        }
+        return (int8_t)(prefix * 8 + size);
+    }
+
+    /**
+     * Return the static string dictionary array for a known low-cardinality field.
+     * Returns nullptr for fields that are not dictionary-encoded.
+     */
+    static std::shared_ptr<arrow::Array> get_dict_for_field(const std::string& field_name);
+
 private:
     /**
      * Build string array from string_view span
@@ -235,6 +310,14 @@ private:
      */
     static arrow::Result<std::shared_ptr<arrow::StringArray>>
     build_string_array(std::span<const std::string_view> views);
+
+    /**
+     * Build DictionaryArray<Int8Type, StringArray> from index buffer + static dictionary.
+     * Used for low-cardinality TPC-H columns (returnflag, linestatus, etc.)
+     */
+    static arrow::Result<std::shared_ptr<arrow::Array>>
+    build_dict_int8_array(std::span<const int8_t> indices,
+                          const std::shared_ptr<arrow::Array>& dictionary);
 
     /**
      * Build Int64 array from contiguous memory

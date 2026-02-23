@@ -318,6 +318,11 @@ create_builders_from_schema(std::shared_ptr<arrow::Schema> schema) {
             (void)builder->Reserve(capacity);
             (void)builder->ReserveData(capacity * 50);
             builders[field->name()] = builder;
+        } else if (field->type()->id() == arrow::Type::DICTIONARY) {
+            // Phase 3.3: dict columns use Int8Builder; finish_batch wraps in DictionaryArray
+            auto builder = std::make_shared<arrow::Int8Builder>();
+            (void)builder->Reserve(capacity);
+            builders[field->name()] = builder;
         } else {
             throw std::runtime_error("Unsupported type: " + field->type()->ToString());
         }
@@ -338,7 +343,14 @@ std::shared_ptr<arrow::RecordBatch> finish_batch(
         if (it == builders.end()) {
             throw std::runtime_error("Missing builder for: " + field->name());
         }
-        arrays.push_back(it->second->Finish().ValueOrDie());
+        auto array = it->second->Finish().ValueOrDie();
+        if (field->type()->id() == arrow::Type::DICTIONARY) {
+            // Wrap int8 indices in DictionaryArray with the static string dictionary
+            auto dict = tpch::ZeroCopyConverter::get_dict_for_field(field->name());
+            array = arrow::DictionaryArray::FromArrays(
+                field->type(), array, dict).ValueOrDie();
+        }
+        arrays.push_back(array);
     }
 
     return arrow::RecordBatch::Make(schema, num_rows, arrays);
