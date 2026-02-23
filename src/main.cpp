@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cstdlib>
 
 #include <arrow/api.h>
 #include <arrow/array.h>
@@ -55,6 +56,8 @@ struct Options {
     long lance_max_bytes_per_file = 0;
     bool lance_skip_auto_cleanup = false;
     long lance_stream_queue = 16;
+    std::string lance_stats_level;
+    double lance_cardinality_sample_rate = 1.0;  // Phase 3.1: Sampling-based cardinality
 };
 
 constexpr int OPT_LANCE_ROWS_PER_FILE = 1000;
@@ -62,6 +65,8 @@ constexpr int OPT_LANCE_ROWS_PER_GROUP = 1001;
 constexpr int OPT_LANCE_MAX_BYTES_PER_FILE = 1002;
 constexpr int OPT_LANCE_SKIP_AUTO_CLEANUP = 1003;
 constexpr int OPT_LANCE_STREAM_QUEUE = 1004;
+constexpr int OPT_LANCE_STATS_LEVEL = 1005;
+constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
 
 void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
@@ -98,6 +103,10 @@ void print_usage(const char* prog) {
               << "  --lance-max-bytes-per-file <N>  Lance max bytes per file (default: use Lance defaults)\n"
               << "  --lance-skip-auto-cleanup   Skip Lance auto cleanup during commit\n"
               << "  --lance-stream-queue <N>    Lance streaming queue depth (default: 16)\n"
+              << "  --lance-stats-level <full|light>  Lance stats level (default: full)\n"
+              << "  --lance-cardinality-sample-rate <0.0-1.0>  Cardinality sampling rate (Phase 3.1)\n"
+              << "                               Controls HyperLogLog sampling: 1.0=100% (default),\n"
+              << "                               0.5=50%, 0.1=10%. Smaller rates = faster writes.\n"
 #endif
               << "  --verbose             Verbose output\n"
               << "  --help                Show this help message\n";
@@ -122,6 +131,8 @@ Options parse_args(int argc, char* argv[]) {
         {"lance-max-bytes-per-file", required_argument, nullptr, OPT_LANCE_MAX_BYTES_PER_FILE},
         {"lance-skip-auto-cleanup", no_argument, nullptr, OPT_LANCE_SKIP_AUTO_CLEANUP},
         {"lance-stream-queue", required_argument, nullptr, OPT_LANCE_STREAM_QUEUE},
+        {"lance-stats-level", required_argument, nullptr, OPT_LANCE_STATS_LEVEL},
+        {"lance-cardinality-sample-rate", required_argument, nullptr, OPT_LANCE_CARDINALITY_SAMPLE_RATE},
 #endif
 #ifdef TPCH_ENABLE_ASYNC_IO
         {"async-io", no_argument, nullptr, 'a'},
@@ -176,6 +187,16 @@ Options parse_args(int argc, char* argv[]) {
                 break;
             case OPT_LANCE_STREAM_QUEUE:
                 opts.lance_stream_queue = std::stol(optarg);
+                break;
+            case OPT_LANCE_STATS_LEVEL:
+                opts.lance_stats_level = optarg;
+                break;
+            case OPT_LANCE_CARDINALITY_SAMPLE_RATE:
+                opts.lance_cardinality_sample_rate = std::stod(optarg);
+                if (opts.lance_cardinality_sample_rate < 0.01 || opts.lance_cardinality_sample_rate > 1.0) {
+                    std::cerr << "Error: cardinality-sample-rate must be between 0.01 and 1.0\n";
+                    exit(1);
+                }
                 break;
             // case 'Z': DISABLED - true-zero-copy removed, use --zero-copy instead
 #ifdef TPCH_ENABLE_ASYNC_IO
@@ -1359,6 +1380,20 @@ int main(int argc, char* argv[]) {
 
 #ifdef TPCH_ENABLE_LANCE
         if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+            if (!opts.lance_stats_level.empty()) {
+                setenv("LANCE_STATS_LEVEL", opts.lance_stats_level.c_str(), 1);
+                if (opts.verbose) {
+                    std::cout << "Lance stats level set to: " << opts.lance_stats_level << "\n";
+                }
+            }
+            // Phase 3.1: Set cardinality sampling rate via environment variable
+            if (opts.lance_cardinality_sample_rate < 1.0) {
+                std::string rate_str = std::to_string(opts.lance_cardinality_sample_rate);
+                setenv("LANCE_CARDINALITY_SAMPLE_RATE", rate_str.c_str(), 1);
+                if (opts.verbose) {
+                    std::cout << "Lance cardinality sample rate set to: " << opts.lance_cardinality_sample_rate << "\n";
+                }
+            }
             lance_writer->set_write_params(
                 opts.lance_rows_per_file,
                 opts.lance_rows_per_group,
