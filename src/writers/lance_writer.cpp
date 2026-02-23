@@ -23,7 +23,7 @@ struct StreamState {
     explicit StreamState(size_t max_queue_batches)
         : max_queue_batches_(max_queue_batches) {}
 
-    void push(const std::shared_ptr<arrow::RecordBatch>& batch) {
+    void push(const std::shared_ptr<arrow::RecordBatch>& batch, int64_t batch_bytes) {
         std::unique_lock<std::mutex> lock(mu_);
         if (!closed_ && status_.ok() && queue_.size() >= max_queue_batches_) {
             auto wait_start = std::chrono::steady_clock::now();
@@ -45,7 +45,11 @@ struct StreamState {
         if (closed_) {
             return;
         }
-        queue_.push_back(batch);
+        queue_.push_back({batch, batch_bytes});
+        current_bytes_ += batch_bytes;
+        if (current_bytes_ > peak_bytes_) {
+            peak_bytes_ = current_bytes_;
+        }
         not_empty_cv_.notify_one();
     }
 
@@ -61,7 +65,8 @@ struct StreamState {
             *out = nullptr;
             return arrow::Status::OK();
         }
-        *out = queue_.front();
+        *out = queue_.front().batch;
+        current_bytes_ -= queue_.front().bytes;
         queue_.pop_front();
         not_full_cv_.notify_one();
         return arrow::Status::OK();
@@ -86,16 +91,38 @@ struct StreamState {
                 stall_count_.load(std::memory_order_relaxed)};
     }
 
+    size_t queue_size() const {
+        std::lock_guard<std::mutex> lock(mu_);
+        return queue_.size();
+    }
+
+    int64_t current_bytes() const {
+        std::lock_guard<std::mutex> lock(mu_);
+        return current_bytes_;
+    }
+
+    int64_t peak_bytes() const {
+        std::lock_guard<std::mutex> lock(mu_);
+        return peak_bytes_;
+    }
+
 private:
-    std::mutex mu_;
+    struct QueueItem {
+        std::shared_ptr<arrow::RecordBatch> batch;
+        int64_t bytes;
+    };
+
+    mutable std::mutex mu_;
     std::condition_variable not_empty_cv_;
     std::condition_variable not_full_cv_;
-    std::deque<std::shared_ptr<arrow::RecordBatch>> queue_;
+    std::deque<QueueItem> queue_;
     size_t max_queue_batches_;
     bool closed_ = false;
     arrow::Status status_ = arrow::Status::OK();
     std::atomic<uint64_t> stall_ns_{0};
     std::atomic<uint64_t> stall_count_{0};
+    int64_t current_bytes_ = 0;
+    int64_t peak_bytes_ = 0;
 };
 
 class StreamRecordBatchReader : public arrow::RecordBatchReader {
@@ -311,10 +338,11 @@ void LanceWriter::write_batch(
         if (!streaming_started_ || stream_state_ == nullptr) {
             throw std::runtime_error("Lance streaming writer not initialized");
         }
-        stream_state_->push(batch);
+        int64_t batch_bytes = estimate_batch_bytes(*batch);
+        stream_state_->push(batch, batch_bytes);
         row_count_ += batch->num_rows();
         batch_count_++;
-        total_byte_count_ += estimate_batch_bytes(*batch);
+        total_byte_count_ += batch_bytes;
         if (batch_count_ % 100 == 0 || batch_count_ <= 3) {
             auto now = std::chrono::steady_clock::now();
             auto elapsed_total = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_time_).count();
@@ -327,11 +355,19 @@ void LanceWriter::write_batch(
                 double window_rps = elapsed_window > 0.0 ? (static_cast<double>(rows_window) / elapsed_window) : 0.0;
                 double window_mbps = elapsed_window > 0.0 ? (static_cast<double>(bytes_window) / elapsed_window) / (1024.0 * 1024.0) : 0.0;
 
+                auto stalls = stream_state_->stall_stats();
+                double stall_ms = static_cast<double>(stalls.first) / 1e6;
+                double queue_mb = static_cast<double>(stream_state_->current_bytes()) / (1024.0 * 1024.0);
+                double peak_mb = static_cast<double>(stream_state_->peak_bytes()) / (1024.0 * 1024.0);
+
                 std::cout << "Lance: Streamed batch " << batch_count_ << ", "
                           << row_count_ << " rows total"
                           << " (avg " << static_cast<long long>(total_rps) << " rows/s"
                           << ", window " << static_cast<long long>(window_rps) << " rows/s"
-                          << ", " << window_mbps << " MB/s";
+                          << ", " << window_mbps << " MB/s"
+                          << ", queue " << stream_state_->queue_size()
+                          << " (" << queue_mb << " MB, peak " << peak_mb << " MB)"
+                          << ", stalls " << stalls.second << " (" << stall_ms << " ms)";
                 if (elapsed_window > 0.0) {
                     double batches_per_s = batches_window / elapsed_window;
                     std::cout << ", " << batches_per_s << " batches/s";
