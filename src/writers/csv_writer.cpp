@@ -269,6 +269,13 @@ void CSVWriter::write_batch(
           auto float_array =
               std::dynamic_pointer_cast<arrow::FloatArray>(array);
           row_buffer << float_array->Value(row);
+        } else if (field_type->id() == arrow::Type::DICTIONARY) {
+          auto dict_array =
+              std::dynamic_pointer_cast<arrow::DictionaryArray>(array);
+          auto dict_values =
+              std::dynamic_pointer_cast<arrow::StringArray>(dict_array->dictionary());
+          auto idx = dict_array->GetValueIndex(row);
+          row_buffer << escape_csv_value(dict_values->GetString(idx));
         } else {
           // Fallback: convert to string using Arrow's ToString
           row_buffer << array->ToString();
