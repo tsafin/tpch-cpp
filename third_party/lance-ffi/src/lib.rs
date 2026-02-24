@@ -211,9 +211,9 @@ impl LanceWriterHandle {
                     return Err("Null ArrowArrayStream".to_string());
                 }
 
-                let reader = unsafe { ArrowArrayStreamReader::from_raw(stream_ptr) }
-                    .map_err(|e| format!("Failed to import ArrowArrayStream: {}", e))?;
+                let result = unsafe { ArrowArrayStreamReader::from_raw(stream_ptr) };
                 unsafe { libc::free(stream_ptr as *mut c_void) };
+                let reader = result.map_err(|e| format!("Failed to import ArrowArrayStream: {}", e))?;
 
                 let compressed_schema = Arc::new(apply_compression_metadata(reader.schema().as_ref()));
                 let compression_reader = CompressionReader::new(reader, compressed_schema);
