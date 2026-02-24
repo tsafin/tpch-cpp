@@ -32,6 +32,8 @@ std::string arrow_type_to_orc_type_name(const std::shared_ptr<arrow::DataType>& 
         return "double";
     } else if (type->id() == arrow::Type::STRING) {
         return "string";
+    } else if (type->id() == arrow::Type::DICTIONARY) {
+        return "string";  // dict8<int8, utf8> expanded to string on write
     } else {
         throw std::runtime_error("Unsupported Arrow type for ORC conversion");
     }
@@ -137,6 +139,26 @@ void copy_array_to_orc_column(
                 auto str = string_array->GetString(static_cast<int64_t>(i));
                 string_col->data[i] = const_cast<char*>(str.data());
                 string_col->length[i] = static_cast<int64_t>(str.length());
+            }
+        }
+    } else if (array->type()->id() == arrow::Type::DICTIONARY) {
+        // Expand dict8<int8, utf8> to ORC string column via index lookup.
+        // string_view points into the dictionary buffer which outlives this function.
+        auto dict_array = std::static_pointer_cast<arrow::DictionaryArray>(array);
+        auto dict_values = std::static_pointer_cast<arrow::StringArray>(dict_array->dictionary());
+        auto* string_col = dynamic_cast<orc::StringVectorBatch*>(col_batch);
+        if (!string_col) {
+            throw std::runtime_error("Failed to cast ORC column to StringVectorBatch");
+        }
+        for (size_t i = 0; i < size; ++i) {
+            if (dict_array->IsNull(static_cast<int64_t>(i))) {
+                string_col->notNull[i] = 0;
+            } else {
+                string_col->notNull[i] = 1;
+                auto idx = dict_array->GetValueIndex(static_cast<int64_t>(i));
+                auto sv = dict_values->GetView(idx);
+                string_col->data[i] = const_cast<char*>(sv.data());
+                string_col->length[i] = static_cast<int64_t>(sv.length());
             }
         }
     } else {

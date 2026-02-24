@@ -74,6 +74,8 @@ std::string PaimonWriter::arrow_type_to_paimon_type(
             return "decimal";
         case arrow::Type::BOOL:
             return "boolean";
+        case arrow::Type::DICTIONARY:
+            return "string";  // dict8<int8, utf8> written as Parquet dict page, exposed as string
         default:
             throw std::runtime_error(
                 std::string("Unsupported Arrow type for Paimon: ") + arrow_type->ToString()
