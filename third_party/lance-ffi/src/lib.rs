@@ -371,6 +371,21 @@ pub extern "C" fn lance_writer_write_batch(writer_ptr: *mut LanceWriterHandle, a
     })).unwrap_or(7)
 }
 
+/// Returns 1 if the background streaming task is still running, 0 if it has finished
+/// (either successfully or with an error) or was never started. C++ uses this to detect
+/// early task exit and unblock producers waiting on a full queue.
+#[no_mangle]
+pub extern "C" fn lance_writer_stream_is_alive(writer_ptr: *const LanceWriterHandle) -> c_int {
+    if writer_ptr.is_null() { return 0; }
+    let writer = unsafe { &*writer_ptr };
+    match &writer.backend {
+        WriterBackend::Streaming { task } => {
+            task.as_ref().map(|t| if t.is_finished() { 0 } else { 1 }).unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn lance_writer_start_stream(writer_ptr: *mut LanceWriterHandle, arrow_stream_ptr: *const c_void) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {

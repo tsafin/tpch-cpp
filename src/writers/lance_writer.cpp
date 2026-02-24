@@ -7,6 +7,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
+#include <chrono>
+#include <functional>
 #include <cstdlib>
 #include <cstring>
 #include <arrow/type.h>
@@ -23,13 +25,29 @@ struct StreamState {
     explicit StreamState(size_t max_queue_batches)
         : max_queue_batches_(max_queue_batches) {}
 
+    void set_health_check(std::function<bool()> fn) {
+        health_check_fn_ = std::move(fn);
+    }
+
     void push(const std::shared_ptr<arrow::RecordBatch>& batch, int64_t batch_bytes) {
         std::unique_lock<std::mutex> lock(mu_);
         if (!closed_ && status_.ok() && queue_.size() >= max_queue_batches_) {
             auto wait_start = std::chrono::steady_clock::now();
-            not_full_cv_.wait(lock, [&] {
-                return closed_ || queue_.size() < max_queue_batches_ || !status_.ok();
-            });
+            // Poll with a timeout so we can detect early stream-consumer exit.
+            // A bare wait() would hang indefinitely if the Rust task fails before
+            // draining the queue, because nothing would notify not_full_cv_.
+            while (!closed_ && status_.ok() && queue_.size() >= max_queue_batches_) {
+                bool signaled = not_full_cv_.wait_for(lock, std::chrono::milliseconds(500), [&] {
+                    return closed_ || queue_.size() < max_queue_batches_ || !status_.ok();
+                });
+                if (!signaled && health_check_fn_ && !health_check_fn_()) {
+                    status_ = arrow::Status::IOError(
+                        "Lance streaming task exited unexpectedly (write error or crash)");
+                    not_empty_cv_.notify_all();
+                    not_full_cv_.notify_all();
+                    break;
+                }
+            }
             auto wait_end = std::chrono::steady_clock::now();
             auto waited = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end - wait_start).count();
             stall_ns_.fetch_add(static_cast<uint64_t>(waited), std::memory_order_relaxed);
@@ -119,6 +137,7 @@ private:
     size_t max_queue_batches_;
     bool closed_ = false;
     arrow::Status status_ = arrow::Status::OK();
+    std::function<bool()> health_check_fn_;  // returns false when Rust task has exited
     std::atomic<uint64_t> stall_ns_{0};
     std::atomic<uint64_t> stall_count_{0};
     int64_t current_bytes_ = 0;
@@ -268,6 +287,13 @@ void LanceWriter::initialize_lance_dataset(
         streaming_started_ = true;
         stream_state_ = std::move(state);
         stream_reader_ = std::move(reader);
+
+        // Register health check: if the Rust task exits early (write error etc.),
+        // push() will detect it within 500 ms and unblock producers via set_error().
+        auto* raw = reinterpret_cast<::LanceWriter*>(rust_writer_);
+        stream_state_->set_health_check([raw]() -> bool {
+            return lance_writer_stream_is_alive(raw) != 0;
+        });
     }
 
     std::cout << "Lance: Initialized dataset at " << dataset_path_ << "\n";

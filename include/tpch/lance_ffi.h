@@ -47,6 +47,17 @@ LanceWriter* lance_writer_create(const char* uri, const void* arrow_schema_ptr, 
 int lance_writer_start_stream(LanceWriter* writer, void* arrow_stream_ptr);
 
 /**
+ * Check whether the background streaming task is still running.
+ *
+ * Used by C++ producers to detect early task exit (e.g., write error) so they
+ * can unblock from a full queue rather than hanging indefinitely.
+ *
+ * @param writer Pointer to LanceWriter from lance_writer_create()
+ * @return 1 if the background task is running, 0 if finished or not started
+ */
+int lance_writer_stream_is_alive(const LanceWriter* writer);
+
+/**
  * Configure write parameters for Lance writes.
  *
  * Pass 0 for any numeric parameter to keep the default.
