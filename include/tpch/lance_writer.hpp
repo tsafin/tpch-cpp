@@ -100,6 +100,12 @@ public:
      */
     void set_stream_queue_depth(size_t depth) { stream_queue_depth_ = depth; }
 
+    /**
+     * Enable io_uring write path (Linux only, requires io-uring feature compiled in).
+     * Must be called before the first batch is written.
+     */
+    void enable_io_uring(bool enabled) { use_io_uring_ = enabled; }
+
 private:
     std::string dataset_path_;
     std::string dataset_name_;
@@ -124,6 +130,7 @@ private:
     int64_t max_rows_per_group_ = 0;
     int64_t max_bytes_per_file_ = 0;
     bool skip_auto_cleanup_ = false;
+    bool use_io_uring_ = false;
 
     size_t stream_queue_depth_ = 16;
     std::shared_ptr<StreamState> stream_state_;
