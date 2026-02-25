@@ -55,6 +55,7 @@ struct Options {
     long lance_rows_per_group = 0;
     long lance_max_bytes_per_file = 0;
     bool lance_skip_auto_cleanup = false;
+    bool lance_io_uring = false;
     long lance_stream_queue = 16;
     std::string lance_stats_level;
     double lance_cardinality_sample_rate = 1.0;  // Phase 3.1: Sampling-based cardinality
@@ -67,6 +68,7 @@ constexpr int OPT_LANCE_SKIP_AUTO_CLEANUP = 1003;
 constexpr int OPT_LANCE_STREAM_QUEUE = 1004;
 constexpr int OPT_LANCE_STATS_LEVEL = 1005;
 constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
+constexpr int OPT_LANCE_IO_URING = 1007;
 
 void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
@@ -107,6 +109,7 @@ void print_usage(const char* prog) {
               << "  --lance-cardinality-sample-rate <0.0-1.0>  Cardinality sampling rate (Phase 3.1)\n"
               << "                               Controls HyperLogLog sampling: 1.0=100% (default),\n"
               << "                               0.5=50%, 0.1=10%. Smaller rates = faster writes.\n"
+              << "  --lance-io-uring            Use io_uring for Lance disk writes (Linux only)\n"
 #endif
               << "  --verbose             Verbose output\n"
               << "  --help                Show this help message\n";
@@ -133,6 +136,7 @@ Options parse_args(int argc, char* argv[]) {
         {"lance-stream-queue", required_argument, nullptr, OPT_LANCE_STREAM_QUEUE},
         {"lance-stats-level", required_argument, nullptr, OPT_LANCE_STATS_LEVEL},
         {"lance-cardinality-sample-rate", required_argument, nullptr, OPT_LANCE_CARDINALITY_SAMPLE_RATE},
+        {"lance-io-uring", no_argument, nullptr, OPT_LANCE_IO_URING},
 #endif
 #ifdef TPCH_ENABLE_ASYNC_IO
         {"async-io", no_argument, nullptr, 'a'},
@@ -197,6 +201,9 @@ Options parse_args(int argc, char* argv[]) {
                     std::cerr << "Error: cardinality-sample-rate must be between 0.01 and 1.0\n";
                     exit(1);
                 }
+                break;
+            case OPT_LANCE_IO_URING:
+                opts.lance_io_uring = true;
                 break;
             // case 'Z': DISABLED - true-zero-copy removed, use --zero-copy instead
 #ifdef TPCH_ENABLE_ASYNC_IO
@@ -1152,9 +1159,12 @@ int generate_all_tables_parallel_v2(const Options& opts) {
                 auto writer = create_writer(opts.format, output_path);
 
 #ifdef TPCH_ENABLE_LANCE
-                if (opts.zero_copy || opts.true_zero_copy) {
-                    if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+                if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+                    if (opts.zero_copy || opts.true_zero_copy) {
                         lance_writer->enable_streaming_write(true);
+                    }
+                    if (opts.lance_io_uring) {
+                        lance_writer->enable_io_uring(true);
                     }
                 }
 #endif
@@ -1420,6 +1430,14 @@ int main(int argc, char* argv[]) {
                 lance_writer->enable_streaming_write(true);
                 if (opts.verbose) {
                     std::cout << "Lance streaming write mode enabled (zero-copy)\n";
+                }
+            }
+
+            // Enable io_uring write path if requested
+            if (opts.lance_io_uring) {
+                lance_writer->enable_io_uring(true);
+                if (opts.verbose) {
+                    std::cout << "Lance io_uring write path enabled\n";
                 }
             }
         }

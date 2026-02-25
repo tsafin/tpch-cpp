@@ -8,14 +8,25 @@ authors = ["Timur Safin <timur.safin@gmail.com>"]
 # Rust 1.93.0 now available - enabling full Arrow/Lance support
 # Implements actual Lance dataset writing in Rust FFI
 
+[features]
+# io-uring is compiled in by default on Linux so runtime --io-uring flag works
+# without needing a separate binary build.
+default = ["io-uring"]
+io-uring = ["dep:io-uring"]
+
 [dependencies]
 arrow = { version = "57", features = ["ffi"] }
 lance = { path = "../lance/rust/lance" }
+lance-io = { path = "../lance/rust/lance-io" }
+object_store = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 tokio-stream = "0.1"
 futures = "0.3"
 serde_json = "1.0"
 libc = "0.2"
+async-trait = "0.1"
+bytes = "1"
+io-uring = { version = "0.7", optional = true }
 
 [lib]
 crate-type = ["staticlib"]

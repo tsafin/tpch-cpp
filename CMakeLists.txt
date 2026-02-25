@@ -294,6 +294,9 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
             list(APPEND CARGO_BUILD_CMD --target "${RUST_TARGET}")
         endif()
 
+        # io_uring is compiled in by default (see Cargo.toml default features).
+        # Runtime activation happens via --io-uring CLI flag, not a build switch.
+
         add_custom_command(
             OUTPUT "${LANCE_FFI_LIB_FINAL}"
             COMMAND ${CMAKE_COMMAND} -E echo "Building Lance FFI library with Rust cargo ..."
@@ -304,6 +307,7 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
             DEPENDS "${LANCE_FFI_DIR}/Cargo.toml"
                     "${LANCE_FFI_DIR}/Cargo.lock"
                     "${LANCE_FFI_DIR}/src/lib.rs"
+                    "${LANCE_FFI_DIR}/src/io_uring_store.rs"
             COMMENT "Compiling Lance FFI library with Rust (target: ${RUST_TARGET})"
             VERBATIM
         )

@@ -77,6 +77,17 @@ int lance_writer_set_write_params(
     int skip_auto_cleanup);
 
 /**
+ * Enable or disable the io_uring write path for this writer.
+ * Must be called before writing the first batch.
+ * Has no effect if the io-uring feature was not compiled in.
+ *
+ * @param writer Pointer to LanceWriter from lance_writer_create()
+ * @param enabled 1 to enable io_uring writes, 0 to disable
+ * @return 0 on success, non-zero on failure
+ */
+int lance_writer_enable_io_uring(LanceWriter* writer, int enabled);
+
+/**
  * Write a batch of records to the Lance dataset.
  *
  * Imports Arrow C Data Interface structures and accumulates batches for

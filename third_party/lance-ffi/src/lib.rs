@@ -18,6 +18,11 @@ use tokio::runtime::Runtime;
 use lance::dataset::{WriteParams, WriteMode, CommitBuilder};
 use libc;
 
+// io_uring write path — compiled in when feature is enabled (default on Linux)
+// Activated at runtime via lance_writer_enable_io_uring().
+#[cfg(feature = "io-uring")]
+mod io_uring_store;
+
 fn apply_compression_metadata(schema: &Schema) -> Schema {
     let fields: Vec<Field> = schema.fields().iter().map(|field| {
         let mut metadata = field.metadata().clone();
@@ -78,6 +83,7 @@ struct WriteParamsConfig {
     max_rows_per_group: usize,
     max_bytes_per_file: usize,
     skip_auto_cleanup: bool,
+    use_io_uring: bool,
 }
 
 impl Default for WriteParamsConfig {
@@ -87,6 +93,7 @@ impl Default for WriteParamsConfig {
             max_rows_per_group: 8192,
             max_bytes_per_file: 0,
             skip_auto_cleanup: false,
+            use_io_uring: false,
         }
     }
 }
@@ -273,6 +280,16 @@ fn build_write_params_from(config: WriteParamsConfig, mode: WriteMode) -> WriteP
         params.max_bytes_per_file = config.max_bytes_per_file;
     }
     params.skip_auto_cleanup = config.skip_auto_cleanup;
+
+    // Inject io_uring write path when requested at runtime (--io-uring CLI flag).
+    // The feature must be compiled in (default on Linux) for this to have any effect.
+    #[cfg(feature = "io-uring")]
+    if config.use_io_uring {
+        let mut store_params = lance_io::object_store::ObjectStoreParams::default();
+        store_params.object_store_wrapper = Some(Arc::new(io_uring_store::IoUringWrapper));
+        params.store_params = Some(store_params);
+    }
+
     params
 }
 
@@ -424,6 +441,30 @@ pub extern "C" fn lance_writer_set_write_params(
             writer.write_params.max_bytes_per_file = max_bytes_per_file as usize;
         }
         writer.write_params.skip_auto_cleanup = skip_auto_cleanup != 0;
+        0
+    })).unwrap_or(3)
+}
+
+/// Enable or disable io_uring write path for this writer.
+/// Must be called before the first batch is written.
+/// Returns 0 on success, 1 if writer_ptr is null, 2 if already closed.
+#[no_mangle]
+pub extern "C" fn lance_writer_enable_io_uring(
+    writer_ptr: *mut LanceWriterHandle,
+    enabled: c_int,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if writer_ptr.is_null() { return 1; }
+        let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
+        writer.write_params.use_io_uring = enabled != 0;
+        if enabled != 0 {
+            eprintln!("Lance FFI: io_uring write path {}", if cfg!(feature = "io-uring") {
+                "enabled"
+            } else {
+                "requested but not compiled in (rebuild with --features io-uring)"
+            });
+        }
         0
     })).unwrap_or(3)
 }

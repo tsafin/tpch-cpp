@@ -250,6 +250,11 @@ void LanceWriter::initialize_lance_dataset(
         throw std::runtime_error("Failed to create Lance writer via FFI");
     }
 
+    // Enable io_uring write path if requested (--lance-io-uring flag)
+    if (use_io_uring_) {
+        lance_writer_enable_io_uring(reinterpret_cast<::LanceWriter*>(rust_writer_), 1);
+    }
+
     if (max_rows_per_file_ > 0 || max_rows_per_group_ > 0 || max_bytes_per_file_ > 0 || skip_auto_cleanup_) {
         int result = lance_writer_set_write_params(
             reinterpret_cast<::LanceWriter*>(rust_writer_),
