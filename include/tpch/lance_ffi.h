@@ -79,13 +79,16 @@ int lance_writer_set_write_params(
 /**
  * Enable or disable the io_uring write path for this writer.
  * Must be called before writing the first batch.
- * Has no effect if the io-uring feature was not compiled in.
+ * Only available when building lance_ffi from source with the io-uring
+ * Cargo feature (TPCH_LANCE_IO_URING is defined by CMake in that case).
  *
  * @param writer Pointer to LanceWriter from lance_writer_create()
  * @param enabled 1 to enable io_uring writes, 0 to disable
  * @return 0 on success, non-zero on failure
  */
+#ifdef TPCH_LANCE_IO_URING
 int lance_writer_enable_io_uring(LanceWriter* writer, int enabled);
+#endif
 
 /**
  * Write a batch of records to the Lance dataset.
