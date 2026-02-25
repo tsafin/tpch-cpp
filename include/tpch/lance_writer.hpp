@@ -104,7 +104,9 @@ public:
      * Enable io_uring write path (Linux only, requires io-uring feature compiled in).
      * Must be called before the first batch is written.
      */
+#ifdef TPCH_LANCE_IO_URING
     void enable_io_uring(bool enabled) { use_io_uring_ = enabled; }
+#endif
 
 private:
     std::string dataset_path_;
@@ -130,7 +132,9 @@ private:
     int64_t max_rows_per_group_ = 0;
     int64_t max_bytes_per_file_ = 0;
     bool skip_auto_cleanup_ = false;
+#ifdef TPCH_LANCE_IO_URING
     bool use_io_uring_ = false;
+#endif
 
     size_t stream_queue_depth_ = 16;
     std::shared_ptr<StreamState> stream_state_;

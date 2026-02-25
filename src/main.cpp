@@ -1163,9 +1163,11 @@ int generate_all_tables_parallel_v2(const Options& opts) {
                     if (opts.zero_copy || opts.true_zero_copy) {
                         lance_writer->enable_streaming_write(true);
                     }
+                    #ifdef TPCH_LANCE_IO_URING
                     if (opts.lance_io_uring) {
                         lance_writer->enable_io_uring(true);
                     }
+                    #endif
                 }
 #endif
 
@@ -1434,12 +1436,14 @@ int main(int argc, char* argv[]) {
             }
 
             // Enable io_uring write path if requested
+#ifdef TPCH_LANCE_IO_URING
             if (opts.lance_io_uring) {
                 lance_writer->enable_io_uring(true);
                 if (opts.verbose) {
                     std::cout << "Lance io_uring write path enabled\n";
                 }
             }
+#endif
         }
 #endif
 

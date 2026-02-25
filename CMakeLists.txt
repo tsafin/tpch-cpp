@@ -315,6 +315,10 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
         add_custom_target(lance_ffi ALL DEPENDS "${LANCE_FFI_LIB_FINAL}")
         message(STATUS "Rust FFI build configured for Lance support")
         message(STATUS "  Rust target directory: ${LANCE_FFI_BUILD_DIR}")
+        # io_uring symbols are only present when we build from source (Cargo.toml
+        # has io-uring as a default feature).  Pre-compiled CI libraries may not
+        # have them, so gate the C++ call site with this flag.
+        set(LANCE_FFI_HAS_IO_URING TRUE)
     endif()
 
     # Import the Rust library as an external target
@@ -488,6 +492,9 @@ endif()
 
 if(TPCH_ENABLE_LANCE)
     target_compile_definitions(tpch_core PUBLIC TPCH_ENABLE_LANCE)
+    if(LANCE_FFI_HAS_IO_URING)
+        target_compile_definitions(tpch_core PUBLIC TPCH_LANCE_IO_URING)
+    endif()
 endif()
 
 if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
