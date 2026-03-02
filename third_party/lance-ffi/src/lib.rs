@@ -18,9 +18,11 @@ use tokio::runtime::Runtime;
 use lance::dataset::{WriteParams, WriteMode, CommitBuilder};
 use libc;
 
-// io_uring write path — compiled in when feature is enabled (default on Linux)
+// io_uring write path — compiled in when feature is enabled on Linux.
 // Activated at runtime via lance_writer_enable_io_uring().
-#[cfg(feature = "io-uring")]
+// The module uses Unix-only APIs (AsRawFd, MetadataExt, /sys/dev/block/…)
+// so it must be guarded by both the feature flag and target_os.
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
 mod io_uring_store;
 
 fn apply_compression_metadata(schema: &Schema) -> Schema {
@@ -282,8 +284,8 @@ fn build_write_params_from(config: WriteParamsConfig, mode: WriteMode) -> WriteP
     params.skip_auto_cleanup = config.skip_auto_cleanup;
 
     // Inject io_uring write path when requested at runtime (--io-uring CLI flag).
-    // The feature must be compiled in (default on Linux) for this to have any effect.
-    #[cfg(feature = "io-uring")]
+    // Only available on Linux (io_uring is a Linux-specific syscall).
+    #[cfg(all(feature = "io-uring", target_os = "linux"))]
     if config.use_io_uring {
         let mut store_params = lance_io::object_store::ObjectStoreParams::default();
         store_params.object_store_wrapper = Some(Arc::new(io_uring_store::IoUringWrapper));

@@ -253,7 +253,10 @@ void LanceWriter::initialize_lance_dataset(
     // Enable io_uring write path if requested (--lance-io-uring flag)
 #ifdef TPCH_LANCE_IO_URING
     if (use_io_uring_) {
-        lance_writer_enable_io_uring(reinterpret_cast<::LanceWriter*>(rust_writer_), 1);
+        int result = lance_writer_enable_io_uring(reinterpret_cast<::LanceWriter*>(rust_writer_), 1);
+        if (result != 0) {
+            throw std::runtime_error("Failed to enable io_uring for Lance writer");
+        }
     }
 #endif
 

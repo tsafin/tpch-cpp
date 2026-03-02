@@ -83,27 +83,39 @@ fn try_sysfs_queue_depth(path: &std::path::Path) -> Option<u32> {
         .find(|p| p.exists())
         .unwrap_or_else(|| std::path::Path::new("/"));
 
-    let dev = std::fs::metadata(probe).ok()?.dev();
-    // Extract major number.  Standard Linux encoding (works for major < 4096).
-    let target_major = ((dev >> 8) & 0xfff) as u32;
+    let raw_dev = std::fs::metadata(probe).ok()?.dev();
+    // Standard Linux dev_t encoding (works for major < 4096, minor < 1 048 576).
+    let major = (raw_dev >> 8) & 0xfff;
+    let minor = (raw_dev & 0xff) | ((raw_dev >> 12) & 0xfff00);
 
-    for entry in std::fs::read_dir("/sys/block").ok()?.flatten() {
-        let dev_file = entry.path().join("dev");
-        if let Ok(s) = std::fs::read_to_string(&dev_file) {
-            let block_major: u32 = s.trim().split(':').next()?.parse().ok()?;
-            if block_major == target_major {
-                let nr_req_path = entry.path().join("queue/nr_requests");
-                let nr_req: u32 =
-                    std::fs::read_to_string(nr_req_path).ok()?.trim().parse().ok()?;
-                let qd = (nr_req / 2).clamp(8, 128);
-                eprintln!(
-                    "Lance FFI: io_uring calibration: {:?} nr_requests={} → QD={}",
-                    entry.file_name(),
-                    nr_req,
-                    qd
-                );
-                return Some(qd);
-            }
+    // /sys/dev/block/MAJOR:MINOR is a symlink to the device's sysfs entry.
+    // This correctly handles partitions (e.g. sda1 → block/sda/sda1) without
+    // false-matching a different disk that shares the same major number.
+    let dev_link = std::path::PathBuf::from(format!("/sys/dev/block/{}:{}", major, minor));
+    let sysfs_path = std::fs::canonicalize(&dev_link).ok()?;
+
+    // Walk up from the resolved sysfs path until we find queue/nr_requests.
+    // For a partition (e.g. sda1) this walks up to the parent disk (sda) which
+    // owns the queue settings; for a whole-disk device it matches immediately.
+    let mut cur = sysfs_path.as_path();
+    loop {
+        let nr_req_file = cur.join("queue/nr_requests");
+        if nr_req_file.exists() {
+            let nr_req: u32 =
+                std::fs::read_to_string(&nr_req_file).ok()?.trim().parse().ok()?;
+            let dev_name = cur.file_name()?.to_string_lossy().into_owned();
+            let qd = (nr_req / 2).clamp(8, 128);
+            eprintln!(
+                "Lance FFI: io_uring calibration: {:?} nr_requests={} → QD={}",
+                dev_name,
+                nr_req,
+                qd
+            );
+            return Some(qd);
+        }
+        cur = cur.parent()?;
+        if cur == std::path::Path::new("/") {
+            break;
         }
     }
     None
@@ -232,7 +244,12 @@ fn collect_payload(payload: PutPayload) -> Vec<u8> {
 // ─── Convert object_store::Path → PathBuf ────────────────────────────────────
 
 fn to_fs_path(path: &Path) -> PathBuf {
-    PathBuf::from(format!("/{path}"))
+    let s = path.to_string();
+    if s.starts_with('/') {
+        PathBuf::from(s)
+    } else {
+        PathBuf::from(format!("/{s}"))
+    }
 }
 
 // ─── Worker thread ────────────────────────────────────────────────────────────
@@ -269,10 +286,10 @@ fn spawn_writer_thread(
     // Channel depth = 2×qd: enough headroom for Lance's concurrent-part window.
     let cap = (qd as usize).max(32);
     let (tx, mut rx) = tokio::sync::mpsc::channel::<WriteJob>(cap);
-    let raw_fd = file.as_raw_fd();
 
     let handle = std::thread::spawn(move || {
-        let _file = file; // keep fd alive so raw_fd stays valid
+        let _file = file; // keep fd alive for the entire thread lifetime
+        let raw_fd = _file.as_raw_fd(); // extract after move so lifetime is clear
         let mut ring = make_ring(qd)?;
 
         // `blocking_recv()` parks the worker thread until a job arrives.
@@ -318,7 +335,9 @@ impl MultipartUpload for IoUringMultipartUpload {
         let bytes = collect_payload(data);
         let len = bytes.len() as u64;
         // Pre-claim write offset so concurrent parts get distinct ranges.
-        let write_offset = self.offset.fetch_add(len, Ordering::SeqCst);
+        // Relaxed is sufficient: each part writes to its own non-overlapping
+        // range, so no happens-before relationship is needed between parts.
+        let write_offset = self.offset.fetch_add(len, Ordering::Relaxed);
 
         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
         let tx = self.tx.clone();
@@ -414,7 +433,7 @@ impl ObjectStore for IoUringStore {
         &self,
         location: &Path,
         payload: PutPayload,
-        opts: PutOptions,
+        _opts: PutOptions, // attributes/tags not applicable for local io_uring writes
     ) -> OSResult<PutResult> {
         let bytes = collect_payload(payload);
         let path = to_fs_path(location);
@@ -450,7 +469,7 @@ impl ObjectStore for IoUringStore {
     async fn put_multipart_opts(
         &self,
         location: &Path,
-        opts: PutMultipartOptions,
+        opts: PutMultipartOptions, // passed through to inner store on fallback
     ) -> OSResult<Box<dyn MultipartUpload>> {
         match IoUringMultipartUpload::create(to_fs_path(location)) {
             Ok(upload) => Ok(Box::new(upload)),
