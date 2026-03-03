@@ -51,6 +51,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liburing-dev \
     # UUID – Paimon and Iceberg metadata generation
     uuid-dev \
+    # JSON – Paimon and Iceberg metadata serialization
+    nlohmann-json3-dev \
     # SSL – needed at runtime by Lance's object_store HTTP backend
     libssl-dev \
     && pip3 install --no-cache-dir 'cmake>=3.25' \
