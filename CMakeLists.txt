@@ -226,6 +226,34 @@ endif()
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Generate dists_generated.c from dists.dss at configure time.
+# This embeds all distribution data as static C arrays, eliminating runtime
+# file I/O and heap allocation for distribution loading.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+set(DISTS_DSS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tpch/dbgen/dists.dss")
+set(DISTS_GENERATED_C "${CMAKE_BINARY_DIR}/generated/dists_generated.c")
+
+execute_process(
+    COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_dists.py"
+            "${DISTS_DSS_PATH}"
+            "${DISTS_GENERATED_C}"
+    RESULT_VARIABLE _gen_dists_result
+    OUTPUT_VARIABLE _gen_dists_output
+    ERROR_VARIABLE  _gen_dists_error
+)
+if(_gen_dists_result)
+    message(FATAL_ERROR "gen_dists.py failed: ${_gen_dists_error}")
+endif()
+message(STATUS "${_gen_dists_output}")
+
+# Re-run cmake if dists.dss or the generator script changes
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${DISTS_DSS_PATH}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_dists.py"
+)
+
 # Build dbgen objects
 add_subdirectory(third_party/dbgen EXCLUDE_FROM_ALL)
 include_directories(${DBGEN_INCLUDE_DIRS})
