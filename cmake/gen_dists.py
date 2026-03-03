@@ -185,9 +185,33 @@ def gen_c_source(distributions, input_path):
             '    {var}.list = {arr}; {var}.permute = (long*)NULL;'.format(
                 var=var, arr=arr_name))
 
-    # Emit load_dists()
+    # Emit load_dists() with DSS_DIST runtime fallback.
+    # If DSS_DIST is set we call read_dist() for every distribution, mirroring
+    # the original tpch_init.c behaviour.  Otherwise we use the compile-time
+    # embedded static arrays (no file I/O, no malloc).
+    # When d_path is set, read_dist() opens d_path directly and ignores the
+    # first 'path' argument; DIST_DFLT is just a harmless placeholder.
+    fallback_stmts = []
+    for dist_name in sorted(distributions.keys()):
+        info = distributions[dist_name]
+        fallback_stmts.append(
+            '    read_dist(DIST_DFLT, "{name}", &{var});'.format(
+                name=dist_name, var=info['var']))
+
     out.append('void load_dists(void)')
     out.append('{')
+    out.append('    /* If DSS_DIST is set, load from the specified file at runtime */')
+    out.append('    const char *env_dist = getenv(DIST_TAG);')
+    out.append('    if (env_dist != NULL && *env_dist != \'\\0\') {')
+    out.append('        /* Set d_path so read_dist() opens env_dist directly,')
+    out.append('         * bypassing the CONFIG_DFLT prefix logic. */')
+    out.append('        d_path = (char*)env_dist;')
+    for stmt in fallback_stmts:
+        out.append('    ' + stmt)
+    out.append('        d_path = NULL;')
+    out.append('        return;')
+    out.append('    }')
+    out.append('    /* No DSS_DIST: use compile-time embedded distributions (no file I/O) */')
     out.extend(load_stmts)
     out.append('}')
     out.append('')
