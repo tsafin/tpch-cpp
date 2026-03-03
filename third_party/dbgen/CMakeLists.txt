@@ -19,7 +19,7 @@ set(DBGEN_CORE_SOURCES
     ${DBGEN_SOURCE_DIR}/permute.c
     ${DBGEN_SOURCE_DIR}/speed_seed.c
     ${DBGEN_SOURCE_DIR}/bcd2.c
-    ${DBGEN_SOURCE_DIR}/tpch_init.c
+    "${CMAKE_BINARY_DIR}/generated/dists_generated.c"
     "${CMAKE_SOURCE_DIR}/src/dbgen/dbgen_stubs.c"
 )
 
