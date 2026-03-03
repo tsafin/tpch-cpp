@@ -11,6 +11,11 @@ on:
       - 'third_party/arrow'
       - 'third_party/orc'
       - 'third_party/lance-ffi'
+      - 'third_party/lance'
+      - 'cmake/gen_dists.py'
+      - 'CMakeLists.txt'
+      - 'src/**'
+      - 'include/**'
       - '.github/workflows/docker-images.yml'
   workflow_dispatch:
     inputs:
@@ -23,6 +28,7 @@ on:
           - base
           - orc
           - lance
+          - all-formats
 
 env:
   REGISTRY: ghcr.io
@@ -37,6 +43,7 @@ jobs:
       base: ${{ steps.filter.outputs.base }}
       orc: ${{ steps.filter.outputs.orc }}
       lance: ${{ steps.filter.outputs.lance }}
+      all-formats: ${{ steps.filter.outputs.all-formats }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -63,6 +70,17 @@ jobs:
               - '.docker/Dockerfile.base'
               - 'third_party/lance-ffi/**'
               - 'third_party/lance/**'
+              - '.github/workflows/docker-images.yml'
+            all-formats:
+              - '.docker/Dockerfile.all'
+              - 'third_party/arrow/**'
+              - 'third_party/orc/**'
+              - 'third_party/lance-ffi/**'
+              - 'third_party/lance/**'
+              - 'cmake/gen_dists.py'
+              - 'CMakeLists.txt'
+              - 'src/**'
+              - 'include/**'
               - '.github/workflows/docker-images.yml'
 
   build-base:
@@ -235,4 +253,66 @@ jobs:
             type=gha
           cache-to: |
             type=registry,ref=${{ env.IMAGE_PREFIX }}-lance:buildcache,mode=max
+            type=gha,mode=max
+
+  build-all-formats:
+    name: Build All-Formats Image
+    runs-on: ubuntu-22.04
+    needs: [check-changes]
+    if: |
+      always() &&
+      !cancelled() &&
+      (needs.check-changes.result == 'skipped' ||
+       needs.check-changes.outputs.all-formats == 'true' ||
+       github.event.inputs.image == 'all' ||
+       github.event.inputs.image == 'all-formats')
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-all
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push all-formats image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .docker/Dockerfile.all
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Each named build stage gets its own cache entry so that
+          # Arrow, ORC, and Rust can be cached independently.
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-all:buildcache-deps
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-all:buildcache-orc
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-all:buildcache-rust
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-all:buildcache
+            type=gha
+          cache-to: |
+            type=registry,ref=${{ env.IMAGE_PREFIX }}-all:buildcache,mode=max
             type=gha,mode=max

@@ -1,0 +1,266 @@
+# syntax=docker/dockerfile:1.4
+###############################################################################
+# Dockerfile.all — tpch_benchmark with ALL supported formats
+#
+# Formats included:  CSV · Parquet · ORC · Paimon · Iceberg · Lance
+# Features included: async I/O (io_uring), io_uring Lance write path
+#
+# Multi-stage build — each stage can be cached independently:
+#
+#   stage-deps  ubuntu:22.04 + system packages + Arrow + Parquet
+#       │
+#       ├─► stage-orc   adds ORC (static lib with embedded protobuf)
+#       │                       ┐
+#       └─► stage-rust  adds Rust toolchain only (no source build here)
+#                               │
+#   builder    FROM stage-orc; COPY Rust from stage-rust; build tpch_benchmark
+#              (CMake finds Rust → builds lance_ffi from source;
+#               sets LANCE_FFI_HAS_IO_URING=TRUE automatically)
+#       │
+#   runtime    ubuntu:22.04 + runtime system libs + binary + Arrow/Parquet .so
+#
+# stage-orc and stage-rust are independent and can be built in parallel.
+###############################################################################
+
+ARG UBUNTU_VERSION=22.04
+ARG RUST_VERSION=1.93.0
+ARG INSTALL_PREFIX=/opt/tpch
+
+###############################################################################
+# stage-deps: system packages + Arrow/Parquet built from source
+###############################################################################
+FROM ubuntu:${UBUNTU_VERSION} AS stage-deps
+
+ARG INSTALL_PREFIX
+ENV DEBIAN_FRONTEND=noninteractive \
+    INSTALL_PREFIX=${INSTALL_PREFIX}
+
+# System packages needed to build Arrow and the final binary.
+# protobuf is here because ORC (built later) shares the same base image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core build tools
+    cmake build-essential git pkg-config wget ca-certificates \
+    python3 python3-pip \
+    # Compression codecs (Arrow, ORC, Parquet)
+    libsnappy-dev liblz4-dev libzstd-dev zlib1g-dev libbrotli-dev \
+    # Schema / encoding libraries
+    libboost-all-dev rapidjson-dev libthrift-dev libre2-dev \
+    # Protobuf – used by ORC (Arrow is built WITHOUT protobuf)
+    libprotobuf-dev protobuf-compiler libtool \
+    # Async I/O (io_uring for CSV writer and Lance write path)
+    liburing-dev \
+    # UUID – Paimon and Iceberg metadata generation
+    uuid-dev \
+    # SSL – needed at runtime by Lance's object_store HTTP backend
+    libssl-dev \
+    && pip3 install --no-cache-dir 'cmake>=3.25' \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p ${INSTALL_PREFIX}/{lib,include,lib/pkgconfig}
+
+# xsimd: header-only SIMD library used by Arrow internals
+COPY third_party/xsimd third_party/xsimd
+RUN cmake -S third_party/xsimd -B third_party/xsimd/_build \
+        -DCMAKE_INSTALL_PREFIX=/tmp/xsimd_inst \
+        -DBUILD_TESTING=OFF && \
+    cmake --build third_party/xsimd/_build --target install -j$(nproc) && \
+    rm -rf third_party/xsimd/_build
+
+# Arrow + Parquet (built WITHOUT protobuf to avoid symbol conflicts with ORC's
+# statically embedded protobuf; see CMakeLists.txt comment for background).
+COPY third_party/arrow third_party/arrow
+RUN cmake -S third_party/arrow/cpp -B third_party/arrow/cpp/_build \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
+        -DCMAKE_PREFIX_PATH=/tmp/xsimd_inst \
+        -DARROW_PARQUET=ON \
+        -DARROW_CSV=ON \
+        -DARROW_COMPUTE=ON \
+        -DARROW_FILESYSTEM=ON \
+        -DARROW_WITH_SNAPPY=ON \
+        -DARROW_WITH_ZSTD=ON \
+        -DARROW_WITH_LZ4=ON \
+        -DARROW_WITH_ZLIB=ON \
+        -DARROW_WITH_PROTOBUF=OFF \
+        -DARROW_ORC=OFF \
+        -DARROW_FLIGHT=OFF \
+        -DARROW_SUBSTRAIT=OFF \
+        -DARROW_BUILD_TESTS=OFF && \
+    cmake --build third_party/arrow/cpp/_build -j$(nproc) && \
+    cmake --install third_party/arrow/cpp/_build && \
+    rm -rf third_party/arrow/cpp/_build /tmp/xsimd_inst
+
+ENV LD_LIBRARY_PATH=${INSTALL_PREFIX}/lib \
+    PKG_CONFIG_PATH=${INSTALL_PREFIX}/lib/pkgconfig \
+    CMAKE_PREFIX_PATH=${INSTALL_PREFIX}
+
+RUN ldconfig && \
+    ls -lh ${INSTALL_PREFIX}/lib/libarrow*.so* ${INSTALL_PREFIX}/lib/libparquet*.so* && \
+    echo "stage-deps: Arrow/Parquet ready"
+
+###############################################################################
+# stage-orc: ORC as a static library with protobuf embedded
+#
+# IMPORTANT: -DBUILD_SHARED_LIBS=OFF produces liborc.a which bundles its own
+# protobuf symbols, keeping them isolated from Arrow's build.
+###############################################################################
+FROM stage-deps AS stage-orc
+
+COPY third_party/orc third_party/orc
+RUN cmake -S third_party/orc -B third_party/orc/_build \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
+        -DBUILD_LIBHDFSPP=OFF \
+        -DBUILD_JAVA=OFF \
+        -DBUILD_TOOLS=OFF \
+        -DBUILD_CPP_TESTS=OFF \
+        -DINSTALL_VENDORED_LIBS=OFF \
+        -DBUILD_SHARED_LIBS=OFF && \
+    cmake --build third_party/orc/_build -j$(nproc) && \
+    cmake --install third_party/orc/_build && \
+    rm -rf third_party/orc/_build
+
+RUN ls -lh ${INSTALL_PREFIX}/lib/liborc.a && \
+    echo "stage-orc: ORC static lib ready"
+
+###############################################################################
+# stage-rust: Rust toolchain only (no Lance FFI build here)
+#
+# This stage is independent of stage-orc and can be built in parallel.
+# The toolchain is copied into the builder stage via COPY --from.
+# Lance FFI is compiled in the builder stage so that CMake can set
+# LANCE_FFI_HAS_IO_URING=TRUE (it only does this when building from source).
+###############################################################################
+FROM stage-deps AS stage-rust
+
+ARG RUST_VERSION
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+# mold linker speeds up Rust linking significantly
+RUN apt-get update && apt-get install -y --no-install-recommends mold \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget -qO- https://sh.rustup.rs | \
+    sh -s -- -y \
+        --default-toolchain ${RUST_VERSION} \
+        --profile minimal \
+        --no-modify-path && \
+    chmod -R a+w ${RUSTUP_HOME} ${CARGO_HOME}
+
+RUN rustc --version && cargo --version && \
+    echo "stage-rust: Rust ${RUST_VERSION} toolchain ready"
+
+###############################################################################
+# builder: compile tpch_benchmark with ALL formats enabled
+#
+# Starts from stage-orc (has Arrow + ORC + all system build deps).
+# Rust toolchain is imported from stage-rust via COPY --from.
+# lance-ffi and lance sources are copied in so CMake can build the FFI
+# from source — this is required for LANCE_FFI_HAS_IO_URING to be set.
+###############################################################################
+FROM stage-orc AS builder
+
+# Import Rust toolchain from stage-rust (avoids re-downloading ~300 MB)
+COPY --from=stage-rust /usr/local/rustup /usr/local/rustup
+COPY --from=stage-rust /usr/local/cargo  /usr/local/cargo
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+# mold linker: used by both CMake (TPCH_ENABLE_MOLD) and Rust (RUSTFLAGS)
+RUN apt-get update && apt-get install -y --no-install-recommends mold \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
+
+WORKDIR /src/tpch-cpp
+
+# Third-party vendored sources.
+# Layer ordering: large/infrequently-changed trees first for better cache reuse.
+COPY third_party/lance     third_party/lance
+COPY third_party/lance-ffi third_party/lance-ffi
+COPY third_party/dbgen     third_party/dbgen
+COPY third_party/tpch      third_party/tpch
+COPY third_party/xsimd     third_party/xsimd
+
+# Project source (changes more frequently — near the end)
+COPY cmake     cmake
+COPY include   include
+COPY src       src
+COPY examples  examples
+COPY CMakeLists.txt .
+
+# Configure and build.
+# -DTPCH_ENABLE_LANCE=ON  → CMake finds Cargo (from imported toolchain) and
+#   builds lance-ffi from source → sets LANCE_FFI_HAS_IO_URING=TRUE so that
+#   the io_uring Lance write path is compiled in.
+# -DTPCH_BUILD_EXAMPLES=OFF / TESTS=OFF → skip non-essential targets.
+RUN cmake -S . -B build \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_PREFIX_PATH=${INSTALL_PREFIX} \
+        -DTPCH_ENABLE_ORC=ON \
+        -DTPCH_ENABLE_PAIMON=ON \
+        -DTPCH_ENABLE_ICEBERG=ON \
+        -DTPCH_ENABLE_LANCE=ON \
+        -DTPCH_ENABLE_ASYNC_IO=ON \
+        -DTPCH_BUILD_EXAMPLES=OFF \
+        -DTPCH_BUILD_TESTS=OFF && \
+    cmake --build build -j$(nproc) --target tpch_benchmark
+
+RUN ls -lh build/tpch_benchmark && \
+    echo "builder: tpch_benchmark compiled with all formats"
+
+###############################################################################
+# runtime: minimal image — binary + shared libs only
+#
+# ORC and Lance FFI are statically linked (liborc.a, liblance_ffi.a) so they
+# need no runtime shared libraries.  Arrow and Parquet are shared and must be
+# copied along with their system library dependencies.
+###############################################################################
+FROM ubuntu:${UBUNTU_VERSION} AS runtime
+
+ARG INSTALL_PREFIX
+ENV DEBIAN_FRONTEND=noninteractive \
+    INSTALL_PREFIX=${INSTALL_PREFIX}
+
+LABEL org.opencontainers.image.source="https://github.com/tsafin/tpch-cpp"
+LABEL org.opencontainers.image.description="tpch_benchmark — all formats: CSV, Parquet, ORC, Paimon, Iceberg, Lance"
+LABEL maintainer="tsafin"
+
+# Runtime-only system libraries required by the shared Arrow/Parquet libs
+# and by the benchmark itself.  No *-dev packages needed here.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Arrow compression codecs (dynamically linked from libarrow.so)
+    libzstd1 liblz4-1 libsnappy1v5 zlib1g libbrotli1 \
+    # Arrow/Parquet schema libraries
+    libthrift-0.16.0 libre2-9 \
+    # io_uring (async I/O: CSV writer + Lance write path)
+    liburing2 \
+    # UUID (Paimon / Iceberg metadata)
+    libuuid1 \
+    # TLS (Lance object_store HTTP/S3 backend)
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Arrow and Parquet shared libraries (built from source — not in standard apt)
+COPY --from=builder ${INSTALL_PREFIX}/lib/libarrow*.so*   ${INSTALL_PREFIX}/lib/
+COPY --from=builder ${INSTALL_PREFIX}/lib/libparquet*.so* ${INSTALL_PREFIX}/lib/
+
+ENV LD_LIBRARY_PATH=${INSTALL_PREFIX}/lib
+
+# The benchmark binary
+COPY --from=builder /src/tpch-cpp/build/tpch_benchmark /usr/local/bin/tpch_benchmark
+
+# Verify the binary loads correctly and record what formats are available
+RUN ldconfig && \
+    ldd /usr/local/bin/tpch_benchmark && \
+    tpch_benchmark --help
+
+# Output data directory (mount a host volume here for generated files)
+WORKDIR /data
+
+ENTRYPOINT ["tpch_benchmark"]
+CMD ["--help"]
