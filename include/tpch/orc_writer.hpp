@@ -40,16 +40,27 @@ public:
      */
     void close() override;
 
+    /**
+     * Enable io_uring-backed output stream for ORC disk writes (Linux only).
+     * Replaces the default writeLocalFile() stream with a double-buffered io_uring writer.
+     * Must be called before the first write_batch().
+     *
+     * @param enable true to enable io_uring write path
+     */
+    void enable_io_uring(bool enable);
+
 private:
     std::string filepath_;
     std::shared_ptr<arrow::RecordBatch> first_batch_;
     bool schema_locked_ = false;
+    bool use_io_uring_ = false;
 
     // Opaque ORC implementations (void* to avoid exposing ORC headers)
     // In the implementation file, these are cast to their actual types
     void* orc_writer_;           // orc::Writer*
-    void* orc_output_stream_;    // unique_ptr<OrcFile::OutStream>
+    void* orc_output_stream_;    // unique_ptr<OrcFile::OutStream> (synchronous path)
     void* orc_type_;             // unique_ptr<orc::Type>
+    void* orc_io_uring_stream_;  // OrcIoUringStream* (io_uring path)
 };
 
 }  // namespace tpch

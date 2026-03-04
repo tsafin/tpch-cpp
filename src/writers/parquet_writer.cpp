@@ -14,6 +14,111 @@
 #include <arrow/io/api.h>
 #include <parquet/arrow/writer.h>
 
+#ifdef TPCH_ENABLE_ASYNC_IO
+
+namespace tpch {
+
+/**
+ * Arrow OutputStream backed by io_uring for async disk writes.
+ * Uses double-buffering: fills current_ while io_uring drains pending_.
+ */
+class IoUringOutputStream : public arrow::io::OutputStream {
+    static constexpr size_t kChunkSize = 1024 * 1024;  // 1 MB chunks
+
+    std::string filepath_;
+    int fd_ = -1;
+    int64_t offset_ = 0;
+    bool closed_ = false;
+    bool has_pending_ = false;
+
+    std::vector<uint8_t> current_;   // being filled by Write()
+    std::vector<uint8_t> pending_;   // submitted to io_uring
+
+    std::unique_ptr<AsyncIOContext> context_;
+
+public:
+    IoUringOutputStream(const std::string& filepath, uint32_t queue_depth)
+        : filepath_(filepath) {
+        fd_ = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd_ < 0) {
+            throw std::runtime_error("IoUringOutputStream: open failed: " + std::string(strerror(errno)));
+        }
+        context_ = std::make_unique<AsyncIOContext>(queue_depth);
+        current_.reserve(kChunkSize);
+        pending_.reserve(kChunkSize);
+    }
+
+    ~IoUringOutputStream() override {
+        if (!closed_) {
+            try { Close(); } catch (...) {}
+        }
+    }
+
+    arrow::Status Write(const void* data, int64_t nbytes) override {
+        const uint8_t* ptr = static_cast<const uint8_t*>(data);
+        while (nbytes > 0) {
+            size_t space = kChunkSize - current_.size();
+            size_t to_copy = std::min(static_cast<size_t>(nbytes), space);
+            current_.insert(current_.end(), ptr, ptr + to_copy);
+            ptr += to_copy;
+            nbytes -= static_cast<int64_t>(to_copy);
+
+            if (current_.size() >= kChunkSize) {
+                ARROW_RETURN_NOT_OK(submit_current());
+            }
+        }
+        return arrow::Status::OK();
+    }
+
+    arrow::Status Flush() override {
+        if (!current_.empty()) {
+            ARROW_RETURN_NOT_OK(submit_current());
+        }
+        if (has_pending_) {
+            context_->wait_completions(1);
+            has_pending_ = false;
+        }
+        return arrow::Status::OK();
+    }
+
+    arrow::Status Close() override {
+        if (closed_) return arrow::Status::OK();
+        ARROW_RETURN_NOT_OK(Flush());
+        ::close(fd_);
+        fd_ = -1;
+        closed_ = true;
+        return arrow::Status::OK();
+    }
+
+    bool closed() const override { return closed_; }
+
+    arrow::Result<int64_t> Tell() const override {
+        return offset_ + static_cast<int64_t>(current_.size());
+    }
+
+private:
+    arrow::Status submit_current() {
+        // Wait for previous pending write to complete before reusing pending_ buffer
+        if (has_pending_) {
+            context_->wait_completions(1);
+            has_pending_ = false;
+        }
+        // Double-buffer swap: pending_ is now safe to refill
+        std::swap(current_, pending_);
+        current_.clear();
+
+        context_->queue_write(fd_, pending_.data(), pending_.size(), offset_, 0);
+        context_->submit_queued();
+        offset_ += static_cast<int64_t>(pending_.size());
+        has_pending_ = true;
+        return arrow::Status::OK();
+    }
+};
+
+}  // namespace tpch
+
+#endif  // TPCH_ENABLE_ASYNC_IO
+
 namespace tpch {
 
 ParquetWriter::ParquetWriter(
@@ -115,6 +220,10 @@ void ParquetWriter::enable_streaming_write(bool use_threads) {
     use_threads_ = use_threads;
 }
 
+void ParquetWriter::enable_io_uring(bool enable) {
+    use_io_uring_ = enable;
+}
+
 void ParquetWriter::write_managed_batch(const ManagedRecordBatch& managed_batch) {
     if (closed_) {
         throw std::runtime_error("Cannot write to a closed Parquet writer");
@@ -176,11 +285,20 @@ void ParquetWriter::init_file_writer() {
         ->build();
 
     // Create output stream
-    auto outfile_result = arrow::io::FileOutputStream::Open(filepath_);
-    if (!outfile_result.ok()) {
-        throw std::runtime_error("Failed to open file: " + outfile_result.status().message());
+    std::shared_ptr<arrow::io::OutputStream> outfile;
+#ifdef TPCH_ENABLE_ASYNC_IO
+    if (use_io_uring_) {
+        outfile = std::make_shared<IoUringOutputStream>(filepath_, 256);
+    } else {
+#endif
+        auto outfile_result = arrow::io::FileOutputStream::Open(filepath_);
+        if (!outfile_result.ok()) {
+            throw std::runtime_error("Failed to open file: " + outfile_result.status().message());
+        }
+        outfile = outfile_result.ValueOrDie();
+#ifdef TPCH_ENABLE_ASYNC_IO
     }
-    auto outfile = outfile_result.ValueOrDie();
+#endif
 
     // Create FileWriter for streaming RecordBatches
     auto writer_result = parquet::arrow::FileWriter::Open(

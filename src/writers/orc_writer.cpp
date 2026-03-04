@@ -2,6 +2,10 @@
 #include <sstream>
 #include <memory>
 #include <stdexcept>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstring>
 
 // Minimal Arrow includes to avoid protobuf symbol pollution
 // These specific headers should NOT pull in protobuf infrastructure
@@ -12,6 +16,113 @@
 #include <orc/OrcFile.hh>
 
 #include "tpch/orc_writer.hpp"
+#include "tpch/async_io.hpp"
+
+#ifdef TPCH_ENABLE_ASYNC_IO
+
+namespace tpch {
+
+/**
+ * ORC OutputStream backed by io_uring for async disk writes.
+ * Uses double-buffering: fills current_ while io_uring drains pending_.
+ */
+class OrcIoUringStream : public orc::OutputStream {
+    static constexpr size_t kChunkSize = 1024 * 1024;  // 1 MB chunks
+
+    std::string filepath_;
+    int fd_ = -1;
+    uint64_t offset_ = 0;
+    bool has_pending_ = false;
+
+    std::vector<uint8_t> current_;   // being filled by write()
+    std::vector<uint8_t> pending_;   // submitted to io_uring
+
+    std::unique_ptr<AsyncIOContext> context_;
+
+public:
+    OrcIoUringStream(const std::string& filepath, uint32_t queue_depth)
+        : filepath_(filepath) {
+        fd_ = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd_ < 0) {
+            throw std::runtime_error("OrcIoUringStream: open failed: " + std::string(strerror(errno)));
+        }
+        context_ = std::make_unique<AsyncIOContext>(queue_depth);
+        current_.reserve(kChunkSize);
+        pending_.reserve(kChunkSize);
+    }
+
+    ~OrcIoUringStream() override {
+        try { close(); } catch (...) {}
+    }
+
+    void write(const void* buf, size_t length) override {
+        if (fd_ < 0) {
+            return;  // Silently ignore writes after close (matches sync ORC stream behavior)
+        }
+        const uint8_t* ptr = static_cast<const uint8_t*>(buf);
+        while (length > 0) {
+            size_t space = kChunkSize - current_.size();
+            size_t to_copy = std::min(length, space);
+            current_.insert(current_.end(), ptr, ptr + to_copy);
+            ptr += to_copy;
+            length -= to_copy;
+
+            if (current_.size() >= kChunkSize) {
+                submit_current();
+            }
+        }
+    }
+
+    void close() override {
+        // Flush remaining data
+        if (!current_.empty()) {
+            submit_current();
+        }
+        // Drain pending io_uring write
+        if (has_pending_) {
+            context_->wait_completions(1);
+            has_pending_ = false;
+        }
+        if (fd_ >= 0) {
+            ::close(fd_);
+            fd_ = -1;
+        }
+    }
+
+    uint64_t getLength() const override {
+        return offset_ + static_cast<uint64_t>(current_.size());
+    }
+
+    uint64_t getNaturalWriteSize() const override {
+        return kChunkSize;
+    }
+
+    const std::string& getName() const override {
+        return filepath_;
+    }
+
+private:
+    void submit_current() {
+        // Wait for previous pending write to complete before reusing pending_ buffer
+        if (has_pending_) {
+            context_->wait_completions(1);
+            has_pending_ = false;
+        }
+        // Double-buffer swap: pending_ is now safe to refill
+        std::swap(current_, pending_);
+        current_.clear();
+
+        context_->queue_write(fd_, pending_.data(), pending_.size(),
+                              static_cast<off_t>(offset_), 0);
+        context_->submit_queued();
+        offset_ += pending_.size();
+        has_pending_ = true;
+    }
+};
+
+}  // namespace tpch
+
+#endif  // TPCH_ENABLE_ASYNC_IO
 
 namespace tpch {
 
@@ -169,7 +280,8 @@ void copy_array_to_orc_column(
 }  // anonymous namespace
 
 ORCWriter::ORCWriter(const std::string& filepath)
-    : filepath_(filepath), orc_writer_(nullptr), orc_output_stream_(nullptr), orc_type_(nullptr) {
+    : filepath_(filepath), orc_writer_(nullptr), orc_output_stream_(nullptr),
+      orc_type_(nullptr), orc_io_uring_stream_(nullptr) {
     // Constructor doesn't create writer yet - we wait for first batch to get schema
 }
 
@@ -198,6 +310,14 @@ ORCWriter::~ORCWriter() {
         delete reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
         orc_type_ = nullptr;
     }
+
+    // Delete io_uring stream (if used)
+#ifdef TPCH_ENABLE_ASYNC_IO
+    if (orc_io_uring_stream_) {
+        delete reinterpret_cast<OrcIoUringStream*>(orc_io_uring_stream_);
+        orc_io_uring_stream_ = nullptr;
+    }
+#endif
 }
 
 void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
@@ -218,20 +338,36 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
             auto orc_type_local = orc::Type::buildTypeFromString(orc_schema_str);
             orc_type_ = new std::unique_ptr<orc::Type>(std::move(orc_type_local));
 
-            // Create output file stream using ORC factory function - must be stored as member to stay alive
-            auto out_stream_local = orc::writeLocalFile(filepath_);
-            orc_output_stream_ = new std::unique_ptr<orc::OutputStream>(std::move(out_stream_local));
-
             // Create writer options
             orc::WriterOptions writer_options;
             writer_options.setStripeSize(64 * 1024 * 1024);  // 64MB stripes
             writer_options.setRowIndexStride(10000);
+            // Always attempt dictionary encoding for strings (threshold = 1.0 = always).
+            // TPC-H string columns have 2-40 unique values, so dictionary is always beneficial.
+            writer_options.setDictionaryKeySizeThreshold(1.0);
+
+            auto* orc_type_ptr = reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
+
+#ifdef TPCH_ENABLE_ASYNC_IO
+            if (use_io_uring_) {
+                // io_uring path: OrcIoUringStream owns the fd and the ring
+                auto* uring_stream = new OrcIoUringStream(filepath_, 256);
+                orc_io_uring_stream_ = uring_stream;
+                auto writer = orc::createWriter(**orc_type_ptr, uring_stream, writer_options);
+                orc_writer_ = writer.release();
+            } else {
+#endif
+            // Create output file stream using ORC factory function - must be stored as member to stay alive
+            auto out_stream_local = orc::writeLocalFile(filepath_);
+            orc_output_stream_ = new std::unique_ptr<orc::OutputStream>(std::move(out_stream_local));
 
             // Create ORC writer using factory function
             auto* out_stream_ptr = reinterpret_cast<std::unique_ptr<orc::OutputStream>*>(orc_output_stream_);
-            auto* orc_type_ptr = reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
             auto writer = orc::createWriter(**orc_type_ptr, out_stream_ptr->get(), writer_options);
             orc_writer_ = writer.release();
+#ifdef TPCH_ENABLE_ASYNC_IO
+            }
+#endif
 
         } catch (const std::exception& e) {
             schema_locked_ = false;
@@ -290,6 +426,10 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("Failed to write ORC batch: ") + e.what());
     }
+}
+
+void ORCWriter::enable_io_uring(bool enable) {
+    use_io_uring_ = enable;
 }
 
 void ORCWriter::close() {

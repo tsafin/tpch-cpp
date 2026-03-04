@@ -59,6 +59,8 @@ struct Options {
     long lance_stream_queue = 16;
     std::string lance_stats_level;
     double lance_cardinality_sample_rate = 1.0;  // Phase 3.1: Sampling-based cardinality
+    bool parquet_io_uring = false;
+    bool orc_io_uring = false;
 };
 
 constexpr int OPT_LANCE_ROWS_PER_FILE = 1000;
@@ -69,6 +71,8 @@ constexpr int OPT_LANCE_STREAM_QUEUE = 1004;
 constexpr int OPT_LANCE_STATS_LEVEL = 1005;
 constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
 constexpr int OPT_LANCE_IO_URING = 1007;
+constexpr int OPT_PARQUET_IO_URING = 1008;
+constexpr int OPT_ORC_IO_URING     = 1009;
 
 void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
@@ -111,6 +115,10 @@ void print_usage(const char* prog) {
               << "                               0.5=50%, 0.1=10%. Smaller rates = faster writes.\n"
               << "  --lance-io-uring            Use io_uring for Lance disk writes (Linux only)\n"
 #endif
+#ifdef TPCH_ENABLE_ASYNC_IO
+              << "  --parquet-io-uring    Use io_uring for Parquet streaming writes (requires --streaming, Linux only)\n"
+              << "  --orc-io-uring        Use io_uring for ORC disk writes (Linux only)\n"
+#endif
               << "  --verbose             Verbose output\n"
               << "  --help                Show this help message\n";
 }
@@ -139,7 +147,9 @@ Options parse_args(int argc, char* argv[]) {
         {"lance-io-uring", no_argument, nullptr, OPT_LANCE_IO_URING},
 #endif
 #ifdef TPCH_ENABLE_ASYNC_IO
-        {"async-io", no_argument, nullptr, 'a'},
+        {"async-io",        no_argument, nullptr, 'a'},
+        {"parquet-io-uring", no_argument, nullptr, OPT_PARQUET_IO_URING},
+        {"orc-io-uring",    no_argument, nullptr, OPT_ORC_IO_URING},
 #endif
         {"verbose", no_argument, nullptr, 'v'},
         {"help", no_argument, nullptr, 'h'},
@@ -209,6 +219,12 @@ Options parse_args(int argc, char* argv[]) {
 #ifdef TPCH_ENABLE_ASYNC_IO
             case 'a':
                 opts.async_io = true;
+                break;
+            case OPT_PARQUET_IO_URING:
+                opts.parquet_io_uring = true;
+                break;
+            case OPT_ORC_IO_URING:
+                opts.orc_io_uring = true;
                 break;
 #endif
             case 'v':
@@ -1445,6 +1461,32 @@ int main(int argc, char* argv[]) {
             }
 #endif
         }
+#endif
+
+        // Wire up Parquet and ORC io_uring flags
+#ifdef TPCH_ENABLE_ASYNC_IO
+        if (opts.parquet_io_uring) {
+            if (auto* pw = dynamic_cast<tpch::ParquetWriter*>(writer.get())) {
+                if (!opts.zero_copy) {
+                    std::cerr << "Warning: --parquet-io-uring has no effect without --zero-copy (streaming mode)\n";
+                } else {
+                    pw->enable_io_uring(true);
+                    if (opts.verbose) {
+                        std::cout << "Parquet io_uring write path enabled\n";
+                    }
+                }
+            }
+        }
+#ifdef TPCH_ENABLE_ORC
+        if (opts.orc_io_uring) {
+            if (auto* ow = dynamic_cast<tpch::ORCWriter*>(writer.get())) {
+                ow->enable_io_uring(true);
+                if (opts.verbose) {
+                    std::cout << "ORC io_uring write path enabled\n";
+                }
+            }
+        }
+#endif
 #endif
 
         // Set async context if available
