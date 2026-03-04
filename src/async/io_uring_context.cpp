@@ -6,28 +6,123 @@
 #include <stdexcept>
 #include <cstring>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <climits>
+#include <cstdio>
 #include <algorithm>
+#include <mutex>
+#include <string>
 
 namespace tpch {
 
+// ── Sysfs queue-depth calibration ────────────────────────────────────────────
+//
+// Mirror of the Rust sysfs_calibrate_qd() in io_uring_store.rs:
+//   1. stat(path_or_ancestor) → st_dev → major:minor
+//   2. realpath(/sys/dev/block/MAJOR:MINOR) → canonical sysfs dir
+//   3. Walk up looking for queue/nr_requests
+//   4. Return nr_requests/2 clamped to [8, 128]; fallback 64
+
+static uint32_t sysfs_calibrate_qd(const char* path) {
+    struct stat st;
+
+    // Walk up to an existing ancestor (target file may not exist yet).
+    std::string p = path ? path : "/";
+    while (!p.empty() && stat(p.c_str(), &st) != 0) {
+        size_t pos = p.rfind('/');
+        if (pos == 0) { p = "/"; break; }
+        if (pos == std::string::npos) break;
+        p.resize(pos);
+    }
+    if (stat(p.c_str(), &st) != 0) return 64;
+
+    // Build /sys/dev/block/MAJOR:MINOR symlink path.
+    char link[256];
+    snprintf(link, sizeof(link), "/sys/dev/block/%u:%u",
+             major(st.st_dev), minor(st.st_dev));
+
+    char canon[PATH_MAX];
+    if (realpath(link, canon) == nullptr) return 64;
+
+    // Walk up from canonical sysfs path to find queue/nr_requests.
+    std::string cur = canon;
+    while (cur.size() > 1) {
+        std::string nr_req_path = cur + "/queue/nr_requests";
+        FILE* f = fopen(nr_req_path.c_str(), "r");
+        if (f) {
+            unsigned int n = 0;
+            fscanf(f, "%u", &n);
+            fclose(f);
+            if (n > 0) {
+                uint32_t qd = static_cast<uint32_t>(n) / 2;
+                if (qd <   8) qd =   8;
+                if (qd > 128) qd = 128;
+                return qd;
+            }
+        }
+        size_t slash = cur.rfind('/');
+        if (slash == std::string::npos || slash == 0) break;
+        cur.resize(slash);
+    }
+    return 64;  // fallback: /tmp or other pseudo-fs
+}
+
+// ── Process-global anchor ring (IORING_SETUP_ATTACH_WQ) ─────────────────────
+//
+// All rings after the first one attach to this anchor's kernel async-worker
+// thread pool, reducing scheduler pressure on WSL2/Hyper-V IOThread.
+// The anchor io_uring is intentionally leaked (never freed) so its fd stays
+// open for the process lifetime.
+
+static io_uring* g_anchor_ring = nullptr;
+static int       g_anchor_fd   = -1;
+static std::once_flag g_anchor_once;
+
+static void init_anchor(uint32_t qd) {
+    g_anchor_ring = new io_uring;
+    if (io_uring_queue_init(qd, g_anchor_ring, 0) == 0) {
+        g_anchor_fd = g_anchor_ring->ring_fd;
+    } else {
+        delete g_anchor_ring;
+        g_anchor_ring = nullptr;
+        g_anchor_fd   = -1;
+    }
+}
+
+static int get_anchor_fd(uint32_t qd) {
+    std::call_once(g_anchor_once, init_anchor, qd);
+    return g_anchor_fd;
+}
+
 AsyncIOContext::AsyncIOContext(const AsyncIOConfig& config)
     : queue_depth_(config.queue_depth), pending_(0) {
-    // Allocate io_uring ring structure
     ring_ = new io_uring;
 
-    // Setup initialization parameters for SQPOLL if requested
     struct io_uring_params params = {};
     if (config.use_sqpoll) {
-        // IORING_SETUP_SQPOLL: kernel thread polls submission queue
-        // This reduces syscalls but requires CAP_SYS_NICE capability
         params.flags |= IORING_SETUP_SQPOLL;
-        params.sq_thread_idle = 2000;  // 2 second idle timeout
+        params.sq_thread_idle = 2000;
     }
 
-    // Initialize the io_uring ring with params
+    // Attach to shared kernel worker pool (mirrors Rust IORING_SETUP_ATTACH_WQ).
+    // Skip when SQPOLL is requested (incompatible combination).
+    int anchor = config.use_sqpoll ? -1 : get_anchor_fd(config.queue_depth);
+    if (anchor >= 0) {
+        params.flags |= IORING_SETUP_ATTACH_WQ;
+        params.wq_fd   = static_cast<uint32_t>(anchor);
+    }
+
     int ret = io_uring_queue_init_params(config.queue_depth,
                                          static_cast<io_uring*>(ring_),
                                          &params);
+    if (ret < 0) {
+        // Retry without ATTACH_WQ on kernels that don't support it.
+        params.flags &= ~static_cast<unsigned>(IORING_SETUP_ATTACH_WQ);
+        ret = io_uring_queue_init_params(config.queue_depth,
+                                          static_cast<io_uring*>(ring_),
+                                          &params);
+    }
     if (ret < 0) {
         delete static_cast<io_uring*>(ring_);
         throw std::runtime_error("Failed to initialize io_uring: " + std::string(strerror(-ret)));
@@ -36,11 +131,23 @@ AsyncIOContext::AsyncIOContext(const AsyncIOConfig& config)
 
 AsyncIOContext::AsyncIOContext(uint32_t queue_depth)
     : queue_depth_(queue_depth), pending_(0) {
-    // Allocate io_uring ring structure
     ring_ = new io_uring;
 
-    // Initialize the io_uring ring with default params (no SQPOLL)
-    int ret = io_uring_queue_init(queue_depth, static_cast<io_uring*>(ring_), 0);
+    // Attach to shared kernel worker pool (mirrors Rust IORING_SETUP_ATTACH_WQ).
+    int anchor = get_anchor_fd(queue_depth);
+    int ret = -1;
+    if (anchor >= 0) {
+        struct io_uring_params params = {};
+        params.flags = IORING_SETUP_ATTACH_WQ;
+        params.wq_fd  = static_cast<uint32_t>(anchor);
+        ret = io_uring_queue_init_params(queue_depth,
+                                          static_cast<io_uring*>(ring_),
+                                          &params);
+    }
+    if (ret < 0) {
+        // Fallback: plain ring without shared worker pool.
+        ret = io_uring_queue_init(queue_depth, static_cast<io_uring*>(ring_), 0);
+    }
     if (ret < 0) {
         delete static_cast<io_uring*>(ring_);
         throw std::runtime_error("Failed to initialize io_uring: " + std::string(strerror(-ret)));
@@ -273,6 +380,42 @@ void AsyncIOContext::queue_write_fixed(int fd, size_t buf_index, size_t count,
 
 bool AsyncIOContext::has_registered_buffers() const {
     return !registered_buffers_.empty();
+}
+
+int AsyncIOContext::submit_and_wait(int min_complete) {
+    if (queued_ == 0 && pending_ == 0) return 0;
+
+    auto ring = static_cast<io_uring*>(ring_);
+    int to_submit = queued_;
+    int to_wait   = (min_complete < pending_ + queued_) ? min_complete : (pending_ + queued_);
+    if (to_wait < 1) to_wait = 1;
+
+    // Single syscall: submit all prepared SQEs + wait for to_wait CQEs.
+    int ret = io_uring_submit_and_wait(ring, static_cast<unsigned>(to_wait));
+    if (ret < 0) {
+        throw std::runtime_error("io_uring submit_and_wait failed: " + std::string(strerror(-ret)));
+    }
+    pending_ += to_submit;
+    queued_   = 0;
+
+    // Drain all available CQEs (may be more than min_complete).
+    struct io_uring_cqe* cqe = nullptr;
+    unsigned head;
+    int completed = 0;
+    io_uring_for_each_cqe(ring, head, cqe) {
+        if (cqe->res < 0) {
+            throw std::runtime_error("I/O error in submit_and_wait: " + std::string(strerror(-cqe->res)));
+        }
+        completed++;
+    }
+    io_uring_cq_advance(ring, completed);
+    pending_ -= completed;
+    return completed;
+}
+
+// static
+uint32_t AsyncIOContext::calibrate_queue_depth(const char* path) {
+    return sysfs_calibrate_qd(path);
 }
 
 }  // namespace tpch

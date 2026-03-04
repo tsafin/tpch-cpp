@@ -24,31 +24,42 @@ namespace tpch {
 
 /**
  * ORC OutputStream backed by io_uring for async disk writes.
- * Uses double-buffering: fills current_ while io_uring drains pending_.
+ *
+ * Matches the Rust io_uring_store design:
+ *   - 512 KB chunks (same as Rust CHUNK_SIZE)
+ *   - 8-buffer circular ring: up to 7 SQEs in-flight while filling the 8th
+ *   - submit_and_wait(1) in the drain path: single syscall instead of two
+ *   - sysfs-calibrated queue depth (nr_requests/2, clamped [8,128])
+ *   - IORING_SETUP_ATTACH_WQ shared worker pool (via AsyncIOContext ctor)
  */
 class OrcIoUringStream : public orc::OutputStream {
-    static constexpr size_t kChunkSize = 1024 * 1024;  // 1 MB chunks
+    // 512 KB per SQE — matches Rust CHUNK_SIZE
+    static constexpr size_t kChunkSize = 512 * 1024;
+    // Circular pool of staging buffers.
+    // At steady state kNumBufs-1 = 7 SQEs are in-flight while we fill the 8th.
+    static constexpr int kNumBufs = 8;
 
     std::string filepath_;
     int fd_ = -1;
-    uint64_t offset_ = 0;
-    bool has_pending_ = false;
+    uint64_t file_offset_ = 0;
 
-    std::vector<uint8_t> current_;   // being filled by write()
-    std::vector<uint8_t> pending_;   // submitted to io_uring
+    std::array<std::vector<uint8_t>, kNumBufs> pool_;
+    int write_idx_ = 0;  // slot currently being filled
+    int read_idx_  = 0;  // oldest submitted slot (FIFO order)
 
     std::unique_ptr<AsyncIOContext> context_;
 
 public:
-    OrcIoUringStream(const std::string& filepath, uint32_t queue_depth)
+    explicit OrcIoUringStream(const std::string& filepath)
         : filepath_(filepath) {
         fd_ = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd_ < 0) {
             throw std::runtime_error("OrcIoUringStream: open failed: " + std::string(strerror(errno)));
         }
-        context_ = std::make_unique<AsyncIOContext>(queue_depth);
-        current_.reserve(kChunkSize);
-        pending_.reserve(kChunkSize);
+        // Calibrate queue depth from the target block device via sysfs.
+        uint32_t qd = AsyncIOContext::calibrate_queue_depth(filepath.c_str());
+        context_ = std::make_unique<AsyncIOContext>(qd);
+        for (auto& b : pool_) b.reserve(kChunkSize);
     }
 
     ~OrcIoUringStream() override {
@@ -57,40 +68,44 @@ public:
 
     void write(const void* buf, size_t length) override {
         if (fd_ < 0) {
-            return;  // Silently ignore writes after close (matches sync ORC stream behavior)
+            return;  // Silently ignore writes after close (double-close guard)
         }
         const uint8_t* ptr = static_cast<const uint8_t*>(buf);
         while (length > 0) {
-            size_t space = kChunkSize - current_.size();
+            auto& cur = pool_[write_idx_];
+            size_t space   = kChunkSize - cur.size();
             size_t to_copy = std::min(length, space);
-            current_.insert(current_.end(), ptr, ptr + to_copy);
-            ptr += to_copy;
+            cur.insert(cur.end(), ptr, ptr + to_copy);
+            ptr    += to_copy;
             length -= to_copy;
-
-            if (current_.size() >= kChunkSize) {
-                submit_current();
+            if (cur.size() >= kChunkSize) {
+                submit_head();
             }
         }
     }
 
     void close() override {
-        // Flush remaining data
-        if (!current_.empty()) {
-            submit_current();
+        if (fd_ < 0) return;
+
+        // Submit any partial buffer.
+        if (!pool_[write_idx_].empty()) {
+            submit_head();
         }
-        // Drain pending io_uring write
-        if (has_pending_) {
+        // Drain all remaining in-flight SQEs.
+        if (context_->queued_count() > 0) {
+            context_->submit_queued();
+        }
+        while (context_->pending_count() > 0) {
             context_->wait_completions(1);
-            has_pending_ = false;
+            pool_[read_idx_].clear();
+            read_idx_ = (read_idx_ + 1) % kNumBufs;
         }
-        if (fd_ >= 0) {
-            ::close(fd_);
-            fd_ = -1;
-        }
+        ::close(fd_);
+        fd_ = -1;
     }
 
     uint64_t getLength() const override {
-        return offset_ + static_cast<uint64_t>(current_.size());
+        return file_offset_ + static_cast<uint64_t>(pool_[write_idx_].size());
     }
 
     uint64_t getNaturalWriteSize() const override {
@@ -102,21 +117,25 @@ public:
     }
 
 private:
-    void submit_current() {
-        // Wait for previous pending write to complete before reusing pending_ buffer
-        if (has_pending_) {
-            context_->wait_completions(1);
-            has_pending_ = false;
-        }
-        // Double-buffer swap: pending_ is now safe to refill
-        std::swap(current_, pending_);
-        current_.clear();
+    // Submit pool_[write_idx_] to io_uring, then advance write_idx_.
+    // When the pool is full, drain the oldest slot with submit_and_wait(1).
+    void submit_head() {
+        auto& cur = pool_[write_idx_];
 
-        context_->queue_write(fd_, pending_.data(), pending_.size(),
-                              static_cast<off_t>(offset_), 0);
-        context_->submit_queued();
-        offset_ += pending_.size();
-        has_pending_ = true;
+        context_->queue_write(fd_, cur.data(), cur.size(),
+                              static_cast<off_t>(file_offset_), 0);
+        file_offset_ += cur.size();
+
+        if (context_->pending_count() + 1 >= kNumBufs) {
+            // Pool full: submit new SQE + wait for oldest in 1 syscall.
+            context_->submit_and_wait(1);
+            pool_[read_idx_].clear();
+            read_idx_ = (read_idx_ + 1) % kNumBufs;
+        } else {
+            context_->submit_queued();
+        }
+
+        write_idx_ = (write_idx_ + 1) % kNumBufs;
     }
 };
 
@@ -351,7 +370,7 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
 #ifdef TPCH_ENABLE_ASYNC_IO
             if (use_io_uring_) {
                 // io_uring path: OrcIoUringStream owns the fd and the ring
-                auto* uring_stream = new OrcIoUringStream(filepath_, 256);
+                auto* uring_stream = new OrcIoUringStream(filepath_);
                 orc_io_uring_stream_ = uring_stream;
                 auto writer = orc::createWriter(**orc_type_ptr, uring_stream, writer_options);
                 orc_writer_ = writer.release();
