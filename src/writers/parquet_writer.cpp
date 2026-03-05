@@ -14,6 +14,135 @@
 #include <arrow/io/api.h>
 #include <parquet/arrow/writer.h>
 
+#ifdef TPCH_ENABLE_ASYNC_IO
+
+namespace tpch {
+
+/**
+ * Arrow OutputStream backed by io_uring for async disk writes.
+ *
+ * Matches the Rust io_uring_store design:
+ *   - 512 KB chunks (same as Rust CHUNK_SIZE)
+ *   - 8-buffer circular ring: up to 7 SQEs in-flight while filling the 8th
+ *   - submit_and_wait(1) in the drain path: single syscall instead of two
+ *   - sysfs-calibrated queue depth (nr_requests/2, clamped [8,128])
+ *   - IORING_SETUP_ATTACH_WQ shared worker pool (via AsyncIOContext ctor)
+ */
+class IoUringOutputStream : public arrow::io::OutputStream {
+    // 512 KB per SQE — matches Rust CHUNK_SIZE
+    static constexpr size_t kChunkSize = 512 * 1024;
+    // Circular pool of staging buffers.
+    // At steady state kNumBufs-1 = 7 SQEs are in-flight while we fill the 8th.
+    static constexpr int kNumBufs = 8;
+
+    std::string filepath_;
+    int fd_ = -1;
+    int64_t file_offset_ = 0;
+    bool closed_ = false;
+
+    std::array<std::vector<uint8_t>, kNumBufs> pool_;
+    int write_idx_ = 0;  // slot currently being filled
+    int read_idx_  = 0;  // oldest submitted slot (FIFO order)
+
+    std::unique_ptr<AsyncIOContext> context_;
+
+public:
+    explicit IoUringOutputStream(const std::string& filepath)
+        : filepath_(filepath) {
+        fd_ = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd_ < 0) {
+            throw std::runtime_error("IoUringOutputStream: open failed: " + std::string(strerror(errno)));
+        }
+        // Calibrate queue depth from the target block device via sysfs.
+        uint32_t qd = AsyncIOContext::calibrate_queue_depth(filepath.c_str());
+        context_ = std::make_unique<AsyncIOContext>(qd);
+        for (auto& b : pool_) b.reserve(kChunkSize);
+    }
+
+    ~IoUringOutputStream() override {
+        if (!closed_) {
+            try { Close(); } catch (...) {}
+        }
+    }
+
+    arrow::Status Write(const void* data, int64_t nbytes) override {
+        const uint8_t* ptr = static_cast<const uint8_t*>(data);
+        while (nbytes > 0) {
+            auto& cur = pool_[write_idx_];
+            size_t space   = kChunkSize - cur.size();
+            size_t to_copy = std::min(static_cast<size_t>(nbytes), space);
+            cur.insert(cur.end(), ptr, ptr + to_copy);
+            ptr    += to_copy;
+            nbytes -= static_cast<int64_t>(to_copy);
+            if (cur.size() >= kChunkSize) {
+                ARROW_RETURN_NOT_OK(submit_head());
+            }
+        }
+        return arrow::Status::OK();
+    }
+
+    arrow::Status Flush() override {
+        // Submit any partial buffer.
+        if (!pool_[write_idx_].empty()) {
+            ARROW_RETURN_NOT_OK(submit_head());
+        }
+        // Drain all remaining in-flight SQEs.
+        if (context_->queued_count() > 0) {
+            context_->submit_queued();
+        }
+        while (context_->pending_count() > 0) {
+            context_->wait_completions(1);
+            pool_[read_idx_].clear();
+            read_idx_ = (read_idx_ + 1) % kNumBufs;
+        }
+        return arrow::Status::OK();
+    }
+
+    arrow::Status Close() override {
+        if (closed_) return arrow::Status::OK();
+        ARROW_RETURN_NOT_OK(Flush());
+        ::close(fd_);
+        fd_ = -1;
+        closed_ = true;
+        return arrow::Status::OK();
+    }
+
+    bool closed() const override { return closed_; }
+
+    arrow::Result<int64_t> Tell() const override {
+        return file_offset_ + static_cast<int64_t>(pool_[write_idx_].size());
+    }
+
+private:
+    // Submit pool_[write_idx_] to io_uring, then advance write_idx_.
+    //
+    // Invariant: (write_idx_ - read_idx_ + kNumBufs) % kNumBufs == pending_count()
+    // When the pool is full (pending == kNumBufs-1), drain the oldest slot first
+    // using submit_and_wait(1) — one syscall for both submit and wait.
+    arrow::Status submit_head() {
+        auto& cur = pool_[write_idx_];
+
+        context_->queue_write(fd_, cur.data(), cur.size(), file_offset_, 0);
+        file_offset_ += static_cast<int64_t>(cur.size());
+
+        if (context_->pending_count() + 1 >= kNumBufs) {
+            // Pool full: submit new SQE + wait for oldest completion in 1 syscall.
+            context_->submit_and_wait(1);
+            pool_[read_idx_].clear();
+            read_idx_ = (read_idx_ + 1) % kNumBufs;
+        } else {
+            context_->submit_queued();
+        }
+
+        write_idx_ = (write_idx_ + 1) % kNumBufs;
+        return arrow::Status::OK();
+    }
+};
+
+}  // namespace tpch
+
+#endif  // TPCH_ENABLE_ASYNC_IO
+
 namespace tpch {
 
 ParquetWriter::ParquetWriter(
@@ -115,6 +244,10 @@ void ParquetWriter::enable_streaming_write(bool use_threads) {
     use_threads_ = use_threads;
 }
 
+void ParquetWriter::enable_io_uring(bool enable) {
+    use_io_uring_ = enable;
+}
+
 void ParquetWriter::write_managed_batch(const ManagedRecordBatch& managed_batch) {
     if (closed_) {
         throw std::runtime_error("Cannot write to a closed Parquet writer");
@@ -176,11 +309,20 @@ void ParquetWriter::init_file_writer() {
         ->build();
 
     // Create output stream
-    auto outfile_result = arrow::io::FileOutputStream::Open(filepath_);
-    if (!outfile_result.ok()) {
-        throw std::runtime_error("Failed to open file: " + outfile_result.status().message());
+    std::shared_ptr<arrow::io::OutputStream> outfile;
+#ifdef TPCH_ENABLE_ASYNC_IO
+    if (use_io_uring_) {
+        outfile = std::make_shared<IoUringOutputStream>(filepath_);
+    } else {
+#endif
+        auto outfile_result = arrow::io::FileOutputStream::Open(filepath_);
+        if (!outfile_result.ok()) {
+            throw std::runtime_error("Failed to open file: " + outfile_result.status().message());
+        }
+        outfile = outfile_result.ValueOrDie();
+#ifdef TPCH_ENABLE_ASYNC_IO
     }
-    auto outfile = outfile_result.ValueOrDie();
+#endif
 
     // Create FileWriter for streaming RecordBatches
     auto writer_result = parquet::arrow::FileWriter::Open(

@@ -90,6 +90,15 @@ public:
      */
     void enable_streaming_write(bool use_threads = true);
 
+    /**
+     * Enable io_uring-backed output stream for streaming writes (Linux only).
+     * Only effective when streaming mode is also enabled via enable_streaming_write().
+     * Replaces the default FileOutputStream with an io_uring double-buffered writer.
+     *
+     * @param enable true to enable io_uring write path
+     */
+    void enable_io_uring(bool enable);
+
 private:
     std::string filepath_;
     std::shared_ptr<arrow::RecordBatch> first_batch_;
@@ -107,6 +116,7 @@ private:
     // Streaming write mode (Phase 14.2)
     bool streaming_mode_ = false;
     bool use_threads_ = true;
+    bool use_io_uring_ = false;
     std::unique_ptr<parquet::arrow::FileWriter> parquet_file_writer_;
 
     // Initialize the Parquet FileWriter for streaming mode

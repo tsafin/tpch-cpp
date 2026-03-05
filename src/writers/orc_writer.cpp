@@ -2,6 +2,10 @@
 #include <sstream>
 #include <memory>
 #include <stdexcept>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstring>
 
 // Minimal Arrow includes to avoid protobuf symbol pollution
 // These specific headers should NOT pull in protobuf infrastructure
@@ -12,6 +16,132 @@
 #include <orc/OrcFile.hh>
 
 #include "tpch/orc_writer.hpp"
+#include "tpch/async_io.hpp"
+
+#ifdef TPCH_ENABLE_ASYNC_IO
+
+namespace tpch {
+
+/**
+ * ORC OutputStream backed by io_uring for async disk writes.
+ *
+ * Matches the Rust io_uring_store design:
+ *   - 512 KB chunks (same as Rust CHUNK_SIZE)
+ *   - 8-buffer circular ring: up to 7 SQEs in-flight while filling the 8th
+ *   - submit_and_wait(1) in the drain path: single syscall instead of two
+ *   - sysfs-calibrated queue depth (nr_requests/2, clamped [8,128])
+ *   - IORING_SETUP_ATTACH_WQ shared worker pool (via AsyncIOContext ctor)
+ */
+class OrcIoUringStream : public orc::OutputStream {
+    // 512 KB per SQE — matches Rust CHUNK_SIZE
+    static constexpr size_t kChunkSize = 512 * 1024;
+    // Circular pool of staging buffers.
+    // At steady state kNumBufs-1 = 7 SQEs are in-flight while we fill the 8th.
+    static constexpr int kNumBufs = 8;
+
+    std::string filepath_;
+    int fd_ = -1;
+    uint64_t file_offset_ = 0;
+
+    std::array<std::vector<uint8_t>, kNumBufs> pool_;
+    int write_idx_ = 0;  // slot currently being filled
+    int read_idx_  = 0;  // oldest submitted slot (FIFO order)
+
+    std::unique_ptr<AsyncIOContext> context_;
+
+public:
+    explicit OrcIoUringStream(const std::string& filepath)
+        : filepath_(filepath) {
+        fd_ = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd_ < 0) {
+            throw std::runtime_error("OrcIoUringStream: open failed: " + std::string(strerror(errno)));
+        }
+        // Calibrate queue depth from the target block device via sysfs.
+        uint32_t qd = AsyncIOContext::calibrate_queue_depth(filepath.c_str());
+        context_ = std::make_unique<AsyncIOContext>(qd);
+        for (auto& b : pool_) b.reserve(kChunkSize);
+    }
+
+    ~OrcIoUringStream() override {
+        try { close(); } catch (...) {}
+    }
+
+    void write(const void* buf, size_t length) override {
+        if (fd_ < 0) {
+            return;  // Silently ignore writes after close (double-close guard)
+        }
+        const uint8_t* ptr = static_cast<const uint8_t*>(buf);
+        while (length > 0) {
+            auto& cur = pool_[write_idx_];
+            size_t space   = kChunkSize - cur.size();
+            size_t to_copy = std::min(length, space);
+            cur.insert(cur.end(), ptr, ptr + to_copy);
+            ptr    += to_copy;
+            length -= to_copy;
+            if (cur.size() >= kChunkSize) {
+                submit_head();
+            }
+        }
+    }
+
+    void close() override {
+        if (fd_ < 0) return;
+
+        // Submit any partial buffer.
+        if (!pool_[write_idx_].empty()) {
+            submit_head();
+        }
+        // Drain all remaining in-flight SQEs.
+        if (context_->queued_count() > 0) {
+            context_->submit_queued();
+        }
+        while (context_->pending_count() > 0) {
+            context_->wait_completions(1);
+            pool_[read_idx_].clear();
+            read_idx_ = (read_idx_ + 1) % kNumBufs;
+        }
+        ::close(fd_);
+        fd_ = -1;
+    }
+
+    uint64_t getLength() const override {
+        return file_offset_ + static_cast<uint64_t>(pool_[write_idx_].size());
+    }
+
+    uint64_t getNaturalWriteSize() const override {
+        return kChunkSize;
+    }
+
+    const std::string& getName() const override {
+        return filepath_;
+    }
+
+private:
+    // Submit pool_[write_idx_] to io_uring, then advance write_idx_.
+    // When the pool is full, drain the oldest slot with submit_and_wait(1).
+    void submit_head() {
+        auto& cur = pool_[write_idx_];
+
+        context_->queue_write(fd_, cur.data(), cur.size(),
+                              static_cast<off_t>(file_offset_), 0);
+        file_offset_ += cur.size();
+
+        if (context_->pending_count() + 1 >= kNumBufs) {
+            // Pool full: submit new SQE + wait for oldest in 1 syscall.
+            context_->submit_and_wait(1);
+            pool_[read_idx_].clear();
+            read_idx_ = (read_idx_ + 1) % kNumBufs;
+        } else {
+            context_->submit_queued();
+        }
+
+        write_idx_ = (write_idx_ + 1) % kNumBufs;
+    }
+};
+
+}  // namespace tpch
+
+#endif  // TPCH_ENABLE_ASYNC_IO
 
 namespace tpch {
 
@@ -169,7 +299,8 @@ void copy_array_to_orc_column(
 }  // anonymous namespace
 
 ORCWriter::ORCWriter(const std::string& filepath)
-    : filepath_(filepath), orc_writer_(nullptr), orc_output_stream_(nullptr), orc_type_(nullptr) {
+    : filepath_(filepath), orc_writer_(nullptr), orc_output_stream_(nullptr),
+      orc_type_(nullptr), orc_io_uring_stream_(nullptr) {
     // Constructor doesn't create writer yet - we wait for first batch to get schema
 }
 
@@ -198,6 +329,14 @@ ORCWriter::~ORCWriter() {
         delete reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
         orc_type_ = nullptr;
     }
+
+    // Delete io_uring stream (if used)
+#ifdef TPCH_ENABLE_ASYNC_IO
+    if (orc_io_uring_stream_) {
+        delete reinterpret_cast<OrcIoUringStream*>(orc_io_uring_stream_);
+        orc_io_uring_stream_ = nullptr;
+    }
+#endif
 }
 
 void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
@@ -218,20 +357,36 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
             auto orc_type_local = orc::Type::buildTypeFromString(orc_schema_str);
             orc_type_ = new std::unique_ptr<orc::Type>(std::move(orc_type_local));
 
-            // Create output file stream using ORC factory function - must be stored as member to stay alive
-            auto out_stream_local = orc::writeLocalFile(filepath_);
-            orc_output_stream_ = new std::unique_ptr<orc::OutputStream>(std::move(out_stream_local));
-
             // Create writer options
             orc::WriterOptions writer_options;
             writer_options.setStripeSize(64 * 1024 * 1024);  // 64MB stripes
             writer_options.setRowIndexStride(10000);
+            // Always attempt dictionary encoding for strings (threshold = 1.0 = always).
+            // TPC-H string columns have 2-40 unique values, so dictionary is always beneficial.
+            writer_options.setDictionaryKeySizeThreshold(1.0);
+
+            auto* orc_type_ptr = reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
+
+#ifdef TPCH_ENABLE_ASYNC_IO
+            if (use_io_uring_) {
+                // io_uring path: OrcIoUringStream owns the fd and the ring
+                auto* uring_stream = new OrcIoUringStream(filepath_);
+                orc_io_uring_stream_ = uring_stream;
+                auto writer = orc::createWriter(**orc_type_ptr, uring_stream, writer_options);
+                orc_writer_ = writer.release();
+            } else {
+#endif
+            // Create output file stream using ORC factory function - must be stored as member to stay alive
+            auto out_stream_local = orc::writeLocalFile(filepath_);
+            orc_output_stream_ = new std::unique_ptr<orc::OutputStream>(std::move(out_stream_local));
 
             // Create ORC writer using factory function
             auto* out_stream_ptr = reinterpret_cast<std::unique_ptr<orc::OutputStream>*>(orc_output_stream_);
-            auto* orc_type_ptr = reinterpret_cast<std::unique_ptr<orc::Type>*>(orc_type_);
             auto writer = orc::createWriter(**orc_type_ptr, out_stream_ptr->get(), writer_options);
             orc_writer_ = writer.release();
+#ifdef TPCH_ENABLE_ASYNC_IO
+            }
+#endif
 
         } catch (const std::exception& e) {
             schema_locked_ = false;
@@ -290,6 +445,10 @@ void ORCWriter::write_batch(const std::shared_ptr<arrow::RecordBatch>& batch) {
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("Failed to write ORC batch: ") + e.what());
     }
+}
+
+void ORCWriter::enable_io_uring(bool enable) {
+    use_io_uring_ = enable;
 }
 
 void ORCWriter::close() {

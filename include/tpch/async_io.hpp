@@ -117,6 +117,26 @@ public:
     int queued_count() const;
 
     /**
+     * Submit all queued SQEs and wait for at least min_complete CQEs in a single syscall.
+     * More efficient than separate submit_queued() + wait_completions() for the common
+     * "submit one chunk and wait for oldest" pattern.
+     *
+     * @param min_complete Minimum number of CQEs to wait for (default 1)
+     * @return Number of CQEs drained
+     */
+    int submit_and_wait(int min_complete = 1);
+
+    /**
+     * Probe the block device backing `path` via sysfs to determine an optimal
+     * io_uring queue depth.  Returns nr_requests/2 clamped to [8, 128].
+     * Falls back to 64 when sysfs is unavailable (e.g. tmpfs, WSL2 /tmp).
+     *
+     * @param path Any path on the target filesystem (file need not exist yet)
+     * @return Calibrated queue depth
+     */
+    static uint32_t calibrate_queue_depth(const char* path);
+
+    /**
      * Set callback for completion events.
      *
      * @param cb Callback function to invoke for each completion
@@ -211,6 +231,8 @@ public:
     void queue_write(int fd, const void* buf, std::size_t count, off_t offset, std::uint64_t user_data);
     int submit_queued() { return 0; }
     int queued_count() const { return queued_; }
+    int submit_and_wait(int min_complete = 1) { (void)min_complete; return 0; }
+    static uint32_t calibrate_queue_depth(const char* path) { (void)path; return 64; }
     void set_completion_callback(CompletionCallback cb) { (void)cb; }
     int process_completions() { return 0; }
     void register_buffers(const std::vector<iovec>& buffers) { (void)buffers; }
