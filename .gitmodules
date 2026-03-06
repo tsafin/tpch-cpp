@@ -16,3 +16,6 @@
 [submodule "third_party/lance"]
 	path = third_party/lance
 	url = https://github.com/tsafin/lance.git
+[submodule "third_party/tpcds"]
+	path = third_party/tpcds
+	url = https://github.com/tsafin/tpchds-tools.git

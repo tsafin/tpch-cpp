@@ -28,6 +28,7 @@ option(TPCH_ENABLE_ICEBERG "Enable Apache Iceberg table format support" OFF)
 option(TPCH_ENABLE_LANCE "Enable Lance columnar format support (requires Rust)" OFF)
 option(TPCH_ENABLE_PERF_COUNTERS "Enable performance counters instrumentation" OFF)
 option(TPCH_ENABLE_MOLD "Enable mold linker if available (incompatible with GTest in this project)" ON)
+option(TPCDS_ENABLE "Enable TPC-DS data generation (tpcds_benchmark executable)" OFF)
 
 # Compiler configuration
 include(cmake/CompilerWarnings.cmake)
@@ -257,6 +258,11 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 # Build dbgen objects
 add_subdirectory(third_party/dbgen EXCLUDE_FROM_ALL)
 include_directories(${DBGEN_INCLUDE_DIRS})
+
+# TPC-DS dsdgen objects (built only when TPCDS_ENABLE=ON)
+if(TPCDS_ENABLE)
+    add_subdirectory(third_party/dsdgen EXCLUDE_FROM_ALL)
+endif()
 
 # Copy TPC-H distribution file to build directory
 # Required by dbgen for loading nations, regions, and other lookup tables
@@ -557,6 +563,46 @@ if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
 endif()
 if(TPCH_ENABLE_PERF_COUNTERS)
     target_compile_definitions(tpch_benchmark PRIVATE TPCH_ENABLE_PERF_COUNTERS)
+endif()
+
+# TPC-DS benchmark executable
+if(TPCDS_ENABLE)
+    add_executable(tpcds_benchmark
+        src/tpcds_main.cpp
+        src/dsdgen/dsdgen_wrapper.cpp
+        src/dsdgen/dsdgen_converter.cpp
+        ${DSDGEN_OBJECTS}
+    )
+    target_link_libraries(tpcds_benchmark PRIVATE tpch_core)
+    target_include_directories(tpcds_benchmark PRIVATE ${DSDGEN_INCLUDE_DIRS})
+    # dsdgen upstream has several globals defined in multiple source files
+    # (pCurrentFile in driver.c and grammar_support.c, etc.). Allow duplicates
+    # at link time — the old GCC linker accepted these by default via -fcommon.
+    target_link_options(tpcds_benchmark PRIVATE -Wl,--allow-multiple-definition)
+    # dsdgen headers require LINUX=1 and TPCDS=1 to define ds_key_t and enable
+    # 64-bit support (config.h/#ifdef LINUX). Also needed by dsdgen_wrapper.cpp
+    # and dsdgen_converter.cpp which include dsdgen C headers.
+    target_compile_definitions(tpcds_benchmark PRIVATE TPCDS_ENABLE LINUX=1 TPCDS=1 EMBEDDED_DSDGEN=1)
+    if(TPCH_ENABLE_ORC)
+        target_compile_definitions(tpcds_benchmark PRIVATE TPCH_ENABLE_ORC)
+    endif()
+    if(TPCH_ENABLE_PAIMON)
+        target_compile_definitions(tpcds_benchmark PRIVATE TPCH_ENABLE_PAIMON)
+    endif()
+    if(TPCH_ENABLE_ICEBERG)
+        target_compile_definitions(tpcds_benchmark PRIVATE TPCH_ENABLE_ICEBERG)
+    endif()
+    if(TPCH_ENABLE_LANCE)
+        target_compile_definitions(tpcds_benchmark PRIVATE TPCH_ENABLE_LANCE)
+    endif()
+    if(TPCH_ENABLE_ASYNC_IO AND Uring_FOUND)
+        target_compile_definitions(tpcds_benchmark PRIVATE TPCH_ENABLE_ASYNC_IO)
+    endif()
+    if(TPCH_ENABLE_PERF_COUNTERS)
+        target_compile_definitions(tpcds_benchmark PRIVATE TPCH_ENABLE_PERF_COUNTERS)
+    endif()
+    message(STATUS "TPC-DS support enabled: tpcds_benchmark target added")
+    install(TARGETS tpcds_benchmark RUNTIME DESTINATION bin)
 endif()
 
 # Examples
