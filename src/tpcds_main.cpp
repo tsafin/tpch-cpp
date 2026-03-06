@@ -79,14 +79,14 @@ void print_usage(const char* prog) {
         "  --verbose              Verbose output\n"
         "  --help                 Show this help\n"
         "\n"
-        "TPC-DS tables (Phase 2 — implemented):\n"
-        "  store_sales, inventory\n"
+        "TPC-DS tables (Phase 3 — implemented):\n"
+        "  Fact:      store_sales, inventory, catalog_sales, web_sales,\n"
+        "             store_returns, catalog_returns, web_returns\n"
+        "  Dimension: customer, item, date_dim\n"
         "\n"
-        "TPC-DS tables (planned Phase 3+):\n"
-        "  Fact:      catalog_sales, web_sales, store_returns, catalog_returns,\n"
-        "             web_returns\n"
-        "  Dimension: customer, customer_address, customer_demographics,\n"
-        "             date_dim, time_dim, item, store, call_center,\n"
+        "TPC-DS tables (planned Phase 4+):\n"
+        "  Dimension: customer_address, customer_demographics,\n"
+        "             time_dim, store, call_center,\n"
         "             catalog_page, web_page, web_site, warehouse,\n"
         "             ship_mode, household_demographics, income_band,\n"
         "             reason, promotion\n",
@@ -222,7 +222,7 @@ void reset_builders(std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>&
 // ---------------------------------------------------------------------------
 
 template<typename GenerateFn>
-void run_generation(
+size_t run_generation(
     const Options& opts,
     std::shared_ptr<arrow::Schema> schema,
     std::unique_ptr<tpch::WriterInterface>& writer,
@@ -256,15 +256,26 @@ void run_generation(
     if (rows_in_batch > 0) {
         writer->write_batch(finish_batch(schema, builders, rows_in_batch));
     }
+
+    return total_rows;
 }
 
 // Map table name → TableType enum
 tpcds::TableType parse_table(const std::string& name) {
-    if (name == "store_sales")  return tpcds::TableType::STORE_SALES;
-    if (name == "inventory")    return tpcds::TableType::INVENTORY;
+    if (name == "store_sales")     return tpcds::TableType::STORE_SALES;
+    if (name == "inventory")       return tpcds::TableType::INVENTORY;
+    if (name == "catalog_sales")   return tpcds::TableType::CATALOG_SALES;
+    if (name == "web_sales")       return tpcds::TableType::WEB_SALES;
+    if (name == "customer")        return tpcds::TableType::CUSTOMER;
+    if (name == "item")            return tpcds::TableType::ITEM;
+    if (name == "date_dim")        return tpcds::TableType::DATE_DIM;
+    if (name == "store_returns")   return tpcds::TableType::STORE_RETURNS;
+    if (name == "catalog_returns") return tpcds::TableType::CATALOG_RETURNS;
+    if (name == "web_returns")     return tpcds::TableType::WEB_RETURNS;
     throw std::invalid_argument(
-        "Table '" + name + "' not yet implemented (Phase 3+).\n"
-        "Available in Phase 2: store_sales, inventory");
+        "Table '" + name + "' not yet implemented.\n"
+        "Available: store_sales, inventory, catalog_sales, web_sales, "
+        "customer, item, date_dim, store_returns, catalog_returns, web_returns");
 }
 
 // Extension for a given format
@@ -333,13 +344,38 @@ int main(int argc, char* argv[]) {
     auto t_start = std::chrono::steady_clock::now();
 
     // Generate
+    size_t actual_rows = 0;
     try {
         if (table_type == tpcds::TableType::STORE_SALES) {
-            run_generation(opts, schema, writer,
+            actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_store_sales(cb, opts.max_rows); });
         } else if (table_type == tpcds::TableType::INVENTORY) {
-            run_generation(opts, schema, writer,
+            actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_inventory(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::CATALOG_SALES) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_catalog_sales(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::WEB_SALES) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_web_sales(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::CUSTOMER) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_customer(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::ITEM) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_item(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::DATE_DIM) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_date_dim(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::STORE_RETURNS) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_store_returns(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::CATALOG_RETURNS) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_catalog_returns(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::WEB_RETURNS) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_web_returns(cb, opts.max_rows); });
         }
     } catch (const std::exception& e) {
         fprintf(stderr, "tpcds_benchmark: generation error: %s\n", e.what());
@@ -351,16 +387,10 @@ int main(int argc, char* argv[]) {
     auto t_end = std::chrono::steady_clock::now();
     double elapsed = std::chrono::duration<double>(t_end - t_start).count();
 
-    // Report
-    long row_count = dsdgen.get_row_count(table_type);
-    long actual    = (opts.max_rows > 0 && opts.max_rows < row_count)
-                     ? opts.max_rows : row_count;
-    if (opts.max_rows == 1000 && opts.max_rows < row_count) {
-        // default 1000-row limit
-        actual = opts.max_rows;
-    }
+    // Report: use actual emitted row count (avoids -1 for tables with no standalone rowcount)
+    long actual = static_cast<long>(actual_rows);
 
-    printf("tpcds_benchmark: %s  SF=%ld  rows≈%ld  elapsed=%.2fs  rate=%.0f rows/s\n",
+    printf("tpcds_benchmark: %s  SF=%ld  rows=%ld  elapsed=%.2fs  rate=%.0f rows/s\n",
            opts.table.c_str(), opts.scale_factor, actual,
            elapsed, (elapsed > 0) ? actual / elapsed : 0.0);
     printf("  output: %s\n", filepath.c_str());
