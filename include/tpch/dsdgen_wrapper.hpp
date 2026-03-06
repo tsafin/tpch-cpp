@@ -81,6 +81,70 @@ public:
         std::function<void(const void* row)> callback,
         long max_rows = -1);
 
+    /**
+     * Generate catalog_sales rows (master-detail via callback).
+     * Calls callback once per line item with a const W_CATALOG_SALES_TBL*.
+     */
+    void generate_catalog_sales(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    /**
+     * Generate web_sales rows (master-detail via callback).
+     * Calls callback once per line item with a const W_WEB_SALES_TBL*.
+     */
+    void generate_web_sales(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    /**
+     * Generate customer rows.
+     * Calls callback once per row with a const W_CUSTOMER_TBL*.
+     */
+    void generate_customer(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    /**
+     * Generate item rows.
+     * Calls callback once per row with a const W_ITEM_TBL*.
+     */
+    void generate_item(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    /**
+     * Generate date_dim rows.
+     * Calls callback once per row with a const W_DATE_TBL*.
+     */
+    void generate_date_dim(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    /**
+     * Generate store_returns rows.
+     * Calls callback once per row with a const W_STORE_RETURNS_TBL*.
+     */
+    void generate_store_returns(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    /**
+     * Generate catalog_returns rows.
+     * Calls callback once per row with a const W_CATALOG_RETURNS_TBL*.
+     */
+    void generate_catalog_returns(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    /**
+     * Generate web_returns rows.
+     * Calls callback once per row with a const W_WEB_RETURNS_TBL*.
+     */
+    void generate_web_returns(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
     long scale_factor() const { return scale_factor_; }
 
     /**
