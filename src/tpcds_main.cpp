@@ -14,7 +14,6 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
-#include <unordered_map>
 #include <string>
 #include <chrono>
 #include <getopt.h>
@@ -158,6 +157,7 @@ tpcds::BuilderMap
 create_builders(std::shared_ptr<arrow::Schema> schema)
 {
     tpcds::BuilderMap builders;
+    builders.reserve(static_cast<size_t>(schema->num_fields()));
     const int64_t capacity = 10000;
 
     for (const auto& field : schema->fields()) {
@@ -165,32 +165,32 @@ create_builders(std::shared_ptr<arrow::Schema> schema)
             case arrow::Type::INT64: {
                 auto b = std::make_shared<arrow::Int64Builder>();
                 (void)b->Reserve(capacity);
-                builders[field->name()] = b;
+                builders.push_back(b);
                 break;
             }
             case arrow::Type::INT32: {
                 auto b = std::make_shared<arrow::Int32Builder>();
                 (void)b->Reserve(capacity);
-                builders[field->name()] = b;
+                builders.push_back(b);
                 break;
             }
             case arrow::Type::DOUBLE: {
                 auto b = std::make_shared<arrow::DoubleBuilder>();
                 (void)b->Reserve(capacity);
-                builders[field->name()] = b;
+                builders.push_back(b);
                 break;
             }
             case arrow::Type::STRING: {
                 auto b = std::make_shared<arrow::StringBuilder>();
                 (void)b->Reserve(capacity);
                 (void)b->ReserveData(capacity * 32);
-                builders[field->name()] = b;
+                builders.push_back(b);
                 break;
             }
             case arrow::Type::DICTIONARY: {
                 auto b = std::make_shared<arrow::Int8Builder>();
                 (void)b->Reserve(capacity);
-                builders[field->name()] = b;
+                builders.push_back(b);
                 break;
             }
             default:
@@ -210,8 +210,9 @@ finish_batch(
 {
     std::vector<std::shared_ptr<arrow::Array>> arrays;
     arrays.reserve(schema->num_fields());
-    for (const auto& field : schema->fields()) {
-        auto array = builders[field->name()]->Finish().ValueOrDie();
+    for (int i = 0; i < schema->num_fields(); ++i) {
+        const auto& field = schema->field(i);
+        auto array = builders[static_cast<size_t>(i)]->Finish().ValueOrDie();
         // Convert Int8 indices to DictionaryArray for DICTIONARY fields
         if (field->type()->id() == arrow::Type::DICTIONARY) {
             auto dict = tpcds::get_dict_for_field(field->name());
@@ -225,7 +226,7 @@ finish_batch(
 }
 
 void reset_builders(tpcds::BuilderMap& builders) {
-    for (auto& [name, b] : builders) { b->Reset(); }
+    for (auto& b : builders) { b->Reset(); }
 }
 
 // ---------------------------------------------------------------------------
