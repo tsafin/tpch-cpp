@@ -1,13 +1,13 @@
 #pragma once
 
 #include <memory>
-#include <unordered_map>
+#include <vector>
 #include <string>
 #include <arrow/builder.h>
 
 namespace tpcds {
 
-using BuilderMap = std::unordered_map<std::string, std::shared_ptr<arrow::ArrayBuilder>>;
+using BuilderMap = std::vector<std::shared_ptr<arrow::ArrayBuilder>>;
 
 /**
  * Convert dsdgen C struct rows to Arrow array builders.
