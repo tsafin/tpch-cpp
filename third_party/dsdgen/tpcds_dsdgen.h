@@ -64,46 +64,45 @@
 #include "w_store.h"
 
 /* -------------------------------------------------------------------------
- * Utility headers: scaling, params, RNG init
- * Note: tables.h (build-generated) defines plain macros like CALL_CENTER=0,
- * STORE=15, etc. that collide with C++ enum member names — do NOT include it
- * here.  The TPCDS_* constants below duplicate those values but are prefixed
- * to avoid collisions.  They match the generated tables.h and are stable
- * across TPC-DS versions.
+ * Utility headers: table ID constants, scaling, params, RNG init.
+ * tables.h is build-generated (columns.h, streams.h likewise).
  * ------------------------------------------------------------------------- */
+#include "tables.h"    /* CALL_CENTER=0, STORE_SALES=17, WAREHOUSE=19, … */
 #include "scaling.h"   /* get_rowcount(), getIDCount() */
 #include "r_params.h"  /* set_str(), set_int(), init_params() */
 #include "genrand.h"   /* init_rand() */
 
 /* -------------------------------------------------------------------------
- * Table ID constants — match the values in the build-generated tables.h.
- * Prefixed TPCDS_* to avoid colliding with the bare macro names when this
- * header is included alongside other tpcds headers.
+ * TPCDS_* aliases — thin wrappers around the native tables.h constants.
+ * C++ code must use PascalCase TableType enum values (not these macros)
+ * to avoid collision with the ALL_CAPS macros defined in tables.h.
+ * These aliases exist only for internal use within C-linkage code that
+ * calls get_rowcount() with a table ID.
  * ------------------------------------------------------------------------- */
-#define TPCDS_CALL_CENTER            0
-#define TPCDS_CATALOG_PAGE           1
-#define TPCDS_CATALOG_RETURNS        2
-#define TPCDS_CATALOG_SALES          3
-#define TPCDS_CUSTOMER               4
-#define TPCDS_CUSTOMER_ADDRESS       5
-#define TPCDS_CUSTOMER_DEMOGRAPHICS  6
-#define TPCDS_DATE                   7
-#define TPCDS_HOUSEHOLD_DEMOGRAPHICS 8
-#define TPCDS_INCOME_BAND            9
-#define TPCDS_INVENTORY             10
-#define TPCDS_ITEM                  11
-#define TPCDS_PROMOTION             12
-#define TPCDS_REASON                13
-#define TPCDS_SHIP_MODE             14
-#define TPCDS_STORE                 15
-#define TPCDS_STORE_RETURNS         16
-#define TPCDS_STORE_SALES           17
-#define TPCDS_TIME                  18
-#define TPCDS_WAREHOUSE             19
-#define TPCDS_WEB_PAGE              20
-#define TPCDS_WEB_RETURNS           21
-#define TPCDS_WEB_SALES             22
-#define TPCDS_WEB_SITE              23
+#define TPCDS_CALL_CENTER            CALL_CENTER
+#define TPCDS_CATALOG_PAGE           CATALOG_PAGE
+#define TPCDS_CATALOG_RETURNS        CATALOG_RETURNS
+#define TPCDS_CATALOG_SALES          CATALOG_SALES
+#define TPCDS_CUSTOMER               CUSTOMER
+#define TPCDS_CUSTOMER_ADDRESS       CUSTOMER_ADDRESS
+#define TPCDS_CUSTOMER_DEMOGRAPHICS  CUSTOMER_DEMOGRAPHICS
+#define TPCDS_DATE                   DATE
+#define TPCDS_HOUSEHOLD_DEMOGRAPHICS HOUSEHOLD_DEMOGRAPHICS
+#define TPCDS_INCOME_BAND            INCOME_BAND
+#define TPCDS_INVENTORY              INVENTORY
+#define TPCDS_ITEM                   ITEM
+#define TPCDS_PROMOTION              PROMOTION
+#define TPCDS_REASON                 REASON
+#define TPCDS_SHIP_MODE              SHIP_MODE
+#define TPCDS_STORE                  STORE
+#define TPCDS_STORE_RETURNS          STORE_RETURNS
+#define TPCDS_STORE_SALES            STORE_SALES
+#define TPCDS_TIME                   TIME
+#define TPCDS_WAREHOUSE              WAREHOUSE
+#define TPCDS_WEB_PAGE               WEB_PAGE
+#define TPCDS_WEB_RETURNS            WEB_RETURNS
+#define TPCDS_WEB_SALES              WEB_SALES
+#define TPCDS_WEB_SITE               WEB_SITE
 
 /* -------------------------------------------------------------------------
  * Embedded-mode callbacks — our additions to the tpcds C sources, compiled

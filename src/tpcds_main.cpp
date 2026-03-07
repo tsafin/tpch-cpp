@@ -259,30 +259,30 @@ size_t run_generation(
 
 // Map table name → TableType enum
 tpcds::TableType parse_table(const std::string& name) {
-    if (name == "store_sales")              return tpcds::TableType::STORE_SALES;
-    if (name == "inventory")               return tpcds::TableType::INVENTORY;
-    if (name == "catalog_sales")           return tpcds::TableType::CATALOG_SALES;
-    if (name == "web_sales")               return tpcds::TableType::WEB_SALES;
-    if (name == "customer")                return tpcds::TableType::CUSTOMER;
-    if (name == "item")                    return tpcds::TableType::ITEM;
-    if (name == "date_dim")                return tpcds::TableType::DATE_DIM;
-    if (name == "store_returns")           return tpcds::TableType::STORE_RETURNS;
-    if (name == "catalog_returns")         return tpcds::TableType::CATALOG_RETURNS;
-    if (name == "web_returns")             return tpcds::TableType::WEB_RETURNS;
-    if (name == "call_center")             return tpcds::TableType::CALL_CENTER;
-    if (name == "catalog_page")            return tpcds::TableType::CATALOG_PAGE;
-    if (name == "web_page")                return tpcds::TableType::WEB_PAGE;
-    if (name == "web_site")                return tpcds::TableType::WEB_SITE;
-    if (name == "warehouse")               return tpcds::TableType::WAREHOUSE;
-    if (name == "ship_mode")               return tpcds::TableType::SHIP_MODE;
-    if (name == "household_demographics")  return tpcds::TableType::HOUSEHOLD_DEMOGRAPHICS;
-    if (name == "customer_demographics")   return tpcds::TableType::CUSTOMER_DEMOGRAPHICS;
-    if (name == "customer_address")        return tpcds::TableType::CUSTOMER_ADDRESS;
-    if (name == "income_band")             return tpcds::TableType::INCOME_BAND;
-    if (name == "reason")                  return tpcds::TableType::REASON;
-    if (name == "time_dim")                return tpcds::TableType::TIME_DIM;
-    if (name == "promotion")               return tpcds::TableType::PROMOTION;
-    if (name == "store")                   return tpcds::TableType::STORE;
+    if (name == "store_sales")              return tpcds::TableType::StoreSales;
+    if (name == "inventory")               return tpcds::TableType::Inventory;
+    if (name == "catalog_sales")           return tpcds::TableType::CatalogSales;
+    if (name == "web_sales")               return tpcds::TableType::WebSales;
+    if (name == "customer")                return tpcds::TableType::Customer;
+    if (name == "item")                    return tpcds::TableType::Item;
+    if (name == "date_dim")                return tpcds::TableType::DateDim;
+    if (name == "store_returns")           return tpcds::TableType::StoreReturns;
+    if (name == "catalog_returns")         return tpcds::TableType::CatalogReturns;
+    if (name == "web_returns")             return tpcds::TableType::WebReturns;
+    if (name == "call_center")             return tpcds::TableType::CallCenter;
+    if (name == "catalog_page")            return tpcds::TableType::CatalogPage;
+    if (name == "web_page")                return tpcds::TableType::WebPage;
+    if (name == "web_site")                return tpcds::TableType::WebSite;
+    if (name == "warehouse")               return tpcds::TableType::Warehouse;
+    if (name == "ship_mode")               return tpcds::TableType::ShipMode;
+    if (name == "household_demographics")  return tpcds::TableType::HouseholdDemographics;
+    if (name == "customer_demographics")   return tpcds::TableType::CustomerDemographics;
+    if (name == "customer_address")        return tpcds::TableType::CustomerAddress;
+    if (name == "income_band")             return tpcds::TableType::IncomeBand;
+    if (name == "reason")                  return tpcds::TableType::Reason;
+    if (name == "time_dim")                return tpcds::TableType::TimeDim;
+    if (name == "promotion")               return tpcds::TableType::Promotion;
+    if (name == "store")                   return tpcds::TableType::Store;
     throw std::invalid_argument("Table '" + name + "' not found. Use --help for list.");
 }
 
@@ -354,76 +354,76 @@ int main(int argc, char* argv[]) {
     // Generate
     size_t actual_rows = 0;
     try {
-        if (table_type == tpcds::TableType::STORE_SALES) {
+        if (table_type == tpcds::TableType::StoreSales) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_store_sales(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::INVENTORY) {
+        } else if (table_type == tpcds::TableType::Inventory) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_inventory(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CATALOG_SALES) {
+        } else if (table_type == tpcds::TableType::CatalogSales) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_catalog_sales(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WEB_SALES) {
+        } else if (table_type == tpcds::TableType::WebSales) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_web_sales(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CUSTOMER) {
+        } else if (table_type == tpcds::TableType::Customer) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_customer(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::ITEM) {
+        } else if (table_type == tpcds::TableType::Item) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_item(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::DATE_DIM) {
+        } else if (table_type == tpcds::TableType::DateDim) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_date_dim(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::STORE_RETURNS) {
+        } else if (table_type == tpcds::TableType::StoreReturns) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_store_returns(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CATALOG_RETURNS) {
+        } else if (table_type == tpcds::TableType::CatalogReturns) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_catalog_returns(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WEB_RETURNS) {
+        } else if (table_type == tpcds::TableType::WebReturns) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_web_returns(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CALL_CENTER) {
+        } else if (table_type == tpcds::TableType::CallCenter) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_call_center(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CATALOG_PAGE) {
+        } else if (table_type == tpcds::TableType::CatalogPage) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_catalog_page(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WEB_PAGE) {
+        } else if (table_type == tpcds::TableType::WebPage) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_web_page(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WEB_SITE) {
+        } else if (table_type == tpcds::TableType::WebSite) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_web_site(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WAREHOUSE) {
+        } else if (table_type == tpcds::TableType::Warehouse) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_warehouse(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::SHIP_MODE) {
+        } else if (table_type == tpcds::TableType::ShipMode) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_ship_mode(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::HOUSEHOLD_DEMOGRAPHICS) {
+        } else if (table_type == tpcds::TableType::HouseholdDemographics) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_household_demographics(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CUSTOMER_DEMOGRAPHICS) {
+        } else if (table_type == tpcds::TableType::CustomerDemographics) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_customer_demographics(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CUSTOMER_ADDRESS) {
+        } else if (table_type == tpcds::TableType::CustomerAddress) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_customer_address(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::INCOME_BAND) {
+        } else if (table_type == tpcds::TableType::IncomeBand) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_income_band(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::REASON) {
+        } else if (table_type == tpcds::TableType::Reason) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_reason(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::TIME_DIM) {
+        } else if (table_type == tpcds::TableType::TimeDim) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_time_dim(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::PROMOTION) {
+        } else if (table_type == tpcds::TableType::Promotion) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_promotion(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::STORE) {
+        } else if (table_type == tpcds::TableType::Store) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_store(cb, opts.max_rows); });
         }

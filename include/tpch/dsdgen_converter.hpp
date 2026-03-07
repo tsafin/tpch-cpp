@@ -87,6 +87,104 @@ void append_web_returns_to_builders(
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
 
 /**
+ * Append a call_center row (CALL_CENTER_TBL*) to Arrow builders.
+ */
+void append_call_center_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a catalog_page row (CATALOG_PAGE_TBL*) to Arrow builders.
+ */
+void append_catalog_page_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a web_page row (W_WEB_PAGE_TBL*) to Arrow builders.
+ */
+void append_web_page_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a web_site row (W_WEB_SITE_TBL*) to Arrow builders.
+ */
+void append_web_site_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a warehouse row (W_WAREHOUSE_TBL*) to Arrow builders.
+ */
+void append_warehouse_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a ship_mode row (W_SHIP_MODE_TBL*) to Arrow builders.
+ */
+void append_ship_mode_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a household_demographics row (W_HOUSEHOLD_DEMOGRAPHICS_TBL*) to Arrow builders.
+ */
+void append_household_demographics_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a customer_demographics row (W_CUSTOMER_DEMOGRAPHICS_TBL*) to Arrow builders.
+ */
+void append_customer_demographics_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a customer_address row (W_CUSTOMER_ADDRESS_TBL*) to Arrow builders.
+ */
+void append_customer_address_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append an income_band row (W_INCOME_BAND_TBL*) to Arrow builders.
+ */
+void append_income_band_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a reason row (W_REASON_TBL*) to Arrow builders.
+ */
+void append_reason_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a time_dim row (W_TIME_TBL*) to Arrow builders.
+ */
+void append_time_dim_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a promotion row (W_PROMOTION_TBL*) to Arrow builders.
+ */
+void append_promotion_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
+ * Append a store row (W_STORE_TBL*) to Arrow builders.
+ */
+void append_store_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
+
+/**
  * Generic dispatcher by table name.
  */
 void append_dsdgen_row_to_builders(
