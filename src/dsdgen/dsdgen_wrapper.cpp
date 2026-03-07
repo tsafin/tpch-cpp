@@ -343,6 +343,253 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("wr_net_loss",              arrow::float64()),
             });
 
+        case TableType::CALL_CENTER:
+            return arrow::schema({
+                arrow::field("cc_call_center_sk",  arrow::int64()),
+                arrow::field("cc_call_center_id",  arrow::utf8()),
+                arrow::field("cc_rec_start_date_sk", arrow::int64()),
+                arrow::field("cc_rec_end_date_sk", arrow::int64()),
+                arrow::field("cc_closed_date_sk",  arrow::int64()),
+                arrow::field("cc_open_date_sk",    arrow::int64()),
+                arrow::field("cc_name",            arrow::utf8()),
+                arrow::field("cc_class",           arrow::utf8()),
+                arrow::field("cc_employees",       arrow::int32()),
+                arrow::field("cc_sq_ft",           arrow::int32()),
+                arrow::field("cc_hours",           arrow::utf8()),
+                arrow::field("cc_manager",         arrow::utf8()),
+                arrow::field("cc_mkt_id",          arrow::int32()),
+                arrow::field("cc_mkt_class",       arrow::utf8()),
+                arrow::field("cc_mkt_desc",        arrow::utf8()),
+                arrow::field("cc_market_manager",  arrow::utf8()),
+                arrow::field("cc_division",        arrow::int32()),
+                arrow::field("cc_division_name",   arrow::utf8()),
+                arrow::field("cc_company",         arrow::int32()),
+                arrow::field("cc_company_name",    arrow::utf8()),
+                arrow::field("cc_street_number",   arrow::int32()),
+                arrow::field("cc_street_name",     arrow::utf8()),
+                arrow::field("cc_street_type",     arrow::utf8()),
+                arrow::field("cc_suite_number",    arrow::utf8()),
+                arrow::field("cc_city",            arrow::utf8()),
+                arrow::field("cc_county",          arrow::utf8()),
+                arrow::field("cc_state",           arrow::utf8()),
+                arrow::field("cc_zip",             arrow::utf8()),
+                arrow::field("cc_country",         arrow::utf8()),
+                arrow::field("cc_gmt_offset",      arrow::float64()),
+                arrow::field("cc_tax_percentage",  arrow::float64()),
+            });
+
+        case TableType::CATALOG_PAGE:
+            return arrow::schema({
+                arrow::field("cp_catalog_page_sk",     arrow::int64()),
+                arrow::field("cp_catalog_page_id",     arrow::utf8()),
+                arrow::field("cp_start_date_sk",       arrow::int64()),
+                arrow::field("cp_end_date_sk",         arrow::int64()),
+                arrow::field("cp_department",          arrow::utf8()),
+                arrow::field("cp_catalog_number",      arrow::int32()),
+                arrow::field("cp_catalog_page_number", arrow::int32()),
+                arrow::field("cp_description",         arrow::utf8()),
+                arrow::field("cp_type",                arrow::utf8()),
+            });
+
+        case TableType::WEB_PAGE:
+            return arrow::schema({
+                arrow::field("wp_web_page_sk",       arrow::int64()),
+                arrow::field("wp_web_page_id",       arrow::utf8()),
+                arrow::field("wp_rec_start_date_sk", arrow::int64()),
+                arrow::field("wp_rec_end_date_sk",   arrow::int64()),
+                arrow::field("wp_creation_date_sk",  arrow::int64()),
+                arrow::field("wp_access_date_sk",    arrow::int64()),
+                arrow::field("wp_autogen_flag",      arrow::int32()),
+                arrow::field("wp_customer_sk",       arrow::int64()),
+                arrow::field("wp_url",               arrow::utf8()),
+                arrow::field("wp_type",              arrow::utf8()),
+                arrow::field("wp_char_count",        arrow::int32()),
+                arrow::field("wp_link_count",        arrow::int32()),
+                arrow::field("wp_image_count",       arrow::int32()),
+                arrow::field("wp_max_ad_count",      arrow::int32()),
+            });
+
+        case TableType::WEB_SITE:
+            return arrow::schema({
+                arrow::field("web_site_sk",          arrow::int64()),
+                arrow::field("web_site_id",          arrow::utf8()),
+                arrow::field("web_rec_start_date_sk", arrow::int64()),
+                arrow::field("web_rec_end_date_sk",  arrow::int64()),
+                arrow::field("web_name",             arrow::utf8()),
+                arrow::field("web_open_date_sk",     arrow::int64()),
+                arrow::field("web_close_date_sk",    arrow::int64()),
+                arrow::field("web_class",            arrow::utf8()),
+                arrow::field("web_manager",          arrow::utf8()),
+                arrow::field("web_mkt_id",           arrow::int32()),
+                arrow::field("web_mkt_class",        arrow::utf8()),
+                arrow::field("web_mkt_desc",         arrow::utf8()),
+                arrow::field("web_market_manager",   arrow::utf8()),
+                arrow::field("web_company_id",       arrow::int32()),
+                arrow::field("web_company_name",     arrow::utf8()),
+                arrow::field("web_street_number",    arrow::int32()),
+                arrow::field("web_street_name",      arrow::utf8()),
+                arrow::field("web_street_type",      arrow::utf8()),
+                arrow::field("web_suite_number",     arrow::utf8()),
+                arrow::field("web_city",             arrow::utf8()),
+                arrow::field("web_county",           arrow::utf8()),
+                arrow::field("web_state",            arrow::utf8()),
+                arrow::field("web_zip",              arrow::utf8()),
+                arrow::field("web_country",          arrow::utf8()),
+                arrow::field("web_gmt_offset",       arrow::float64()),
+                arrow::field("web_tax_percentage",   arrow::float64()),
+            });
+
+        case TableType::WAREHOUSE:
+            return arrow::schema({
+                arrow::field("w_warehouse_sk",    arrow::int64()),
+                arrow::field("w_warehouse_id",    arrow::utf8()),
+                arrow::field("w_warehouse_name",  arrow::utf8()),
+                arrow::field("w_warehouse_sq_ft", arrow::int32()),
+                arrow::field("w_street_number",   arrow::int32()),
+                arrow::field("w_street_name",     arrow::utf8()),
+                arrow::field("w_street_type",     arrow::utf8()),
+                arrow::field("w_suite_number",    arrow::utf8()),
+                arrow::field("w_city",            arrow::utf8()),
+                arrow::field("w_county",          arrow::utf8()),
+                arrow::field("w_state",           arrow::utf8()),
+                arrow::field("w_zip",             arrow::utf8()),
+                arrow::field("w_country",         arrow::utf8()),
+                arrow::field("w_gmt_offset",      arrow::float64()),
+            });
+
+        case TableType::SHIP_MODE:
+            return arrow::schema({
+                arrow::field("sm_ship_mode_sk", arrow::int64()),
+                arrow::field("sm_ship_mode_id", arrow::utf8()),
+                arrow::field("sm_type",         arrow::utf8()),
+                arrow::field("sm_code",         arrow::utf8()),
+                arrow::field("sm_carrier",      arrow::utf8()),
+                arrow::field("sm_contract",     arrow::utf8()),
+            });
+
+        case TableType::HOUSEHOLD_DEMOGRAPHICS:
+            return arrow::schema({
+                arrow::field("hd_demo_sk",        arrow::int64()),
+                arrow::field("hd_income_band_sk", arrow::int64()),
+                arrow::field("hd_buy_potential",  arrow::utf8()),
+                arrow::field("hd_dep_count",      arrow::int32()),
+                arrow::field("hd_vehicle_count",  arrow::int32()),
+            });
+
+        case TableType::CUSTOMER_DEMOGRAPHICS:
+            return arrow::schema({
+                arrow::field("cd_demo_sk",             arrow::int64()),
+                arrow::field("cd_gender",              arrow::utf8()),
+                arrow::field("cd_marital_status",      arrow::utf8()),
+                arrow::field("cd_education_status",    arrow::utf8()),
+                arrow::field("cd_purchase_estimate",   arrow::int32()),
+                arrow::field("cd_credit_rating",       arrow::utf8()),
+                arrow::field("cd_dep_count",           arrow::int32()),
+                arrow::field("cd_dep_employed_count",  arrow::int32()),
+                arrow::field("cd_dep_college_count",   arrow::int32()),
+            });
+
+        case TableType::CUSTOMER_ADDRESS:
+            return arrow::schema({
+                arrow::field("ca_address_sk",    arrow::int64()),
+                arrow::field("ca_address_id",    arrow::utf8()),
+                arrow::field("ca_street_number", arrow::int32()),
+                arrow::field("ca_street_name",   arrow::utf8()),
+                arrow::field("ca_street_type",   arrow::utf8()),
+                arrow::field("ca_suite_number",  arrow::utf8()),
+                arrow::field("ca_city",          arrow::utf8()),
+                arrow::field("ca_county",        arrow::utf8()),
+                arrow::field("ca_state",         arrow::utf8()),
+                arrow::field("ca_zip",           arrow::utf8()),
+                arrow::field("ca_country",       arrow::utf8()),
+                arrow::field("ca_gmt_offset",    arrow::float64()),
+                arrow::field("ca_location_type", arrow::utf8()),
+            });
+
+        case TableType::INCOME_BAND:
+            return arrow::schema({
+                arrow::field("ib_income_band_id", arrow::int32()),
+                arrow::field("ib_lower_bound",    arrow::int32()),
+                arrow::field("ib_upper_bound",    arrow::int32()),
+            });
+
+        case TableType::REASON:
+            return arrow::schema({
+                arrow::field("r_reason_sk",   arrow::int64()),
+                arrow::field("r_reason_id",   arrow::utf8()),
+                arrow::field("r_reason_desc", arrow::utf8()),
+            });
+
+        case TableType::TIME_DIM:
+            return arrow::schema({
+                arrow::field("t_time_sk",   arrow::int64()),
+                arrow::field("t_time_id",   arrow::utf8()),
+                arrow::field("t_time",      arrow::int32()),
+                arrow::field("t_hour",      arrow::int32()),
+                arrow::field("t_minute",    arrow::int32()),
+                arrow::field("t_second",    arrow::int32()),
+                arrow::field("t_am_pm",     arrow::utf8()),
+                arrow::field("t_shift",     arrow::utf8()),
+                arrow::field("t_sub_shift", arrow::utf8()),
+                arrow::field("t_meal_time", arrow::utf8()),
+            });
+
+        case TableType::PROMOTION:
+            return arrow::schema({
+                arrow::field("p_promo_sk",        arrow::int64()),
+                arrow::field("p_promo_id",         arrow::utf8()),
+                arrow::field("p_start_date_sk",    arrow::int64()),
+                arrow::field("p_end_date_sk",      arrow::int64()),
+                arrow::field("p_item_sk",          arrow::int64()),
+                arrow::field("p_cost",             arrow::float64()),
+                arrow::field("p_response_target",  arrow::int32()),
+                arrow::field("p_promo_name",       arrow::utf8()),
+                arrow::field("p_channel_dmail",    arrow::int32()),
+                arrow::field("p_channel_email",    arrow::int32()),
+                arrow::field("p_channel_catalog",  arrow::int32()),
+                arrow::field("p_channel_tv",       arrow::int32()),
+                arrow::field("p_channel_radio",    arrow::int32()),
+                arrow::field("p_channel_press",    arrow::int32()),
+                arrow::field("p_channel_event",    arrow::int32()),
+                arrow::field("p_channel_demo",     arrow::int32()),
+                arrow::field("p_channel_details",  arrow::utf8()),
+                arrow::field("p_purpose",          arrow::utf8()),
+                arrow::field("p_discount_active",  arrow::int32()),
+            });
+
+        case TableType::STORE:
+            return arrow::schema({
+                arrow::field("s_store_sk",       arrow::int64()),
+                arrow::field("s_store_id",       arrow::utf8()),
+                arrow::field("s_rec_start_date", arrow::int64()),
+                arrow::field("s_rec_end_date",   arrow::int64()),
+                arrow::field("s_closed_date_sk", arrow::int64()),
+                arrow::field("s_store_name",     arrow::utf8()),
+                arrow::field("s_number_employees", arrow::int32()),
+                arrow::field("s_floor_space",    arrow::int32()),
+                arrow::field("s_hours",          arrow::utf8()),
+                arrow::field("s_manager",        arrow::utf8()),
+                arrow::field("s_market_id",      arrow::int32()),
+                arrow::field("s_geography_class", arrow::utf8()),
+                arrow::field("s_market_desc",    arrow::utf8()),
+                arrow::field("s_market_manager", arrow::utf8()),
+                arrow::field("s_division_id",    arrow::int64()),
+                arrow::field("s_division_name",  arrow::utf8()),
+                arrow::field("s_company_id",     arrow::int64()),
+                arrow::field("s_company_name",   arrow::utf8()),
+                arrow::field("s_street_number",  arrow::int32()),
+                arrow::field("s_street_name",    arrow::utf8()),
+                arrow::field("s_street_type",    arrow::utf8()),
+                arrow::field("s_suite_number",   arrow::utf8()),
+                arrow::field("s_city",           arrow::utf8()),
+                arrow::field("s_county",         arrow::utf8()),
+                arrow::field("s_state",          arrow::utf8()),
+                arrow::field("s_zip",            arrow::utf8()),
+                arrow::field("s_country",        arrow::utf8()),
+                arrow::field("s_gmt_offset",     arrow::float64()),
+                arrow::field("s_tax_percentage", arrow::float64()),
+            });
+
         default:
             throw std::invalid_argument(
                 "DSDGenWrapper::get_schema: schema not yet implemented for table " +
@@ -863,5 +1110,72 @@ void DSDGenWrapper::generate_web_returns(
             "DSDGenWrapper: emitted %ld web_returns rows\n", emitted);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5 dimension table generators (simple direct-struct pattern)
+// ---------------------------------------------------------------------------
+
+#define TPCDS_SIMPLE_GENERATE(funcname, TBL_TYPE, TPCDS_CONST, mk_func, log_name) \
+void DSDGenWrapper::funcname(                                                       \
+    std::function<void(const void* row)> callback,                                 \
+    long max_rows)                                                                  \
+{                                                                                   \
+    init_dsdgen();                                                                  \
+    ds_key_t total = get_rowcount(TPCDS_CONST);                                    \
+    if (max_rows > 0 && static_cast<ds_key_t>(max_rows) < total)                   \
+        total = static_cast<ds_key_t>(max_rows);                                   \
+    if (verbose_) {                                                                 \
+        std::fprintf(stderr,                                                        \
+            "DSDGenWrapper: generating %lld " log_name " rows\n",                  \
+            static_cast<long long>(total));                                         \
+    }                                                                               \
+    TBL_TYPE row;                                                                   \
+    for (ds_key_t i = 1; i <= total; ++i) {                                        \
+        mk_func(&row, i);                                                           \
+        callback(&row);                                                             \
+    }                                                                               \
+}
+
+TPCDS_SIMPLE_GENERATE(generate_call_center, struct CALL_CENTER_TBL,
+    TPCDS_CALL_CENTER, mk_w_call_center, "call_center")
+
+TPCDS_SIMPLE_GENERATE(generate_catalog_page, struct CATALOG_PAGE_TBL,
+    TPCDS_CATALOG_PAGE, mk_w_catalog_page, "catalog_page")
+
+TPCDS_SIMPLE_GENERATE(generate_web_page, struct W_WEB_PAGE_TBL,
+    TPCDS_WEB_PAGE, mk_w_web_page, "web_page")
+
+TPCDS_SIMPLE_GENERATE(generate_web_site, struct W_WEB_SITE_TBL,
+    TPCDS_WEB_SITE, mk_w_web_site, "web_site")
+
+TPCDS_SIMPLE_GENERATE(generate_warehouse, struct W_WAREHOUSE_TBL,
+    TPCDS_WAREHOUSE, mk_w_warehouse, "warehouse")
+
+TPCDS_SIMPLE_GENERATE(generate_ship_mode, struct W_SHIP_MODE_TBL,
+    TPCDS_SHIP_MODE, mk_w_ship_mode, "ship_mode")
+
+TPCDS_SIMPLE_GENERATE(generate_household_demographics, struct W_HOUSEHOLD_DEMOGRAPHICS_TBL,
+    TPCDS_HOUSEHOLD_DEMOGRAPHICS, mk_w_household_demographics, "household_demographics")
+
+TPCDS_SIMPLE_GENERATE(generate_customer_demographics, struct W_CUSTOMER_DEMOGRAPHICS_TBL,
+    TPCDS_CUSTOMER_DEMOGRAPHICS, mk_w_customer_demographics, "customer_demographics")
+
+TPCDS_SIMPLE_GENERATE(generate_customer_address, struct W_CUSTOMER_ADDRESS_TBL,
+    TPCDS_CUSTOMER_ADDRESS, mk_w_customer_address, "customer_address")
+
+TPCDS_SIMPLE_GENERATE(generate_income_band, struct W_INCOME_BAND_TBL,
+    TPCDS_INCOME_BAND, mk_w_income_band, "income_band")
+
+TPCDS_SIMPLE_GENERATE(generate_reason, struct W_REASON_TBL,
+    TPCDS_REASON, mk_w_reason, "reason")
+
+TPCDS_SIMPLE_GENERATE(generate_time_dim, struct W_TIME_TBL,
+    TPCDS_TIME, mk_w_time, "time_dim")
+
+TPCDS_SIMPLE_GENERATE(generate_promotion, struct W_PROMOTION_TBL,
+    TPCDS_PROMOTION, mk_w_promotion, "promotion")
+
+TPCDS_SIMPLE_GENERATE(generate_store, struct W_STORE_TBL,
+    TPCDS_STORE, mk_w_store, "store")
 
 }  // namespace tpcds

@@ -640,6 +640,498 @@ void append_web_returns_to_builders(
 }
 
 // ---------------------------------------------------------------------------
+// Helper: append ds_addr_t fields with given column-name prefix
+// ---------------------------------------------------------------------------
+//
+// prefix_street_number, prefix_street_name, prefix_street_type,
+// prefix_suite_number, prefix_city, prefix_county, prefix_state,
+// prefix_zip (as string), prefix_country, prefix_gmt_offset
+//
+static void append_addr_fields(
+    const ds_addr_t& addr,
+    const std::string& pfx,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    static_cast<arrow::Int32Builder*>(builders[pfx + "street_number"].get())
+        ->Append(addr.street_num);
+    static_cast<arrow::StringBuilder*>(builders[pfx + "street_name"].get())
+        ->Append(addr.street_name1 ? addr.street_name1 : "");
+    static_cast<arrow::StringBuilder*>(builders[pfx + "street_type"].get())
+        ->Append(addr.street_type ? addr.street_type : "");
+    static_cast<arrow::StringBuilder*>(builders[pfx + "suite_number"].get())
+        ->Append(addr.suite_num);
+    static_cast<arrow::StringBuilder*>(builders[pfx + "city"].get())
+        ->Append(addr.city ? addr.city : "");
+    static_cast<arrow::StringBuilder*>(builders[pfx + "county"].get())
+        ->Append(addr.county ? addr.county : "");
+    static_cast<arrow::StringBuilder*>(builders[pfx + "state"].get())
+        ->Append(addr.state ? addr.state : "");
+    char zip_buf[12];
+    std::snprintf(zip_buf, sizeof(zip_buf), "%05d", addr.zip);
+    static_cast<arrow::StringBuilder*>(builders[pfx + "zip"].get())
+        ->Append(zip_buf);
+    static_cast<arrow::StringBuilder*>(builders[pfx + "country"].get())
+        ->Append(addr.country);
+    static_cast<arrow::DoubleBuilder*>(builders[pfx + "gmt_offset"].get())
+        ->Append(static_cast<double>(addr.gmt_offset));
+}
+
+// ---------------------------------------------------------------------------
+// call_center
+// ---------------------------------------------------------------------------
+
+void append_call_center_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct CALL_CENTER_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["cc_call_center_sk"].get())
+        ->Append(static_cast<int64_t>(r->cc_call_center_sk));
+    static_cast<arrow::StringBuilder*>(builders["cc_call_center_id"].get())
+        ->Append(r->cc_call_center_id);
+    static_cast<arrow::Int64Builder*>(builders["cc_rec_start_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->cc_rec_start_date_id));
+    static_cast<arrow::Int64Builder*>(builders["cc_rec_end_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->cc_rec_end_date_id));
+    static_cast<arrow::Int64Builder*>(builders["cc_closed_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->cc_closed_date_id));
+    static_cast<arrow::Int64Builder*>(builders["cc_open_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->cc_open_date_id));
+    static_cast<arrow::StringBuilder*>(builders["cc_name"].get())
+        ->Append(r->cc_name);
+    static_cast<arrow::StringBuilder*>(builders["cc_class"].get())
+        ->Append(r->cc_class ? r->cc_class : "");
+    static_cast<arrow::Int32Builder*>(builders["cc_employees"].get())
+        ->Append(static_cast<int32_t>(r->cc_employees));
+    static_cast<arrow::Int32Builder*>(builders["cc_sq_ft"].get())
+        ->Append(static_cast<int32_t>(r->cc_sq_ft));
+    static_cast<arrow::StringBuilder*>(builders["cc_hours"].get())
+        ->Append(r->cc_hours ? r->cc_hours : "");
+    static_cast<arrow::StringBuilder*>(builders["cc_manager"].get())
+        ->Append(r->cc_manager);
+    static_cast<arrow::Int32Builder*>(builders["cc_mkt_id"].get())
+        ->Append(static_cast<int32_t>(r->cc_market_id));
+    static_cast<arrow::StringBuilder*>(builders["cc_mkt_class"].get())
+        ->Append(r->cc_market_class);
+    static_cast<arrow::StringBuilder*>(builders["cc_mkt_desc"].get())
+        ->Append(r->cc_market_desc);
+    static_cast<arrow::StringBuilder*>(builders["cc_market_manager"].get())
+        ->Append(r->cc_market_manager);
+    static_cast<arrow::Int32Builder*>(builders["cc_division"].get())
+        ->Append(static_cast<int32_t>(r->cc_division_id));
+    static_cast<arrow::StringBuilder*>(builders["cc_division_name"].get())
+        ->Append(r->cc_division_name);
+    static_cast<arrow::Int32Builder*>(builders["cc_company"].get())
+        ->Append(static_cast<int32_t>(r->cc_company));
+    static_cast<arrow::StringBuilder*>(builders["cc_company_name"].get())
+        ->Append(r->cc_company_name);
+    append_addr_fields(r->cc_address, "cc_", builders);
+    static_cast<arrow::DoubleBuilder*>(builders["cc_tax_percentage"].get())
+        ->Append(dec_to_double(&r->cc_tax_percentage));
+}
+
+// ---------------------------------------------------------------------------
+// catalog_page
+// ---------------------------------------------------------------------------
+
+void append_catalog_page_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct CATALOG_PAGE_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["cp_catalog_page_sk"].get())
+        ->Append(static_cast<int64_t>(r->cp_catalog_page_sk));
+    static_cast<arrow::StringBuilder*>(builders["cp_catalog_page_id"].get())
+        ->Append(r->cp_catalog_page_id);
+    static_cast<arrow::Int64Builder*>(builders["cp_start_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->cp_start_date_id));
+    static_cast<arrow::Int64Builder*>(builders["cp_end_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->cp_end_date_id));
+    static_cast<arrow::StringBuilder*>(builders["cp_department"].get())
+        ->Append(r->cp_department);
+    static_cast<arrow::Int32Builder*>(builders["cp_catalog_number"].get())
+        ->Append(static_cast<int32_t>(r->cp_catalog_number));
+    static_cast<arrow::Int32Builder*>(builders["cp_catalog_page_number"].get())
+        ->Append(static_cast<int32_t>(r->cp_catalog_page_number));
+    static_cast<arrow::StringBuilder*>(builders["cp_description"].get())
+        ->Append(r->cp_description);
+    static_cast<arrow::StringBuilder*>(builders["cp_type"].get())
+        ->Append(r->cp_type ? r->cp_type : "");
+}
+
+// ---------------------------------------------------------------------------
+// web_page
+// ---------------------------------------------------------------------------
+
+void append_web_page_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_WEB_PAGE_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["wp_web_page_sk"].get())
+        ->Append(static_cast<int64_t>(r->wp_page_sk));
+    static_cast<arrow::StringBuilder*>(builders["wp_web_page_id"].get())
+        ->Append(r->wp_page_id);
+    static_cast<arrow::Int64Builder*>(builders["wp_rec_start_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->wp_rec_start_date_id));
+    static_cast<arrow::Int64Builder*>(builders["wp_rec_end_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->wp_rec_end_date_id));
+    static_cast<arrow::Int64Builder*>(builders["wp_creation_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->wp_creation_date_sk));
+    static_cast<arrow::Int64Builder*>(builders["wp_access_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->wp_access_date_sk));
+    static_cast<arrow::Int32Builder*>(builders["wp_autogen_flag"].get())
+        ->Append(static_cast<int32_t>(r->wp_autogen_flag));
+    static_cast<arrow::Int64Builder*>(builders["wp_customer_sk"].get())
+        ->Append(static_cast<int64_t>(r->wp_customer_sk));
+    static_cast<arrow::StringBuilder*>(builders["wp_url"].get())
+        ->Append(r->wp_url);
+    static_cast<arrow::StringBuilder*>(builders["wp_type"].get())
+        ->Append(r->wp_type ? r->wp_type : "");
+    static_cast<arrow::Int32Builder*>(builders["wp_char_count"].get())
+        ->Append(static_cast<int32_t>(r->wp_char_count));
+    static_cast<arrow::Int32Builder*>(builders["wp_link_count"].get())
+        ->Append(static_cast<int32_t>(r->wp_link_count));
+    static_cast<arrow::Int32Builder*>(builders["wp_image_count"].get())
+        ->Append(static_cast<int32_t>(r->wp_image_count));
+    static_cast<arrow::Int32Builder*>(builders["wp_max_ad_count"].get())
+        ->Append(static_cast<int32_t>(r->wp_max_ad_count));
+}
+
+// ---------------------------------------------------------------------------
+// web_site
+// ---------------------------------------------------------------------------
+
+void append_web_site_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_WEB_SITE_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["web_site_sk"].get())
+        ->Append(static_cast<int64_t>(r->web_site_sk));
+    static_cast<arrow::StringBuilder*>(builders["web_site_id"].get())
+        ->Append(r->web_site_id);
+    static_cast<arrow::Int64Builder*>(builders["web_rec_start_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->web_rec_start_date_id));
+    static_cast<arrow::Int64Builder*>(builders["web_rec_end_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->web_rec_end_date_id));
+    static_cast<arrow::StringBuilder*>(builders["web_name"].get())
+        ->Append(r->web_name);
+    static_cast<arrow::Int64Builder*>(builders["web_open_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->web_open_date));
+    static_cast<arrow::Int64Builder*>(builders["web_close_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->web_close_date));
+    static_cast<arrow::StringBuilder*>(builders["web_class"].get())
+        ->Append(r->web_class);
+    static_cast<arrow::StringBuilder*>(builders["web_manager"].get())
+        ->Append(r->web_manager);
+    static_cast<arrow::Int32Builder*>(builders["web_mkt_id"].get())
+        ->Append(static_cast<int32_t>(r->web_market_id));
+    static_cast<arrow::StringBuilder*>(builders["web_mkt_class"].get())
+        ->Append(r->web_market_class);
+    static_cast<arrow::StringBuilder*>(builders["web_mkt_desc"].get())
+        ->Append(r->web_market_desc);
+    static_cast<arrow::StringBuilder*>(builders["web_market_manager"].get())
+        ->Append(r->web_market_manager);
+    static_cast<arrow::Int32Builder*>(builders["web_company_id"].get())
+        ->Append(static_cast<int32_t>(r->web_company_id));
+    static_cast<arrow::StringBuilder*>(builders["web_company_name"].get())
+        ->Append(r->web_company_name);
+    append_addr_fields(r->web_address, "web_", builders);
+    static_cast<arrow::DoubleBuilder*>(builders["web_tax_percentage"].get())
+        ->Append(dec_to_double(&r->web_tax_percentage));
+}
+
+// ---------------------------------------------------------------------------
+// warehouse
+// ---------------------------------------------------------------------------
+
+void append_warehouse_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_WAREHOUSE_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["w_warehouse_sk"].get())
+        ->Append(static_cast<int64_t>(r->w_warehouse_sk));
+    static_cast<arrow::StringBuilder*>(builders["w_warehouse_id"].get())
+        ->Append(r->w_warehouse_id);
+    static_cast<arrow::StringBuilder*>(builders["w_warehouse_name"].get())
+        ->Append(r->w_warehouse_name);
+    static_cast<arrow::Int32Builder*>(builders["w_warehouse_sq_ft"].get())
+        ->Append(static_cast<int32_t>(r->w_warehouse_sq_ft));
+    append_addr_fields(r->w_address, "w_", builders);
+}
+
+// ---------------------------------------------------------------------------
+// ship_mode
+// ---------------------------------------------------------------------------
+
+void append_ship_mode_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_SHIP_MODE_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["sm_ship_mode_sk"].get())
+        ->Append(static_cast<int64_t>(r->sm_ship_mode_sk));
+    static_cast<arrow::StringBuilder*>(builders["sm_ship_mode_id"].get())
+        ->Append(r->sm_ship_mode_id);
+    static_cast<arrow::StringBuilder*>(builders["sm_type"].get())
+        ->Append(r->sm_type ? r->sm_type : "");
+    static_cast<arrow::StringBuilder*>(builders["sm_code"].get())
+        ->Append(r->sm_code ? r->sm_code : "");
+    static_cast<arrow::StringBuilder*>(builders["sm_carrier"].get())
+        ->Append(r->sm_carrier ? r->sm_carrier : "");
+    static_cast<arrow::StringBuilder*>(builders["sm_contract"].get())
+        ->Append(r->sm_contract);
+}
+
+// ---------------------------------------------------------------------------
+// household_demographics
+// ---------------------------------------------------------------------------
+
+void append_household_demographics_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_HOUSEHOLD_DEMOGRAPHICS_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["hd_demo_sk"].get())
+        ->Append(static_cast<int64_t>(r->hd_demo_sk));
+    static_cast<arrow::Int64Builder*>(builders["hd_income_band_sk"].get())
+        ->Append(static_cast<int64_t>(r->hd_income_band_id));
+    static_cast<arrow::StringBuilder*>(builders["hd_buy_potential"].get())
+        ->Append(r->hd_buy_potential ? r->hd_buy_potential : "");
+    static_cast<arrow::Int32Builder*>(builders["hd_dep_count"].get())
+        ->Append(static_cast<int32_t>(r->hd_dep_count));
+    static_cast<arrow::Int32Builder*>(builders["hd_vehicle_count"].get())
+        ->Append(static_cast<int32_t>(r->hd_vehicle_count));
+}
+
+// ---------------------------------------------------------------------------
+// customer_demographics
+// ---------------------------------------------------------------------------
+
+void append_customer_demographics_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_CUSTOMER_DEMOGRAPHICS_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["cd_demo_sk"].get())
+        ->Append(static_cast<int64_t>(r->cd_demo_sk));
+    static_cast<arrow::StringBuilder*>(builders["cd_gender"].get())
+        ->Append(r->cd_gender ? r->cd_gender : "");
+    static_cast<arrow::StringBuilder*>(builders["cd_marital_status"].get())
+        ->Append(r->cd_marital_status ? r->cd_marital_status : "");
+    static_cast<arrow::StringBuilder*>(builders["cd_education_status"].get())
+        ->Append(r->cd_education_status ? r->cd_education_status : "");
+    static_cast<arrow::Int32Builder*>(builders["cd_purchase_estimate"].get())
+        ->Append(static_cast<int32_t>(r->cd_purchase_estimate));
+    static_cast<arrow::StringBuilder*>(builders["cd_credit_rating"].get())
+        ->Append(r->cd_credit_rating ? r->cd_credit_rating : "");
+    static_cast<arrow::Int32Builder*>(builders["cd_dep_count"].get())
+        ->Append(static_cast<int32_t>(r->cd_dep_count));
+    static_cast<arrow::Int32Builder*>(builders["cd_dep_employed_count"].get())
+        ->Append(static_cast<int32_t>(r->cd_dep_employed_count));
+    static_cast<arrow::Int32Builder*>(builders["cd_dep_college_count"].get())
+        ->Append(static_cast<int32_t>(r->cd_dep_college_count));
+}
+
+// ---------------------------------------------------------------------------
+// customer_address
+// ---------------------------------------------------------------------------
+
+void append_customer_address_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_CUSTOMER_ADDRESS_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["ca_address_sk"].get())
+        ->Append(static_cast<int64_t>(r->ca_addr_sk));
+    static_cast<arrow::StringBuilder*>(builders["ca_address_id"].get())
+        ->Append(r->ca_addr_id);
+    append_addr_fields(r->ca_address, "ca_", builders);
+    static_cast<arrow::StringBuilder*>(builders["ca_location_type"].get())
+        ->Append(r->ca_location_type ? r->ca_location_type : "");
+}
+
+// ---------------------------------------------------------------------------
+// income_band
+// ---------------------------------------------------------------------------
+
+void append_income_band_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_INCOME_BAND_TBL*>(row);
+
+    static_cast<arrow::Int32Builder*>(builders["ib_income_band_id"].get())
+        ->Append(static_cast<int32_t>(r->ib_income_band_id));
+    static_cast<arrow::Int32Builder*>(builders["ib_lower_bound"].get())
+        ->Append(static_cast<int32_t>(r->ib_lower_bound));
+    static_cast<arrow::Int32Builder*>(builders["ib_upper_bound"].get())
+        ->Append(static_cast<int32_t>(r->ib_upper_bound));
+}
+
+// ---------------------------------------------------------------------------
+// reason
+// ---------------------------------------------------------------------------
+
+void append_reason_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_REASON_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["r_reason_sk"].get())
+        ->Append(static_cast<int64_t>(r->r_reason_sk));
+    static_cast<arrow::StringBuilder*>(builders["r_reason_id"].get())
+        ->Append(r->r_reason_id);
+    static_cast<arrow::StringBuilder*>(builders["r_reason_desc"].get())
+        ->Append(r->r_reason_description ? r->r_reason_description : "");
+}
+
+// ---------------------------------------------------------------------------
+// time_dim
+// ---------------------------------------------------------------------------
+
+void append_time_dim_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_TIME_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["t_time_sk"].get())
+        ->Append(static_cast<int64_t>(r->t_time_sk));
+    static_cast<arrow::StringBuilder*>(builders["t_time_id"].get())
+        ->Append(r->t_time_id);
+    static_cast<arrow::Int32Builder*>(builders["t_time"].get())
+        ->Append(static_cast<int32_t>(r->t_time));
+    static_cast<arrow::Int32Builder*>(builders["t_hour"].get())
+        ->Append(static_cast<int32_t>(r->t_hour));
+    static_cast<arrow::Int32Builder*>(builders["t_minute"].get())
+        ->Append(static_cast<int32_t>(r->t_minute));
+    static_cast<arrow::Int32Builder*>(builders["t_second"].get())
+        ->Append(static_cast<int32_t>(r->t_second));
+    static_cast<arrow::StringBuilder*>(builders["t_am_pm"].get())
+        ->Append(r->t_am_pm ? r->t_am_pm : "");
+    static_cast<arrow::StringBuilder*>(builders["t_shift"].get())
+        ->Append(r->t_shift ? r->t_shift : "");
+    static_cast<arrow::StringBuilder*>(builders["t_sub_shift"].get())
+        ->Append(r->t_sub_shift ? r->t_sub_shift : "");
+    static_cast<arrow::StringBuilder*>(builders["t_meal_time"].get())
+        ->Append(r->t_meal_time ? r->t_meal_time : "");
+}
+
+// ---------------------------------------------------------------------------
+// promotion
+// ---------------------------------------------------------------------------
+
+void append_promotion_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_PROMOTION_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["p_promo_sk"].get())
+        ->Append(static_cast<int64_t>(r->p_promo_sk));
+    static_cast<arrow::StringBuilder*>(builders["p_promo_id"].get())
+        ->Append(r->p_promo_id);
+    static_cast<arrow::Int64Builder*>(builders["p_start_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->p_start_date_id));
+    static_cast<arrow::Int64Builder*>(builders["p_end_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->p_end_date_id));
+    static_cast<arrow::Int64Builder*>(builders["p_item_sk"].get())
+        ->Append(static_cast<int64_t>(r->p_item_sk));
+    static_cast<arrow::DoubleBuilder*>(builders["p_cost"].get())
+        ->Append(dec_to_double(&r->p_cost));
+    static_cast<arrow::Int32Builder*>(builders["p_response_target"].get())
+        ->Append(static_cast<int32_t>(r->p_response_target));
+    static_cast<arrow::StringBuilder*>(builders["p_promo_name"].get())
+        ->Append(r->p_promo_name);
+    static_cast<arrow::Int32Builder*>(builders["p_channel_dmail"].get())
+        ->Append(static_cast<int32_t>(r->p_channel_dmail));
+    static_cast<arrow::Int32Builder*>(builders["p_channel_email"].get())
+        ->Append(static_cast<int32_t>(r->p_channel_email));
+    static_cast<arrow::Int32Builder*>(builders["p_channel_catalog"].get())
+        ->Append(static_cast<int32_t>(r->p_channel_catalog));
+    static_cast<arrow::Int32Builder*>(builders["p_channel_tv"].get())
+        ->Append(static_cast<int32_t>(r->p_channel_tv));
+    static_cast<arrow::Int32Builder*>(builders["p_channel_radio"].get())
+        ->Append(static_cast<int32_t>(r->p_channel_radio));
+    static_cast<arrow::Int32Builder*>(builders["p_channel_press"].get())
+        ->Append(static_cast<int32_t>(r->p_channel_press));
+    static_cast<arrow::Int32Builder*>(builders["p_channel_event"].get())
+        ->Append(static_cast<int32_t>(r->p_channel_event));
+    static_cast<arrow::Int32Builder*>(builders["p_channel_demo"].get())
+        ->Append(static_cast<int32_t>(r->p_channel_demo));
+    static_cast<arrow::StringBuilder*>(builders["p_channel_details"].get())
+        ->Append(r->p_channel_details);
+    static_cast<arrow::StringBuilder*>(builders["p_purpose"].get())
+        ->Append(r->p_purpose ? r->p_purpose : "");
+    static_cast<arrow::Int32Builder*>(builders["p_discount_active"].get())
+        ->Append(static_cast<int32_t>(r->p_discount_active));
+}
+
+// ---------------------------------------------------------------------------
+// store
+// ---------------------------------------------------------------------------
+
+void append_store_to_builders(
+    const void* row,
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+{
+    auto* r = static_cast<const struct W_STORE_TBL*>(row);
+
+    static_cast<arrow::Int64Builder*>(builders["s_store_sk"].get())
+        ->Append(static_cast<int64_t>(r->store_sk));
+    static_cast<arrow::StringBuilder*>(builders["s_store_id"].get())
+        ->Append(r->store_id);
+    static_cast<arrow::Int64Builder*>(builders["s_rec_start_date"].get())
+        ->Append(static_cast<int64_t>(r->rec_start_date_id));
+    static_cast<arrow::Int64Builder*>(builders["s_rec_end_date"].get())
+        ->Append(static_cast<int64_t>(r->rec_end_date_id));
+    static_cast<arrow::Int64Builder*>(builders["s_closed_date_sk"].get())
+        ->Append(static_cast<int64_t>(r->closed_date_id));
+    static_cast<arrow::StringBuilder*>(builders["s_store_name"].get())
+        ->Append(r->store_name);
+    static_cast<arrow::Int32Builder*>(builders["s_number_employees"].get())
+        ->Append(static_cast<int32_t>(r->employees));
+    static_cast<arrow::Int32Builder*>(builders["s_floor_space"].get())
+        ->Append(static_cast<int32_t>(r->floor_space));
+    static_cast<arrow::StringBuilder*>(builders["s_hours"].get())
+        ->Append(r->hours ? r->hours : "");
+    static_cast<arrow::StringBuilder*>(builders["s_manager"].get())
+        ->Append(r->store_manager);
+    static_cast<arrow::Int32Builder*>(builders["s_market_id"].get())
+        ->Append(static_cast<int32_t>(r->market_id));
+    static_cast<arrow::StringBuilder*>(builders["s_geography_class"].get())
+        ->Append(r->geography_class ? r->geography_class : "");
+    static_cast<arrow::StringBuilder*>(builders["s_market_desc"].get())
+        ->Append(r->market_desc);
+    static_cast<arrow::StringBuilder*>(builders["s_market_manager"].get())
+        ->Append(r->market_manager);
+    static_cast<arrow::Int64Builder*>(builders["s_division_id"].get())
+        ->Append(static_cast<int64_t>(r->division_id));
+    static_cast<arrow::StringBuilder*>(builders["s_division_name"].get())
+        ->Append(r->division_name ? r->division_name : "");
+    static_cast<arrow::Int64Builder*>(builders["s_company_id"].get())
+        ->Append(static_cast<int64_t>(r->company_id));
+    static_cast<arrow::StringBuilder*>(builders["s_company_name"].get())
+        ->Append(r->company_name ? r->company_name : "");
+    append_addr_fields(r->address, "s_", builders);
+    static_cast<arrow::DoubleBuilder*>(builders["s_tax_percentage"].get())
+        ->Append(dec_to_double(&r->dTaxPercentage));
+}
+
+// ---------------------------------------------------------------------------
 // Generic dispatcher
 // ---------------------------------------------------------------------------
 
@@ -668,6 +1160,34 @@ void append_dsdgen_row_to_builders(
         append_catalog_returns_to_builders(row, builders);
     } else if (tbl_name == "web_returns") {
         append_web_returns_to_builders(row, builders);
+    } else if (tbl_name == "call_center") {
+        append_call_center_to_builders(row, builders);
+    } else if (tbl_name == "catalog_page") {
+        append_catalog_page_to_builders(row, builders);
+    } else if (tbl_name == "web_page") {
+        append_web_page_to_builders(row, builders);
+    } else if (tbl_name == "web_site") {
+        append_web_site_to_builders(row, builders);
+    } else if (tbl_name == "warehouse") {
+        append_warehouse_to_builders(row, builders);
+    } else if (tbl_name == "ship_mode") {
+        append_ship_mode_to_builders(row, builders);
+    } else if (tbl_name == "household_demographics") {
+        append_household_demographics_to_builders(row, builders);
+    } else if (tbl_name == "customer_demographics") {
+        append_customer_demographics_to_builders(row, builders);
+    } else if (tbl_name == "customer_address") {
+        append_customer_address_to_builders(row, builders);
+    } else if (tbl_name == "income_band") {
+        append_income_band_to_builders(row, builders);
+    } else if (tbl_name == "reason") {
+        append_reason_to_builders(row, builders);
+    } else if (tbl_name == "time_dim") {
+        append_time_dim_to_builders(row, builders);
+    } else if (tbl_name == "promotion") {
+        append_promotion_to_builders(row, builders);
+    } else if (tbl_name == "store") {
+        append_store_to_builders(row, builders);
     } else {
         throw std::invalid_argument("append_dsdgen_row_to_builders: unknown table: " + tbl_name);
     }

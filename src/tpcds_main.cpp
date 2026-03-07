@@ -79,17 +79,14 @@ void print_usage(const char* prog) {
         "  --verbose              Verbose output\n"
         "  --help                 Show this help\n"
         "\n"
-        "TPC-DS tables (Phase 3 — implemented):\n"
+        "TPC-DS tables (implemented):\n"
         "  Fact:      store_sales, inventory, catalog_sales, web_sales,\n"
         "             store_returns, catalog_returns, web_returns\n"
-        "  Dimension: customer, item, date_dim\n"
-        "\n"
-        "TPC-DS tables (planned Phase 4+):\n"
-        "  Dimension: customer_address, customer_demographics,\n"
-        "             time_dim, store, call_center,\n"
-        "             catalog_page, web_page, web_site, warehouse,\n"
-        "             ship_mode, household_demographics, income_band,\n"
-        "             reason, promotion\n",
+        "  Dimension: customer, item, date_dim,\n"
+        "             call_center, catalog_page, web_page, web_site,\n"
+        "             warehouse, ship_mode, household_demographics,\n"
+        "             customer_demographics, customer_address, income_band,\n"
+        "             reason, time_dim, promotion, store\n",
         prog);
 }
 
@@ -262,20 +259,31 @@ size_t run_generation(
 
 // Map table name → TableType enum
 tpcds::TableType parse_table(const std::string& name) {
-    if (name == "store_sales")     return tpcds::TableType::STORE_SALES;
-    if (name == "inventory")       return tpcds::TableType::INVENTORY;
-    if (name == "catalog_sales")   return tpcds::TableType::CATALOG_SALES;
-    if (name == "web_sales")       return tpcds::TableType::WEB_SALES;
-    if (name == "customer")        return tpcds::TableType::CUSTOMER;
-    if (name == "item")            return tpcds::TableType::ITEM;
-    if (name == "date_dim")        return tpcds::TableType::DATE_DIM;
-    if (name == "store_returns")   return tpcds::TableType::STORE_RETURNS;
-    if (name == "catalog_returns") return tpcds::TableType::CATALOG_RETURNS;
-    if (name == "web_returns")     return tpcds::TableType::WEB_RETURNS;
-    throw std::invalid_argument(
-        "Table '" + name + "' not yet implemented.\n"
-        "Available: store_sales, inventory, catalog_sales, web_sales, "
-        "customer, item, date_dim, store_returns, catalog_returns, web_returns");
+    if (name == "store_sales")              return tpcds::TableType::STORE_SALES;
+    if (name == "inventory")               return tpcds::TableType::INVENTORY;
+    if (name == "catalog_sales")           return tpcds::TableType::CATALOG_SALES;
+    if (name == "web_sales")               return tpcds::TableType::WEB_SALES;
+    if (name == "customer")                return tpcds::TableType::CUSTOMER;
+    if (name == "item")                    return tpcds::TableType::ITEM;
+    if (name == "date_dim")                return tpcds::TableType::DATE_DIM;
+    if (name == "store_returns")           return tpcds::TableType::STORE_RETURNS;
+    if (name == "catalog_returns")         return tpcds::TableType::CATALOG_RETURNS;
+    if (name == "web_returns")             return tpcds::TableType::WEB_RETURNS;
+    if (name == "call_center")             return tpcds::TableType::CALL_CENTER;
+    if (name == "catalog_page")            return tpcds::TableType::CATALOG_PAGE;
+    if (name == "web_page")                return tpcds::TableType::WEB_PAGE;
+    if (name == "web_site")                return tpcds::TableType::WEB_SITE;
+    if (name == "warehouse")               return tpcds::TableType::WAREHOUSE;
+    if (name == "ship_mode")               return tpcds::TableType::SHIP_MODE;
+    if (name == "household_demographics")  return tpcds::TableType::HOUSEHOLD_DEMOGRAPHICS;
+    if (name == "customer_demographics")   return tpcds::TableType::CUSTOMER_DEMOGRAPHICS;
+    if (name == "customer_address")        return tpcds::TableType::CUSTOMER_ADDRESS;
+    if (name == "income_band")             return tpcds::TableType::INCOME_BAND;
+    if (name == "reason")                  return tpcds::TableType::REASON;
+    if (name == "time_dim")                return tpcds::TableType::TIME_DIM;
+    if (name == "promotion")               return tpcds::TableType::PROMOTION;
+    if (name == "store")                   return tpcds::TableType::STORE;
+    throw std::invalid_argument("Table '" + name + "' not found. Use --help for list.");
 }
 
 // Extension for a given format
@@ -376,6 +384,48 @@ int main(int argc, char* argv[]) {
         } else if (table_type == tpcds::TableType::WEB_RETURNS) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_web_returns(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::CALL_CENTER) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_call_center(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::CATALOG_PAGE) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_catalog_page(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::WEB_PAGE) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_web_page(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::WEB_SITE) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_web_site(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::WAREHOUSE) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_warehouse(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::SHIP_MODE) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_ship_mode(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::HOUSEHOLD_DEMOGRAPHICS) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_household_demographics(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::CUSTOMER_DEMOGRAPHICS) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_customer_demographics(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::CUSTOMER_ADDRESS) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_customer_address(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::INCOME_BAND) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_income_band(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::REASON) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_reason(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::TIME_DIM) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_time_dim(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::PROMOTION) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_promotion(cb, opts.max_rows); });
+        } else if (table_type == tpcds::TableType::STORE) {
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_store(cb, opts.max_rows); });
         }
     } catch (const std::exception& e) {
         fprintf(stderr, "tpcds_benchmark: generation error: %s\n", e.what());

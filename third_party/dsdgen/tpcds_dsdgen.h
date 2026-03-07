@@ -263,6 +263,225 @@ struct W_WEB_RETURNS_TBL {
     ds_pricing_t wr_pricing;
 };
 
+/* Address type used in several dimension tables (address.h) */
+typedef struct DS_ADDR_T {
+    char  suite_num[11];   /* RS_CC_SUITE_NUM+1 */
+    int   street_num;
+    char *street_name1;
+    char *street_name2;
+    char *street_type;
+    char *city;
+    char *county;
+    char *state;
+    char  country[21];     /* RS_CC_COUNTRY+1 */
+    int   zip;
+    int   plus4;
+    int   gmt_offset;
+} ds_addr_t;
+
+/* call_center row (w_call_center.h) */
+struct CALL_CENTER_TBL {
+    ds_key_t  cc_call_center_sk;
+    char      cc_call_center_id[17];
+    ds_key_t  cc_rec_start_date_id;
+    ds_key_t  cc_rec_end_date_id;
+    ds_key_t  cc_closed_date_id;
+    ds_key_t  cc_open_date_id;
+    char      cc_name[51];
+    char     *cc_class;
+    int       cc_employees;
+    int       cc_sq_ft;
+    char     *cc_hours;
+    char      cc_manager[41];
+    int       cc_market_id;
+    char      cc_market_class[51];
+    char      cc_market_desc[101];
+    char      cc_market_manager[41];
+    int       cc_division_id;
+    char      cc_division_name[51];
+    int       cc_company;
+    char      cc_company_name[61];
+    ds_addr_t cc_address;
+    decimal_t cc_tax_percentage;
+};
+
+/* catalog_page row (w_catalog_page.h) */
+struct CATALOG_PAGE_TBL {
+    ds_key_t  cp_catalog_page_sk;
+    char      cp_catalog_page_id[17];
+    ds_key_t  cp_start_date_id;
+    ds_key_t  cp_end_date_id;
+    char      cp_department[21];
+    int       cp_catalog_number;
+    int       cp_catalog_page_number;
+    char      cp_description[101];
+    char     *cp_type;
+};
+
+/* web_page row (w_web_page.h) */
+struct W_WEB_PAGE_TBL {
+    ds_key_t  wp_page_sk;
+    char      wp_page_id[17];
+    char      wp_site_id[17];
+    ds_key_t  wp_rec_start_date_id;
+    ds_key_t  wp_rec_end_date_id;
+    ds_key_t  wp_creation_date_sk;
+    ds_key_t  wp_access_date_sk;
+    int       wp_autogen_flag;
+    ds_key_t  wp_customer_sk;
+    char      wp_url[101];
+    char     *wp_type;
+    int       wp_char_count;
+    int       wp_link_count;
+    int       wp_image_count;
+    int       wp_max_ad_count;
+};
+
+/* web_site row (w_web_site.h) */
+struct W_WEB_SITE_TBL {
+    ds_key_t  web_site_sk;
+    char      web_site_id[17];
+    ds_key_t  web_rec_start_date_id;
+    ds_key_t  web_rec_end_date_id;
+    char      web_name[51];
+    ds_key_t  web_open_date;
+    ds_key_t  web_close_date;
+    char      web_class[51];
+    char      web_manager[51];
+    int       web_market_id;
+    char      web_market_class[51];
+    char      web_market_desc[101];
+    char      web_market_manager[41];
+    int       web_company_id;
+    char      web_company_name[101];
+    ds_addr_t web_address;
+    decimal_t web_tax_percentage;
+};
+
+/* warehouse row (w_warehouse.h) */
+struct W_WAREHOUSE_TBL {
+    ds_key_t  w_warehouse_sk;
+    char      w_warehouse_id[17];
+    char      w_warehouse_name[21];
+    int       w_warehouse_sq_ft;
+    ds_addr_t w_address;
+};
+
+/* ship_mode row (w_ship_mode.h) */
+struct W_SHIP_MODE_TBL {
+    ds_key_t  sm_ship_mode_sk;
+    char      sm_ship_mode_id[17];
+    char     *sm_type;
+    char     *sm_code;
+    char     *sm_carrier;
+    char      sm_contract[21];
+};
+
+/* household_demographics row (w_household_demographics.h) */
+struct W_HOUSEHOLD_DEMOGRAPHICS_TBL {
+    ds_key_t  hd_demo_sk;
+    ds_key_t  hd_income_band_id;
+    char     *hd_buy_potential;
+    int       hd_dep_count;
+    int       hd_vehicle_count;
+};
+
+/* customer_demographics row (w_customer_demographics.h) */
+struct W_CUSTOMER_DEMOGRAPHICS_TBL {
+    ds_key_t  cd_demo_sk;
+    char     *cd_gender;
+    char     *cd_marital_status;
+    char     *cd_education_status;
+    int       cd_purchase_estimate;
+    char     *cd_credit_rating;
+    int       cd_dep_count;
+    int       cd_dep_employed_count;
+    int       cd_dep_college_count;
+};
+
+/* customer_address row (w_customer_address.h) */
+struct W_CUSTOMER_ADDRESS_TBL {
+    ds_key_t  ca_addr_sk;
+    char      ca_addr_id[17];
+    ds_addr_t ca_address;
+    char     *ca_location_type;
+};
+
+/* income_band row (w_income_band.h) */
+struct W_INCOME_BAND_TBL {
+    int ib_income_band_id;
+    int ib_lower_bound;
+    int ib_upper_bound;
+};
+
+/* reason row (w_reason.h) */
+struct W_REASON_TBL {
+    ds_key_t  r_reason_sk;
+    char      r_reason_id[17];
+    char     *r_reason_description;
+};
+
+/* time_dim row (w_timetbl.h) */
+struct W_TIME_TBL {
+    ds_key_t  t_time_sk;
+    char      t_time_id[17];
+    int       t_time;
+    int       t_hour;
+    int       t_minute;
+    int       t_second;
+    char     *t_am_pm;
+    char     *t_shift;
+    char     *t_sub_shift;
+    char     *t_meal_time;
+};
+
+/* promotion row (w_promotion.h) */
+struct W_PROMOTION_TBL {
+    ds_key_t  p_promo_sk;
+    char      p_promo_id[17];
+    ds_key_t  p_start_date_id;
+    ds_key_t  p_end_date_id;
+    ds_key_t  p_item_sk;
+    decimal_t p_cost;
+    int       p_response_target;
+    char      p_promo_name[51];
+    int       p_channel_dmail;
+    int       p_channel_email;
+    int       p_channel_catalog;
+    int       p_channel_tv;
+    int       p_channel_radio;
+    int       p_channel_press;
+    int       p_channel_event;
+    int       p_channel_demo;
+    char      p_channel_details[101];
+    char     *p_purpose;
+    int       p_discount_active;
+};
+
+/* store row (w_store.h) */
+struct W_STORE_TBL {
+    ds_key_t  store_sk;
+    char      store_id[17];
+    ds_key_t  rec_start_date_id;
+    ds_key_t  rec_end_date_id;
+    ds_key_t  closed_date_id;
+    char      store_name[51];
+    int       employees;
+    int       floor_space;
+    char     *hours;
+    char      store_manager[41];
+    int       market_id;
+    decimal_t dTaxPercentage;
+    char     *geography_class;
+    char      market_desc[101];
+    char      market_manager[41];
+    ds_key_t  division_id;
+    char     *division_name;
+    ds_key_t  company_id;
+    char     *company_name;
+    ds_addr_t address;
+};
+
 /* table ID constants (must match generated tables.h) */
 #define TPCDS_STORE_SALES      17
 #define TPCDS_INVENTORY        10
@@ -274,6 +493,21 @@ struct W_WEB_RETURNS_TBL {
 #define TPCDS_STORE_RETURNS    16
 #define TPCDS_CATALOG_RETURNS   2
 #define TPCDS_WEB_RETURNS      21
+/* Phase 5 dimension tables */
+#define TPCDS_CALL_CENTER       0
+#define TPCDS_CATALOG_PAGE      1
+#define TPCDS_CUSTOMER_ADDRESS  5
+#define TPCDS_CUSTOMER_DEMOGRAPHICS 6
+#define TPCDS_HOUSEHOLD_DEMOGRAPHICS 8
+#define TPCDS_INCOME_BAND       9
+#define TPCDS_PROMOTION        12
+#define TPCDS_REASON           13
+#define TPCDS_SHIP_MODE        14
+#define TPCDS_STORE            15
+#define TPCDS_TIME             18
+#define TPCDS_WAREHOUSE        19
+#define TPCDS_WEB_PAGE         20
+#define TPCDS_WEB_SITE         23
 
 /* r_params.h — parameter access */
 void  set_str(char* param, char* value);
@@ -299,6 +533,21 @@ int mk_w_date(void* pDest, ds_key_t kIndex);
 int mk_w_store_returns(void* pDest, ds_key_t kIndex);
 int mk_w_catalog_returns(void* pDest, ds_key_t kIndex);
 int mk_w_web_returns(void* pDest, ds_key_t kIndex);
+/* Phase 5 dimension table generators */
+int mk_w_call_center(void* pDest, ds_key_t kIndex);
+int mk_w_catalog_page(void* pDest, ds_key_t kIndex);
+int mk_w_web_page(void* pDest, ds_key_t kIndex);
+int mk_w_web_site(void* pDest, ds_key_t kIndex);
+int mk_w_warehouse(void* pDest, ds_key_t kIndex);
+int mk_w_ship_mode(void* pDest, ds_key_t kIndex);
+int mk_w_household_demographics(void* pDest, ds_key_t kIndex);
+int mk_w_customer_demographics(void* pDest, ds_key_t kIndex);
+int mk_w_customer_address(void* pDest, ds_key_t kIndex);
+int mk_w_income_band(void* pDest, ds_key_t kIndex);
+int mk_w_reason(void* pDest, ds_key_t kIndex);
+int mk_w_time(void* pDest, ds_key_t kIndex);
+int mk_w_promotion(void* pDest, ds_key_t kIndex);
+int mk_w_store(void* pDest, ds_key_t kIndex);
 
 /* Embedded-mode callback for store_sales (compiled in when EMBEDDED_DSDGEN is
  * defined). Set before calling mk_w_store_sales; called once per line item
