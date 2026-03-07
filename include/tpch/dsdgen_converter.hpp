@@ -192,4 +192,9 @@ void append_dsdgen_row_to_builders(
     const void* row,
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders);
 
+/**
+ * Returns static dictionary Arrow array for dict8-encoded columns, or nullptr.
+ */
+std::shared_ptr<arrow::Array> get_dict_for_field(const std::string& field_name);
+
 }  // namespace tpcds
