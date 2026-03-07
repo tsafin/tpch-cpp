@@ -145,6 +145,66 @@ public:
         std::function<void(const void* row)> callback,
         long max_rows = -1);
 
+    // -----------------------------------------------------------------------
+    // Phase 5 dimension table generators
+    // -----------------------------------------------------------------------
+
+    void generate_call_center(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_catalog_page(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_web_page(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_web_site(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_warehouse(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_ship_mode(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_household_demographics(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_customer_demographics(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_customer_address(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_income_band(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_reason(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_time_dim(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_promotion(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
+    void generate_store(
+        std::function<void(const void* row)> callback,
+        long max_rows = -1);
+
     long scale_factor() const { return scale_factor_; }
 
     /**
