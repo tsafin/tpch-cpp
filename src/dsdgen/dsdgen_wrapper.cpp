@@ -36,30 +36,30 @@ int DSDGenWrapper::table_id(TableType t) {
 
 std::string DSDGenWrapper::table_name(TableType t) {
     switch (t) {
-        case TableType::CALL_CENTER:           return "call_center";
-        case TableType::CATALOG_PAGE:          return "catalog_page";
-        case TableType::CATALOG_RETURNS:       return "catalog_returns";
-        case TableType::CATALOG_SALES:         return "catalog_sales";
-        case TableType::CUSTOMER:              return "customer";
-        case TableType::CUSTOMER_ADDRESS:      return "customer_address";
-        case TableType::CUSTOMER_DEMOGRAPHICS: return "customer_demographics";
-        case TableType::DATE_DIM:              return "date_dim";
-        case TableType::HOUSEHOLD_DEMOGRAPHICS:return "household_demographics";
-        case TableType::INCOME_BAND:           return "income_band";
-        case TableType::INVENTORY:             return "inventory";
-        case TableType::ITEM:                  return "item";
-        case TableType::PROMOTION:             return "promotion";
-        case TableType::REASON:                return "reason";
-        case TableType::SHIP_MODE:             return "ship_mode";
-        case TableType::STORE:                 return "store";
-        case TableType::STORE_RETURNS:         return "store_returns";
-        case TableType::STORE_SALES:           return "store_sales";
-        case TableType::TIME_DIM:              return "time_dim";
-        case TableType::WAREHOUSE:             return "warehouse";
-        case TableType::WEB_PAGE:              return "web_page";
-        case TableType::WEB_RETURNS:           return "web_returns";
-        case TableType::WEB_SALES:             return "web_sales";
-        case TableType::WEB_SITE:              return "web_site";
+        case TableType::CallCenter:            return "call_center";
+        case TableType::CatalogPage:           return "catalog_page";
+        case TableType::CatalogReturns:        return "catalog_returns";
+        case TableType::CatalogSales:          return "catalog_sales";
+        case TableType::Customer:              return "customer";
+        case TableType::CustomerAddress:       return "customer_address";
+        case TableType::CustomerDemographics:  return "customer_demographics";
+        case TableType::DateDim:               return "date_dim";
+        case TableType::HouseholdDemographics: return "household_demographics";
+        case TableType::IncomeBand:            return "income_band";
+        case TableType::Inventory:             return "inventory";
+        case TableType::Item:                  return "item";
+        case TableType::Promotion:             return "promotion";
+        case TableType::Reason:                return "reason";
+        case TableType::ShipMode:              return "ship_mode";
+        case TableType::Store:                 return "store";
+        case TableType::StoreReturns:          return "store_returns";
+        case TableType::StoreSales:            return "store_sales";
+        case TableType::TimeDim:               return "time_dim";
+        case TableType::Warehouse:             return "warehouse";
+        case TableType::WebPage:               return "web_page";
+        case TableType::WebReturns:            return "web_returns";
+        case TableType::WebSales:              return "web_sales";
+        case TableType::WebSite:               return "web_site";
         default:                               return "unknown";
     }
 }
@@ -70,7 +70,7 @@ std::string DSDGenWrapper::table_name(TableType t) {
 
 std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
     switch (t) {
-        case TableType::STORE_SALES:
+        case TableType::StoreSales:
             return arrow::schema({
                 arrow::field("ss_sold_date_sk",         arrow::int64()),
                 arrow::field("ss_sold_time_sk",         arrow::int64()),
@@ -97,7 +97,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("ss_net_profit",           arrow::float64()),
             });
 
-        case TableType::INVENTORY:
+        case TableType::Inventory:
             return arrow::schema({
                 arrow::field("inv_date_sk",             arrow::int64()),
                 arrow::field("inv_item_sk",             arrow::int64()),
@@ -105,7 +105,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("inv_quantity_on_hand",    arrow::int32()),
             });
 
-        case TableType::CATALOG_SALES:
+        case TableType::CatalogSales:
             return arrow::schema({
                 arrow::field("cs_sold_date_sk",              arrow::int64()),
                 arrow::field("cs_sold_time_sk",              arrow::int64()),
@@ -143,7 +143,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("cs_net_profit",                arrow::float64()),
             });
 
-        case TableType::WEB_SALES:
+        case TableType::WebSales:
             return arrow::schema({
                 arrow::field("ws_sold_date_sk",              arrow::int64()),
                 arrow::field("ws_sold_time_sk",              arrow::int64()),
@@ -181,7 +181,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("ws_net_profit",                arrow::float64()),
             });
 
-        case TableType::CUSTOMER:
+        case TableType::Customer:
             return arrow::schema({
                 arrow::field("c_customer_sk",            arrow::int64()),
                 arrow::field("c_customer_id",            arrow::utf8()),
@@ -203,7 +203,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("c_last_review_date",       arrow::int32()),
             });
 
-        case TableType::ITEM:
+        case TableType::Item:
             return arrow::schema({
                 arrow::field("i_item_sk",           arrow::int64()),
                 arrow::field("i_item_id",           arrow::utf8()),
@@ -230,7 +230,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("i_promo_sk",          arrow::int64()),
             });
 
-        case TableType::DATE_DIM:
+        case TableType::DateDim:
             return arrow::schema({
                 arrow::field("d_date_sk",           arrow::int64()),
                 arrow::field("d_date_id",           arrow::utf8()),
@@ -260,7 +260,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("d_current_year",      arrow::int32()),
             });
 
-        case TableType::STORE_RETURNS:
+        case TableType::StoreReturns:
             return arrow::schema({
                 arrow::field("sr_returned_date_sk",  arrow::int64()),
                 arrow::field("sr_returned_time_sk",  arrow::int64()),
@@ -284,7 +284,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("sr_net_loss",          arrow::float64()),
             });
 
-        case TableType::CATALOG_RETURNS:
+        case TableType::CatalogReturns:
             return arrow::schema({
                 arrow::field("cr_returned_date_sk",      arrow::int64()),
                 arrow::field("cr_returned_time_sk",      arrow::int64()),
@@ -315,7 +315,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("cr_net_loss",              arrow::float64()),
             });
 
-        case TableType::WEB_RETURNS:
+        case TableType::WebReturns:
             return arrow::schema({
                 arrow::field("wr_returned_date_sk",      arrow::int64()),
                 arrow::field("wr_returned_time_sk",      arrow::int64()),
@@ -343,7 +343,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("wr_net_loss",              arrow::float64()),
             });
 
-        case TableType::CALL_CENTER:
+        case TableType::CallCenter:
             return arrow::schema({
                 arrow::field("cc_call_center_sk",  arrow::int64()),
                 arrow::field("cc_call_center_id",  arrow::utf8()),
@@ -378,7 +378,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("cc_tax_percentage",  arrow::float64()),
             });
 
-        case TableType::CATALOG_PAGE:
+        case TableType::CatalogPage:
             return arrow::schema({
                 arrow::field("cp_catalog_page_sk",     arrow::int64()),
                 arrow::field("cp_catalog_page_id",     arrow::utf8()),
@@ -391,7 +391,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("cp_type",                arrow::utf8()),
             });
 
-        case TableType::WEB_PAGE:
+        case TableType::WebPage:
             return arrow::schema({
                 arrow::field("wp_web_page_sk",       arrow::int64()),
                 arrow::field("wp_web_page_id",       arrow::utf8()),
@@ -409,7 +409,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("wp_max_ad_count",      arrow::int32()),
             });
 
-        case TableType::WEB_SITE:
+        case TableType::WebSite:
             return arrow::schema({
                 arrow::field("web_site_sk",          arrow::int64()),
                 arrow::field("web_site_id",          arrow::utf8()),
@@ -439,7 +439,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("web_tax_percentage",   arrow::float64()),
             });
 
-        case TableType::WAREHOUSE:
+        case TableType::Warehouse:
             return arrow::schema({
                 arrow::field("w_warehouse_sk",    arrow::int64()),
                 arrow::field("w_warehouse_id",    arrow::utf8()),
@@ -457,7 +457,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("w_gmt_offset",      arrow::float64()),
             });
 
-        case TableType::SHIP_MODE:
+        case TableType::ShipMode:
             return arrow::schema({
                 arrow::field("sm_ship_mode_sk", arrow::int64()),
                 arrow::field("sm_ship_mode_id", arrow::utf8()),
@@ -467,7 +467,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("sm_contract",     arrow::utf8()),
             });
 
-        case TableType::HOUSEHOLD_DEMOGRAPHICS:
+        case TableType::HouseholdDemographics:
             return arrow::schema({
                 arrow::field("hd_demo_sk",        arrow::int64()),
                 arrow::field("hd_income_band_sk", arrow::int64()),
@@ -476,7 +476,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("hd_vehicle_count",  arrow::int32()),
             });
 
-        case TableType::CUSTOMER_DEMOGRAPHICS:
+        case TableType::CustomerDemographics:
             return arrow::schema({
                 arrow::field("cd_demo_sk",             arrow::int64()),
                 arrow::field("cd_gender",              arrow::utf8()),
@@ -489,7 +489,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("cd_dep_college_count",   arrow::int32()),
             });
 
-        case TableType::CUSTOMER_ADDRESS:
+        case TableType::CustomerAddress:
             return arrow::schema({
                 arrow::field("ca_address_sk",    arrow::int64()),
                 arrow::field("ca_address_id",    arrow::utf8()),
@@ -506,21 +506,21 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("ca_location_type", arrow::utf8()),
             });
 
-        case TableType::INCOME_BAND:
+        case TableType::IncomeBand:
             return arrow::schema({
                 arrow::field("ib_income_band_id", arrow::int32()),
                 arrow::field("ib_lower_bound",    arrow::int32()),
                 arrow::field("ib_upper_bound",    arrow::int32()),
             });
 
-        case TableType::REASON:
+        case TableType::Reason:
             return arrow::schema({
                 arrow::field("r_reason_sk",   arrow::int64()),
                 arrow::field("r_reason_id",   arrow::utf8()),
                 arrow::field("r_reason_desc", arrow::utf8()),
             });
 
-        case TableType::TIME_DIM:
+        case TableType::TimeDim:
             return arrow::schema({
                 arrow::field("t_time_sk",   arrow::int64()),
                 arrow::field("t_time_id",   arrow::utf8()),
@@ -534,7 +534,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("t_meal_time", arrow::utf8()),
             });
 
-        case TableType::PROMOTION:
+        case TableType::Promotion:
             return arrow::schema({
                 arrow::field("p_promo_sk",        arrow::int64()),
                 arrow::field("p_promo_id",         arrow::utf8()),
@@ -557,7 +557,7 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("p_discount_active",  arrow::int32()),
             });
 
-        case TableType::STORE:
+        case TableType::Store:
             return arrow::schema({
                 arrow::field("s_store_sk",       arrow::int64()),
                 arrow::field("s_store_id",       arrow::utf8()),
