@@ -37,6 +37,263 @@ static inline double dec_to_double(const decimal_t* d) {
 }
 
 // ---------------------------------------------------------------------------
+// dict8 encoding helpers — O(1) or O(N) encode for known distributions
+// ---------------------------------------------------------------------------
+namespace {
+
+static inline int8_t encode_cd_gender(const char* s) { return s[0]=='M'?0:1; }
+
+static inline int8_t encode_cd_marital_status(const char* s) {
+    switch(s[0]) { case 'M':return 0; case 'S':return 1; case 'D':return 2;
+                   case 'W':return 3; default:return 4; }
+}
+
+static inline int8_t encode_cd_education_status(const char* s) {
+    switch(s[0]) { case 'P':return 0; case 'S':return 1; case 'C':return 2;
+                   case '2':return 3; case '4':return 4; case 'A':return 5; default:return 6; }
+}
+
+static inline int8_t encode_cd_credit_rating(const char* s) {
+    switch(s[0]) { case 'G':return 0; case 'L':return 1; case 'H':return 2; default:return 3; }
+}
+
+static inline int8_t encode_c_salutation(const char* s) {
+    if(s[0]=='M') { if(s[1]=='r') return s[2]=='.'?0:1; return s[1]=='s'?2:3; }
+    return s[0]=='S'?4:5;
+}
+
+static inline int8_t encode_ca_location_type(const char* s) {
+    switch(s[0]) { case 's':return 0; case 'c':return 1; default:return 2; }
+}
+
+static inline int8_t encode_ca_street_type(const char* s) {
+    static const char* types[] = {
+        "Street","ST","Avenue","Ave","Boulevard","Blvd","Road","RD",
+        "Parkway","Pkwy","Way","Wy","Drive","Dr.","Circle","Cir.","Lane","Ln","Court","Ct."
+    };
+    for (int i = 0; i < 20; i++) if (strcmp(s, types[i]) == 0) return (int8_t)i;
+    return 0;
+}
+
+static inline int8_t encode_cc_class(const char* s) {
+    switch(s[0]) { case 's':return 0; case 'm':return 1; default:return 2; }
+}
+
+static inline int8_t encode_cc_hours(const char* s) {
+    return s[5]=='4'?0:(s[5]=='1'?1:2);
+}
+
+static inline int8_t encode_cc_name(const char* s) {
+    static const char* names[] = {
+        "New England","NY Metro","Mid Atlantic","Southeastern","North Midwest",
+        "Central Midwest","South Midwest","Pacific Northwest",
+        "California","Southwest","Hawaii/Alaska","Other"
+    };
+    for (int i = 0; i < 12; i++) if (strcmp(s, names[i]) == 0) return (int8_t)i;
+    return 0;
+}
+
+static inline int8_t encode_cp_type(const char* s) {
+    switch(s[0]) { case 'b':return 0; case 'q':return 1; default:return 2; }
+}
+
+static inline int8_t encode_wp_type(const char* s) {
+    switch(s[0]) { case 'a':return 3; case 'f':return 4; case 'p':return 5; case 'd':return 6;
+                   case 'w':return 2; case 'o':return 1; default:return 0; }
+}
+
+static inline int8_t encode_sm_type(const char* s) {
+    switch(s[0]) { case 'R':return 0; case 'E':return 1; case 'N':return 2;
+                   case 'O':return 3; case 'T':return 4; default:return 5; }
+}
+
+static inline int8_t encode_sm_code(const char* s) {
+    switch(s[0]) { case 'A':return 0; case 'B':return 3; case 'H':return 4;
+                   case 'M':return 5; case 'C':return 6;
+                   default: return s[1]=='U'?1:2; }
+}
+
+static inline int8_t encode_sm_carrier(const char* s) {
+    static const char* carriers[] = {
+        "UPS","FEDEX","AIRBORNE","USPS","DHL","TBS","ZHOU","ZOUROS","MSC","LATVIAN",
+        "ALLIANCE","ORIENTAL","BARIAN","BOXBUNDLES","GREAT EASTERN","DIAMOND",
+        "RUPEKSA","GERMA","HARMSTORF","PRIVATECARRIER"
+    };
+    for (int i = 0; i < 20; i++) if (strcmp(s, carriers[i]) == 0) return (int8_t)i;
+    return 0;
+}
+
+static inline int8_t encode_t_am_pm(const char* s) { return s[0]=='A'?0:1; }
+
+static inline int8_t encode_t_shift(const char* s) {
+    switch(s[0]) { case 'f':return 0; case 's':return 1; default:return 2; }
+}
+
+static inline int8_t encode_t_sub_shift(const char* s) {
+    switch(s[0]) { case 'm':return 0; case 'a':return 1; case 'e':return 2; default:return 3; }
+}
+
+static inline int8_t encode_t_meal_time(const char* s) {
+    if(!s || !s[0]) return 0;
+    switch(s[0]) { case 'b':return 1; case 'l':return 2; default:return 3; }
+}
+
+static inline int8_t encode_d_day_name(const char* s) {
+    if(s[0]=='S') return s[1]=='u'?0:6;
+    switch(s[0]) { case 'M':return 1; case 'F':return 5;
+                   case 'T': return s[1]=='u'?2:4; default:return 3; }
+}
+
+static inline int8_t encode_i_category(const char* s) {
+    switch(s[0]) {
+        case 'W':return 0; case 'C':return 2; case 'J':return 5;
+        case 'H':return 6; case 'B':return 8; case 'E':return 9;
+        case 'S': return s[1]=='h'?3:7;
+        case 'M': return s[1]=='e'?1:4;
+        default:return 0;
+    }
+}
+
+static inline int8_t encode_i_size(const char* s) {
+    switch(s[0]) { case 'p':return 0; case 's':return 1; case 'm':return 2;
+                   case 'l':return 3; case 'e':return 4;
+                   case 'N':return 6; default:return 5; }
+}
+
+static inline int8_t encode_i_color(const char* s) {
+    static const char* colors[] = {
+        "almond","antique","aquamarine","azure","beige","bisque","black","blanched",
+        "blue","blush","brown","burlywood","burnished","chartreuse","chiffon","chocolate",
+        "coral","cornflower","cornsilk","cream","cyan","dark","deep","dim","dodger",
+        "drab","firebrick","floral","forest","frosted","gainsboro","ghost","goldenrod",
+        "green","grey","honeydew","hot","indian","ivory","khaki","lace","lavender",
+        "lawn","lemon","light","lime","linen","magenta","maroon","medium","metallic",
+        "midnight","mint","misty","moccasin","navajo","navy","olive","orange","orchid",
+        "pale","papaya","peach","peru","pink","plum","powder","puff","purple","red",
+        "rose","rosy","royal","saddle","salmon","sandy","seashell","sienna","sky",
+        "slate","smoke","snow","spring","steel","tan","thistle","tomato","turquoise",
+        "violet","wheat","white","yellow"
+    };
+    for (int i = 0; i < 92; i++) if (strcmp(s, colors[i]) == 0) return (int8_t)i;
+    return 0;
+}
+
+static inline int8_t encode_i_units(const char* s) {
+    static const char* units[] = {
+        "Unknown","Each","Dozen","Case","Pallet","Gross","Carton","Box","Bunch",
+        "Bundle","Oz","Lb","Ton","Ounce","Pound","Tsp","Tbl","Cup","Dram","Gram","N/A"
+    };
+    for (int i = 0; i < 21; i++) if (strcmp(s, units[i]) == 0) return (int8_t)i;
+    return 0;
+}
+
+static inline int8_t encode_state(const char* s) {
+    static const char* states[] = {
+        "AK","AL","AR","AZ","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID",
+        "IL","IN","KS","KY","LA","MA","MD","ME","MI","MN","MO","MS","MT","NC",
+        "ND","NE","NH","NJ","NM","NV","NY","OH","OK","OR","PA","RI","SC","SD",
+        "TN","TX","UT","VA","VT","WA","WI","WV","WY"
+    };
+    for (int i = 0; i < 52; i++) if (strcmp(s, states[i]) == 0) return (int8_t)i;
+    return 0;
+}
+
+}  // anonymous namespace
+
+// ---------------------------------------------------------------------------
+// Static dictionary arrays and getter
+// ---------------------------------------------------------------------------
+
+std::shared_ptr<arrow::Array> get_dict_for_field(const std::string& name) {
+    auto make = [](std::initializer_list<const char*> vals) {
+        arrow::StringBuilder b;
+        for (auto v : vals) (void)b.Append(v, strlen(v));
+        return *b.Finish();
+    };
+
+    static auto gender       = make({"M","F"});
+    static auto marital      = make({"M","S","D","W","U"});
+    static auto education    = make({"Primary","Secondary","College","2 yr Degree","4 yr Degree","Advanced Degree","Unknown"});
+    static auto credit       = make({"Good","Low Risk","High Risk","Unknown"});
+    static auto salutation   = make({"Mr.","Mrs.","Ms.","Miss","Sir","Dr."});
+    static auto am_pm        = make({"AM","PM"});
+    static auto shift        = make({"first","second","third"});
+    static auto sub_shift    = make({"morning","afternoon","evening","night"});
+    static auto meal_time    = make({"","breakfast","lunch","dinner"});
+    static auto day_name     = make({"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"});
+    static auto category     = make({"Women","Men","Children","Shoes","Music","Jewelry","Home","Sports","Books","Electronics"});
+    static auto item_size    = make({"petite","small","medium","large","extra large","economy","N/A"});
+    static auto cp_type_d    = make({"bi-annual","quarterly","monthly"});
+    static auto wp_type_d    = make({"general","order","welcome","ad","feedback","protected","dynamic"});
+    static auto sm_type_d    = make({"REGULAR","EXPRESS","NEXT DAY","OVERNIGHT","TWO DAY","LIBRARY"});
+    static auto sm_code_d    = make({"AIR","SURFACE","SEA","BIKE","HAND CARRY","MESSENGER","COURIER"});
+    static auto sm_carrier_d = make({"UPS","FEDEX","AIRBORNE","USPS","DHL","TBS","ZHOU","ZOUROS","MSC","LATVIAN","ALLIANCE","ORIENTAL","BARIAN","BOXBUNDLES","GREAT EASTERN","DIAMOND","RUPEKSA","GERMA","HARMSTORF","PRIVATECARRIER"});
+    static auto loc_type     = make({"single family","condo","apartment"});
+    static auto cc_class_d   = make({"small","medium","large"});
+    static auto cc_hours_d   = make({"8AM-4PM","8AM-12AM","8AM-8AM"});
+    static auto cc_name_d    = make({"New England","NY Metro","Mid Atlantic","Southeastern","North Midwest","Central Midwest","South Midwest","Pacific Northwest","California","Southwest","Hawaii/Alaska","Other"});
+    static auto street_type_d = make({"Street","ST","Avenue","Ave","Boulevard","Blvd","Road","RD","Parkway","Pkwy","Way","Wy","Drive","Dr.","Circle","Cir.","Lane","Ln","Court","Ct."});
+    static auto one_unknown  = make({"Unknown"});
+    static auto one_dept     = make({"DEPARTMENT"});
+    static auto one_us       = make({"United States"});
+    static auto states       = make({"AK","AL","AR","AZ","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID","IL","IN","KS","KY","LA","MA","MD","ME","MI","MN","MO","MS","MT","NC","ND","NE","NH","NJ","NM","NV","NY","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VA","VT","WA","WI","WV","WY"});
+    static auto colors       = make({"almond","antique","aquamarine","azure","beige","bisque","black","blanched","blue","blush","brown","burlywood","burnished","chartreuse","chiffon","chocolate","coral","cornflower","cornsilk","cream","cyan","dark","deep","dim","dodger","drab","firebrick","floral","forest","frosted","gainsboro","ghost","goldenrod","green","grey","honeydew","hot","indian","ivory","khaki","lace","lavender","lawn","lemon","light","lime","linen","magenta","maroon","medium","metallic","midnight","mint","misty","moccasin","navajo","navy","olive","orange","orchid","pale","papaya","peach","peru","pink","plum","powder","puff","purple","red","rose","rosy","royal","saddle","salmon","sandy","seashell","sienna","sky","slate","smoke","snow","spring","steel","tan","thistle","tomato","turquoise","violet","wheat","white","yellow"});
+    static auto units        = make({"Unknown","Each","Dozen","Case","Pallet","Gross","Carton","Box","Bunch","Bundle","Oz","Lb","Ton","Ounce","Pound","Tsp","Tbl","Cup","Dram","Gram","N/A"});
+
+    static const std::unordered_map<std::string, std::shared_ptr<arrow::Array>> registry = {
+        {"cd_gender", gender},
+        {"cd_marital_status", marital},
+        {"cd_education_status", education},
+        {"cd_credit_rating", credit},
+        {"c_salutation", salutation},
+        {"t_am_pm", am_pm},
+        {"t_shift", shift},
+        {"t_sub_shift", sub_shift},
+        {"t_meal_time", meal_time},
+        {"d_day_name", day_name},
+        {"i_category", category},
+        {"i_size", item_size},
+        {"i_container", one_unknown},
+        {"i_color", colors},
+        {"i_units", units},
+        {"cp_department", one_dept},
+        {"cp_type", cp_type_d},
+        {"wp_type", wp_type_d},
+        {"web_class", one_unknown},
+        {"web_country", one_us},
+        {"web_state", states},
+        {"web_street_type", street_type_d},
+        {"w_country", one_us},
+        {"w_state", states},
+        {"w_street_type", street_type_d},
+        {"s_hours", cc_hours_d},
+        {"s_geography_class", one_unknown},
+        {"s_division_name", one_unknown},
+        {"s_company_name", one_unknown},
+        {"s_country", one_us},
+        {"s_state", states},
+        {"s_street_type", street_type_d},
+        {"sm_type", sm_type_d},
+        {"sm_code", sm_code_d},
+        {"sm_carrier", sm_carrier_d},
+        {"cc_class", cc_class_d},
+        {"cc_hours", cc_hours_d},
+        {"cc_name", cc_name_d},
+        {"cc_country", one_us},
+        {"cc_state", states},
+        {"cc_street_type", street_type_d},
+        {"ca_location_type", loc_type},
+        {"ca_country", one_us},
+        {"ca_state", states},
+        {"ca_street_type", street_type_d},
+        {"p_purpose", one_unknown},
+    };
+
+    auto it = registry.find(name);
+    return it != registry.end() ? it->second : nullptr;
+}
+
+// ---------------------------------------------------------------------------
 // store_sales
 // ---------------------------------------------------------------------------
 
@@ -309,8 +566,8 @@ void append_customer_to_builders(
         ->Append(static_cast<int32_t>(r->c_first_shipto_date_id));
     static_cast<arrow::Int32Builder*>(builders["c_first_sales_date_id"].get())
         ->Append(static_cast<int32_t>(r->c_first_sales_date_id));
-    static_cast<arrow::StringBuilder*>(builders["c_salutation"].get())
-        ->Append(r->c_salutation ? r->c_salutation : "");
+    static_cast<arrow::Int8Builder*>(builders["c_salutation"].get())
+        ->Append(encode_c_salutation(r->c_salutation ? r->c_salutation : ""));
     static_cast<arrow::StringBuilder*>(builders["c_first_name"].get())
         ->Append(r->c_first_name ? r->c_first_name : "");
     static_cast<arrow::StringBuilder*>(builders["c_last_name"].get())
@@ -367,22 +624,22 @@ void append_item_to_builders(
         ->Append(r->i_class ? r->i_class : "");
     static_cast<arrow::Int64Builder*>(builders["i_category_id"].get())
         ->Append(static_cast<int64_t>(r->i_category_id));
-    static_cast<arrow::StringBuilder*>(builders["i_category"].get())
-        ->Append(r->i_category ? r->i_category : "");
+    static_cast<arrow::Int8Builder*>(builders["i_category"].get())
+        ->Append(encode_i_category(r->i_category ? r->i_category : ""));
     static_cast<arrow::Int64Builder*>(builders["i_manufact_id"].get())
         ->Append(static_cast<int64_t>(r->i_manufact_id));
     static_cast<arrow::StringBuilder*>(builders["i_manufact"].get())
         ->Append(r->i_manufact);
-    static_cast<arrow::StringBuilder*>(builders["i_size"].get())
-        ->Append(r->i_size ? r->i_size : "");
+    static_cast<arrow::Int8Builder*>(builders["i_size"].get())
+        ->Append(encode_i_size(r->i_size ? r->i_size : ""));
     static_cast<arrow::StringBuilder*>(builders["i_formulation"].get())
         ->Append(r->i_formulation);
-    static_cast<arrow::StringBuilder*>(builders["i_color"].get())
-        ->Append(r->i_color ? r->i_color : "");
-    static_cast<arrow::StringBuilder*>(builders["i_units"].get())
-        ->Append(r->i_units ? r->i_units : "");
-    static_cast<arrow::StringBuilder*>(builders["i_container"].get())
-        ->Append(r->i_container ? r->i_container : "");
+    static_cast<arrow::Int8Builder*>(builders["i_color"].get())
+        ->Append(encode_i_color(r->i_color ? r->i_color : ""));
+    static_cast<arrow::Int8Builder*>(builders["i_units"].get())
+        ->Append(encode_i_units(r->i_units ? r->i_units : ""));
+    static_cast<arrow::Int8Builder*>(builders["i_container"].get())
+        ->Append(0);  // always "Unknown"
     static_cast<arrow::Int64Builder*>(builders["i_manager_id"].get())
         ->Append(static_cast<int64_t>(r->i_manager_id));
     static_cast<arrow::StringBuilder*>(builders["i_product_name"].get())
@@ -427,8 +684,8 @@ void append_date_dim_to_builders(
         ->Append(static_cast<int32_t>(r->d_fy_quarter_seq));
     static_cast<arrow::Int32Builder*>(builders["d_fy_week_seq"].get())
         ->Append(static_cast<int32_t>(r->d_fy_week_seq));
-    static_cast<arrow::StringBuilder*>(builders["d_day_name"].get())
-        ->Append(r->d_day_name ? r->d_day_name : "");
+    static_cast<arrow::Int8Builder*>(builders["d_day_name"].get())
+        ->Append(encode_d_day_name(r->d_day_name ? r->d_day_name : ""));
     static_cast<arrow::Int32Builder*>(builders["d_holiday"].get())
         ->Append(static_cast<int32_t>(r->d_holiday));
     static_cast<arrow::Int32Builder*>(builders["d_weekend"].get())
@@ -656,22 +913,22 @@ static void append_addr_fields(
         ->Append(addr.street_num);
     static_cast<arrow::StringBuilder*>(builders[pfx + "street_name"].get())
         ->Append(addr.street_name1 ? addr.street_name1 : "");
-    static_cast<arrow::StringBuilder*>(builders[pfx + "street_type"].get())
-        ->Append(addr.street_type ? addr.street_type : "");
+    static_cast<arrow::Int8Builder*>(builders[pfx + "street_type"].get())
+        ->Append(encode_ca_street_type(addr.street_type ? addr.street_type : ""));
     static_cast<arrow::StringBuilder*>(builders[pfx + "suite_number"].get())
         ->Append(addr.suite_num);
     static_cast<arrow::StringBuilder*>(builders[pfx + "city"].get())
         ->Append(addr.city ? addr.city : "");
     static_cast<arrow::StringBuilder*>(builders[pfx + "county"].get())
         ->Append(addr.county ? addr.county : "");
-    static_cast<arrow::StringBuilder*>(builders[pfx + "state"].get())
-        ->Append(addr.state ? addr.state : "");
+    static_cast<arrow::Int8Builder*>(builders[pfx + "state"].get())
+        ->Append(encode_state(addr.state ? addr.state : ""));
     char zip_buf[12];
     std::snprintf(zip_buf, sizeof(zip_buf), "%05d", addr.zip);
     static_cast<arrow::StringBuilder*>(builders[pfx + "zip"].get())
         ->Append(zip_buf);
-    static_cast<arrow::StringBuilder*>(builders[pfx + "country"].get())
-        ->Append(addr.country);
+    static_cast<arrow::Int8Builder*>(builders[pfx + "country"].get())
+        ->Append(0);  // always "United States"
     static_cast<arrow::DoubleBuilder*>(builders[pfx + "gmt_offset"].get())
         ->Append(static_cast<double>(addr.gmt_offset));
 }
@@ -698,16 +955,16 @@ void append_call_center_to_builders(
         ->Append(static_cast<int64_t>(r->cc_closed_date_id));
     static_cast<arrow::Int64Builder*>(builders["cc_open_date_sk"].get())
         ->Append(static_cast<int64_t>(r->cc_open_date_id));
-    static_cast<arrow::StringBuilder*>(builders["cc_name"].get())
-        ->Append(r->cc_name);
-    static_cast<arrow::StringBuilder*>(builders["cc_class"].get())
-        ->Append(r->cc_class ? r->cc_class : "");
+    static_cast<arrow::Int8Builder*>(builders["cc_name"].get())
+        ->Append(encode_cc_name(r->cc_name ? r->cc_name : ""));
+    static_cast<arrow::Int8Builder*>(builders["cc_class"].get())
+        ->Append(encode_cc_class(r->cc_class ? r->cc_class : ""));
     static_cast<arrow::Int32Builder*>(builders["cc_employees"].get())
         ->Append(static_cast<int32_t>(r->cc_employees));
     static_cast<arrow::Int32Builder*>(builders["cc_sq_ft"].get())
         ->Append(static_cast<int32_t>(r->cc_sq_ft));
-    static_cast<arrow::StringBuilder*>(builders["cc_hours"].get())
-        ->Append(r->cc_hours ? r->cc_hours : "");
+    static_cast<arrow::Int8Builder*>(builders["cc_hours"].get())
+        ->Append(encode_cc_hours(r->cc_hours ? r->cc_hours : ""));
     static_cast<arrow::StringBuilder*>(builders["cc_manager"].get())
         ->Append(r->cc_manager);
     static_cast<arrow::Int32Builder*>(builders["cc_mkt_id"].get())
@@ -749,16 +1006,16 @@ void append_catalog_page_to_builders(
         ->Append(static_cast<int64_t>(r->cp_start_date_id));
     static_cast<arrow::Int64Builder*>(builders["cp_end_date_sk"].get())
         ->Append(static_cast<int64_t>(r->cp_end_date_id));
-    static_cast<arrow::StringBuilder*>(builders["cp_department"].get())
-        ->Append(r->cp_department);
+    static_cast<arrow::Int8Builder*>(builders["cp_department"].get())
+        ->Append(0);  // always "DEPARTMENT"
     static_cast<arrow::Int32Builder*>(builders["cp_catalog_number"].get())
         ->Append(static_cast<int32_t>(r->cp_catalog_number));
     static_cast<arrow::Int32Builder*>(builders["cp_catalog_page_number"].get())
         ->Append(static_cast<int32_t>(r->cp_catalog_page_number));
     static_cast<arrow::StringBuilder*>(builders["cp_description"].get())
         ->Append(r->cp_description);
-    static_cast<arrow::StringBuilder*>(builders["cp_type"].get())
-        ->Append(r->cp_type ? r->cp_type : "");
+    static_cast<arrow::Int8Builder*>(builders["cp_type"].get())
+        ->Append(encode_cp_type(r->cp_type ? r->cp_type : ""));
 }
 
 // ---------------------------------------------------------------------------
@@ -789,8 +1046,8 @@ void append_web_page_to_builders(
         ->Append(static_cast<int64_t>(r->wp_customer_sk));
     static_cast<arrow::StringBuilder*>(builders["wp_url"].get())
         ->Append(r->wp_url);
-    static_cast<arrow::StringBuilder*>(builders["wp_type"].get())
-        ->Append(r->wp_type ? r->wp_type : "");
+    static_cast<arrow::Int8Builder*>(builders["wp_type"].get())
+        ->Append(encode_wp_type(r->wp_type ? r->wp_type : ""));
     static_cast<arrow::Int32Builder*>(builders["wp_char_count"].get())
         ->Append(static_cast<int32_t>(r->wp_char_count));
     static_cast<arrow::Int32Builder*>(builders["wp_link_count"].get())
@@ -825,8 +1082,8 @@ void append_web_site_to_builders(
         ->Append(static_cast<int64_t>(r->web_open_date));
     static_cast<arrow::Int64Builder*>(builders["web_close_date_sk"].get())
         ->Append(static_cast<int64_t>(r->web_close_date));
-    static_cast<arrow::StringBuilder*>(builders["web_class"].get())
-        ->Append(r->web_class);
+    static_cast<arrow::Int8Builder*>(builders["web_class"].get())
+        ->Append(0);  // always "Unknown"
     static_cast<arrow::StringBuilder*>(builders["web_manager"].get())
         ->Append(r->web_manager);
     static_cast<arrow::Int32Builder*>(builders["web_mkt_id"].get())
@@ -881,12 +1138,12 @@ void append_ship_mode_to_builders(
         ->Append(static_cast<int64_t>(r->sm_ship_mode_sk));
     static_cast<arrow::StringBuilder*>(builders["sm_ship_mode_id"].get())
         ->Append(r->sm_ship_mode_id);
-    static_cast<arrow::StringBuilder*>(builders["sm_type"].get())
-        ->Append(r->sm_type ? r->sm_type : "");
-    static_cast<arrow::StringBuilder*>(builders["sm_code"].get())
-        ->Append(r->sm_code ? r->sm_code : "");
-    static_cast<arrow::StringBuilder*>(builders["sm_carrier"].get())
-        ->Append(r->sm_carrier ? r->sm_carrier : "");
+    static_cast<arrow::Int8Builder*>(builders["sm_type"].get())
+        ->Append(encode_sm_type(r->sm_type ? r->sm_type : ""));
+    static_cast<arrow::Int8Builder*>(builders["sm_code"].get())
+        ->Append(encode_sm_code(r->sm_code ? r->sm_code : ""));
+    static_cast<arrow::Int8Builder*>(builders["sm_carrier"].get())
+        ->Append(encode_sm_carrier(r->sm_carrier ? r->sm_carrier : ""));
     static_cast<arrow::StringBuilder*>(builders["sm_contract"].get())
         ->Append(r->sm_contract);
 }
@@ -925,16 +1182,16 @@ void append_customer_demographics_to_builders(
 
     static_cast<arrow::Int64Builder*>(builders["cd_demo_sk"].get())
         ->Append(static_cast<int64_t>(r->cd_demo_sk));
-    static_cast<arrow::StringBuilder*>(builders["cd_gender"].get())
-        ->Append(r->cd_gender ? r->cd_gender : "");
-    static_cast<arrow::StringBuilder*>(builders["cd_marital_status"].get())
-        ->Append(r->cd_marital_status ? r->cd_marital_status : "");
-    static_cast<arrow::StringBuilder*>(builders["cd_education_status"].get())
-        ->Append(r->cd_education_status ? r->cd_education_status : "");
+    static_cast<arrow::Int8Builder*>(builders["cd_gender"].get())
+        ->Append(encode_cd_gender(r->cd_gender ? r->cd_gender : ""));
+    static_cast<arrow::Int8Builder*>(builders["cd_marital_status"].get())
+        ->Append(encode_cd_marital_status(r->cd_marital_status ? r->cd_marital_status : ""));
+    static_cast<arrow::Int8Builder*>(builders["cd_education_status"].get())
+        ->Append(encode_cd_education_status(r->cd_education_status ? r->cd_education_status : ""));
     static_cast<arrow::Int32Builder*>(builders["cd_purchase_estimate"].get())
         ->Append(static_cast<int32_t>(r->cd_purchase_estimate));
-    static_cast<arrow::StringBuilder*>(builders["cd_credit_rating"].get())
-        ->Append(r->cd_credit_rating ? r->cd_credit_rating : "");
+    static_cast<arrow::Int8Builder*>(builders["cd_credit_rating"].get())
+        ->Append(encode_cd_credit_rating(r->cd_credit_rating ? r->cd_credit_rating : ""));
     static_cast<arrow::Int32Builder*>(builders["cd_dep_count"].get())
         ->Append(static_cast<int32_t>(r->cd_dep_count));
     static_cast<arrow::Int32Builder*>(builders["cd_dep_employed_count"].get())
@@ -958,8 +1215,8 @@ void append_customer_address_to_builders(
     static_cast<arrow::StringBuilder*>(builders["ca_address_id"].get())
         ->Append(r->ca_addr_id);
     append_addr_fields(r->ca_address, "ca_", builders);
-    static_cast<arrow::StringBuilder*>(builders["ca_location_type"].get())
-        ->Append(r->ca_location_type ? r->ca_location_type : "");
+    static_cast<arrow::Int8Builder*>(builders["ca_location_type"].get())
+        ->Append(encode_ca_location_type(r->ca_location_type ? r->ca_location_type : ""));
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,14 +1277,14 @@ void append_time_dim_to_builders(
         ->Append(static_cast<int32_t>(r->t_minute));
     static_cast<arrow::Int32Builder*>(builders["t_second"].get())
         ->Append(static_cast<int32_t>(r->t_second));
-    static_cast<arrow::StringBuilder*>(builders["t_am_pm"].get())
-        ->Append(r->t_am_pm ? r->t_am_pm : "");
-    static_cast<arrow::StringBuilder*>(builders["t_shift"].get())
-        ->Append(r->t_shift ? r->t_shift : "");
-    static_cast<arrow::StringBuilder*>(builders["t_sub_shift"].get())
-        ->Append(r->t_sub_shift ? r->t_sub_shift : "");
-    static_cast<arrow::StringBuilder*>(builders["t_meal_time"].get())
-        ->Append(r->t_meal_time ? r->t_meal_time : "");
+    static_cast<arrow::Int8Builder*>(builders["t_am_pm"].get())
+        ->Append(encode_t_am_pm(r->t_am_pm ? r->t_am_pm : ""));
+    static_cast<arrow::Int8Builder*>(builders["t_shift"].get())
+        ->Append(encode_t_shift(r->t_shift ? r->t_shift : ""));
+    static_cast<arrow::Int8Builder*>(builders["t_sub_shift"].get())
+        ->Append(encode_t_sub_shift(r->t_sub_shift ? r->t_sub_shift : ""));
+    static_cast<arrow::Int8Builder*>(builders["t_meal_time"].get())
+        ->Append(encode_t_meal_time(r->t_meal_time ? r->t_meal_time : ""));
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,8 +1331,8 @@ void append_promotion_to_builders(
         ->Append(static_cast<int32_t>(r->p_channel_demo));
     static_cast<arrow::StringBuilder*>(builders["p_channel_details"].get())
         ->Append(r->p_channel_details);
-    static_cast<arrow::StringBuilder*>(builders["p_purpose"].get())
-        ->Append(r->p_purpose ? r->p_purpose : "");
+    static_cast<arrow::Int8Builder*>(builders["p_purpose"].get())
+        ->Append(0);  // always "Unknown"
     static_cast<arrow::Int32Builder*>(builders["p_discount_active"].get())
         ->Append(static_cast<int32_t>(r->p_discount_active));
 }
@@ -1106,26 +1363,26 @@ void append_store_to_builders(
         ->Append(static_cast<int32_t>(r->employees));
     static_cast<arrow::Int32Builder*>(builders["s_floor_space"].get())
         ->Append(static_cast<int32_t>(r->floor_space));
-    static_cast<arrow::StringBuilder*>(builders["s_hours"].get())
-        ->Append(r->hours ? r->hours : "");
+    static_cast<arrow::Int8Builder*>(builders["s_hours"].get())
+        ->Append(encode_cc_hours(r->hours ? r->hours : ""));
     static_cast<arrow::StringBuilder*>(builders["s_manager"].get())
         ->Append(r->store_manager);
     static_cast<arrow::Int32Builder*>(builders["s_market_id"].get())
         ->Append(static_cast<int32_t>(r->market_id));
-    static_cast<arrow::StringBuilder*>(builders["s_geography_class"].get())
-        ->Append(r->geography_class ? r->geography_class : "");
+    static_cast<arrow::Int8Builder*>(builders["s_geography_class"].get())
+        ->Append(0);  // always "Unknown"
     static_cast<arrow::StringBuilder*>(builders["s_market_desc"].get())
         ->Append(r->market_desc);
     static_cast<arrow::StringBuilder*>(builders["s_market_manager"].get())
         ->Append(r->market_manager);
     static_cast<arrow::Int64Builder*>(builders["s_division_id"].get())
         ->Append(static_cast<int64_t>(r->division_id));
-    static_cast<arrow::StringBuilder*>(builders["s_division_name"].get())
-        ->Append(r->division_name ? r->division_name : "");
+    static_cast<arrow::Int8Builder*>(builders["s_division_name"].get())
+        ->Append(0);  // always "Unknown"
     static_cast<arrow::Int64Builder*>(builders["s_company_id"].get())
         ->Append(static_cast<int64_t>(r->company_id));
-    static_cast<arrow::StringBuilder*>(builders["s_company_name"].get())
-        ->Append(r->company_name ? r->company_name : "");
+    static_cast<arrow::Int8Builder*>(builders["s_company_name"].get())
+        ->Append(0);  // always "Unknown"
     append_addr_fields(r->address, "s_", builders);
     static_cast<arrow::DoubleBuilder*>(builders["s_tax_percentage"].get())
         ->Append(dec_to_double(&r->dTaxPercentage));

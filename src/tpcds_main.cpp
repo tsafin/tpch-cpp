@@ -187,6 +187,12 @@ create_builders(std::shared_ptr<arrow::Schema> schema)
                 builders[field->name()] = b;
                 break;
             }
+            case arrow::Type::DICTIONARY: {
+                auto b = std::make_shared<arrow::Int8Builder>();
+                (void)b->Reserve(capacity);
+                builders[field->name()] = b;
+                break;
+            }
             default:
                 throw std::runtime_error(
                     "Unsupported Arrow type: " + field->type()->ToString());
@@ -205,7 +211,15 @@ finish_batch(
     std::vector<std::shared_ptr<arrow::Array>> arrays;
     arrays.reserve(schema->num_fields());
     for (const auto& field : schema->fields()) {
-        arrays.push_back(builders[field->name()]->Finish().ValueOrDie());
+        auto array = builders[field->name()]->Finish().ValueOrDie();
+        // Convert Int8 indices to DictionaryArray for DICTIONARY fields
+        if (field->type()->id() == arrow::Type::DICTIONARY) {
+            auto dict = tpcds::get_dict_for_field(field->name());
+            if (dict) {
+                array = arrow::DictionaryArray::FromArrays(field->type(), array, dict).ValueOrDie();
+            }
+        }
+        arrays.push_back(array);
     }
     return arrow::RecordBatch::Make(schema, static_cast<int64_t>(num_rows), arrays);
 }
