@@ -157,6 +157,27 @@ void ParquetWriter::write_managed_batch(const ManagedRecordBatch& managed_batch)
     }
 }
 
+// Build WriterProperties with SNAPPY compression.
+// Disables Parquet's auto-dict for numeric types (int64, int32, float64):
+// those are high-cardinality columns (foreign keys, prices) where the
+// Parquet DictEncoder hashtable is pure overhead.  Arrow DictionaryArray
+// columns (dict8 string fields) are unaffected — Parquet identifies them
+// by column path, not Arrow type.
+static std::shared_ptr<parquet::WriterProperties>
+make_writer_props(const arrow::Schema& schema)
+{
+    auto builder = parquet::WriterProperties::Builder();
+    builder.compression(parquet::Compression::SNAPPY);
+    for (const auto& field : schema.fields()) {
+        auto tid = field->type()->id();
+        if (tid == arrow::Type::INT64 || tid == arrow::Type::INT32 ||
+            tid == arrow::Type::DOUBLE || tid == arrow::Type::FLOAT) {
+            builder.disable_dictionary(field->name());
+        }
+    }
+    return builder.build();
+}
+
 void ParquetWriter::init_file_writer() {
     if (parquet_file_writer_) {
         return;  // Already initialized
@@ -167,9 +188,7 @@ void ParquetWriter::init_file_writer() {
     }
 
     // Configure Parquet writer properties
-    auto writer_props = parquet::WriterProperties::Builder()
-        .compression(parquet::Compression::SNAPPY)
-        ->build();
+    auto writer_props = make_writer_props(*first_batch_->schema());
 
     auto arrow_props = parquet::ArrowWriterProperties::Builder()
         .set_use_threads(use_threads_)
@@ -236,9 +255,7 @@ void ParquetWriter::close() {
                 TPCH_SCOPED_TIMER("parquet_encode_batches");
 
                 // Configure Parquet writer properties
-                auto writer_props = parquet::WriterProperties::Builder()
-                    .compression(parquet::Compression::SNAPPY)
-                    ->build();
+                auto writer_props = make_writer_props(*first_batch_->schema());
 
                 auto arrow_props = parquet::ArrowWriterProperties::Builder()
                     .set_use_threads(use_threads_)
@@ -326,9 +343,7 @@ void ParquetWriter::close() {
             TPCH_SCOPED_TIMER("parquet_encode_sync");
 
             // Configure Parquet writer properties
-            auto writer_props = parquet::WriterProperties::Builder()
-                .compression(parquet::Compression::SNAPPY)
-                ->build();
+            auto writer_props = make_writer_props(*first_batch_->schema());
 
             auto arrow_props = parquet::ArrowWriterProperties::Builder()
                 .set_use_threads(use_threads_)

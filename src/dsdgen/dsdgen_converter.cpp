@@ -299,7 +299,7 @@ std::shared_ptr<arrow::Array> get_dict_for_field(const std::string& name) {
 
 void append_store_sales_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_STORE_SALES_TBL*>(row);
 
@@ -364,7 +364,7 @@ void append_store_sales_to_builders(
 
 void append_inventory_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_INVENTORY_TBL*>(row);
 
@@ -384,7 +384,7 @@ void append_inventory_to_builders(
 
 void append_catalog_sales_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_CATALOG_SALES_TBL*>(row);
 
@@ -466,7 +466,7 @@ void append_catalog_sales_to_builders(
 
 void append_web_sales_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_WEB_SALES_TBL*>(row);
 
@@ -548,7 +548,7 @@ void append_web_sales_to_builders(
 
 void append_customer_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_CUSTOMER_TBL*>(row);
 
@@ -596,7 +596,7 @@ void append_customer_to_builders(
 
 void append_item_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_ITEM_TBL*>(row);
 
@@ -654,7 +654,7 @@ void append_item_to_builders(
 
 void append_date_dim_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_DATE_TBL*>(row);
 
@@ -718,7 +718,7 @@ void append_date_dim_to_builders(
 
 void append_store_returns_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_STORE_RETURNS_TBL*>(row);
 
@@ -772,7 +772,7 @@ void append_store_returns_to_builders(
 
 void append_catalog_returns_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_CATALOG_RETURNS_TBL*>(row);
 
@@ -840,7 +840,7 @@ void append_catalog_returns_to_builders(
 
 void append_web_returns_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const W_WEB_RETURNS_TBL*>(row);
 
@@ -907,7 +907,7 @@ void append_web_returns_to_builders(
 static void append_addr_fields(
     const ds_addr_t& addr,
     const std::string& pfx,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     static_cast<arrow::Int32Builder*>(builders[pfx + "street_number"].get())
         ->Append(addr.street_num);
@@ -939,7 +939,7 @@ static void append_addr_fields(
 
 void append_call_center_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct CALL_CENTER_TBL*>(row);
 
@@ -994,7 +994,7 @@ void append_call_center_to_builders(
 
 void append_catalog_page_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct CATALOG_PAGE_TBL*>(row);
 
@@ -1024,7 +1024,7 @@ void append_catalog_page_to_builders(
 
 void append_web_page_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_WEB_PAGE_TBL*>(row);
 
@@ -1064,7 +1064,7 @@ void append_web_page_to_builders(
 
 void append_web_site_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_WEB_SITE_TBL*>(row);
 
@@ -1109,7 +1109,7 @@ void append_web_site_to_builders(
 
 void append_warehouse_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_WAREHOUSE_TBL*>(row);
 
@@ -1130,7 +1130,7 @@ void append_warehouse_to_builders(
 
 void append_ship_mode_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_SHIP_MODE_TBL*>(row);
 
@@ -1154,7 +1154,7 @@ void append_ship_mode_to_builders(
 
 void append_household_demographics_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_HOUSEHOLD_DEMOGRAPHICS_TBL*>(row);
 
@@ -1176,7 +1176,7 @@ void append_household_demographics_to_builders(
 
 void append_customer_demographics_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_CUSTOMER_DEMOGRAPHICS_TBL*>(row);
 
@@ -1206,7 +1206,7 @@ void append_customer_demographics_to_builders(
 
 void append_customer_address_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_CUSTOMER_ADDRESS_TBL*>(row);
 
@@ -1225,7 +1225,7 @@ void append_customer_address_to_builders(
 
 void append_income_band_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_INCOME_BAND_TBL*>(row);
 
@@ -1243,7 +1243,7 @@ void append_income_band_to_builders(
 
 void append_reason_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_REASON_TBL*>(row);
 
@@ -1261,7 +1261,7 @@ void append_reason_to_builders(
 
 void append_time_dim_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_TIME_TBL*>(row);
 
@@ -1293,7 +1293,7 @@ void append_time_dim_to_builders(
 
 void append_promotion_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_PROMOTION_TBL*>(row);
 
@@ -1343,7 +1343,7 @@ void append_promotion_to_builders(
 
 void append_store_to_builders(
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     auto* r = static_cast<const struct W_STORE_TBL*>(row);
 
@@ -1395,7 +1395,7 @@ void append_store_to_builders(
 void append_dsdgen_row_to_builders(
     const std::string& tbl_name,
     const void* row,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders)
+    tpcds::BuilderMap& builders)
 {
     if (tbl_name == "store_sales") {
         append_store_sales_to_builders(row, builders);

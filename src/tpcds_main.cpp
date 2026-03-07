@@ -14,7 +14,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
-#include <map>
+#include <unordered_map>
 #include <string>
 #include <chrono>
 #include <getopt.h>
@@ -154,10 +154,10 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
 }
 
 // Build Arrow array builders from schema (int32, int64, float64, string)
-std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>
+tpcds::BuilderMap
 create_builders(std::shared_ptr<arrow::Schema> schema)
 {
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>> builders;
+    tpcds::BuilderMap builders;
     const int64_t capacity = 10000;
 
     for (const auto& field : schema->fields()) {
@@ -205,7 +205,7 @@ create_builders(std::shared_ptr<arrow::Schema> schema)
 std::shared_ptr<arrow::RecordBatch>
 finish_batch(
     std::shared_ptr<arrow::Schema> schema,
-    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders,
+    tpcds::BuilderMap& builders,
     size_t num_rows)
 {
     std::vector<std::shared_ptr<arrow::Array>> arrays;
@@ -224,7 +224,7 @@ finish_batch(
     return arrow::RecordBatch::Make(schema, static_cast<int64_t>(num_rows), arrays);
 }
 
-void reset_builders(std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>& builders) {
+void reset_builders(tpcds::BuilderMap& builders) {
     for (auto& [name, b] : builders) { b->Reset(); }
 }
 
