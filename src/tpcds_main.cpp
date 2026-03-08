@@ -263,7 +263,10 @@ size_t run_generation(
     std::unique_ptr<tpch::WriterInterface>& writer,
     GenerateFn generate_fn)
 {
-    const size_t batch_size = 10000;
+    // 8192 = Lance max_rows_per_group default — aligns C++ batches to Lance row-group
+    // boundaries so the streaming encoder never sees split/leftover rows at group edges.
+    // This also benefits Parquet (common row-group granularity) and ORC stripe alignment.
+    const size_t batch_size = 8192;
     size_t rows_in_batch = 0;
     size_t total_rows = 0;
 
