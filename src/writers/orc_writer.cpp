@@ -84,10 +84,11 @@ void copy_array_to_orc_column(
             }
         }
     } else if (array->type()->id() == arrow::Type::INT32) {
+        // ORC uses LongVectorBatch for all integer types (tinyint/smallint/int/bigint)
         auto int_array = std::static_pointer_cast<arrow::Int32Array>(array);
-        auto* long_col = dynamic_cast<orc::IntVectorBatch*>(col_batch);
+        auto* long_col = dynamic_cast<orc::LongVectorBatch*>(col_batch);
         if (!long_col) {
-            throw std::runtime_error("Failed to cast ORC column to IntVectorBatch");
+            throw std::runtime_error("Failed to cast ORC column to LongVectorBatch (int32)");
         }
         for (size_t i = 0; i < size; ++i) {
             if (int_array->IsNull(static_cast<int64_t>(i))) {
