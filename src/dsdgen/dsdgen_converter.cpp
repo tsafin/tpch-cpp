@@ -139,6 +139,17 @@ static inline int8_t encode_t_meal_time(const char* s) {
     switch(s[0]) { case 'b':return 1; case 'l':return 2; default:return 3; }
 }
 
+static inline int8_t encode_hd_buy_potential(const char* s) {
+    if (!s || !s[0]) return 5;
+    switch (s[0]) {
+        case '>': return 0;  // ">10000"
+        case '0': return 1;  // "0-500"
+        case '5': return s[1]=='0'?2:3;  // "501-1000" vs "5001-10000"
+        case '1': return 4;  // "1001-5000"
+        default:  return 5;  // "unknown"
+    }
+}
+
 static inline int8_t encode_d_day_name(const char* s) {
     if(s[0]=='S') return s[1]=='u'?0:6;
     switch(s[0]) { case 'M':return 1; case 'F':return 5;
@@ -234,6 +245,7 @@ std::shared_ptr<arrow::Array> get_dict_for_field(const std::string& name) {
     static auto cc_hours_d   = make({"8AM-4PM","8AM-12AM","8AM-8AM"});
     static auto cc_name_d    = make({"New England","NY Metro","Mid Atlantic","Southeastern","North Midwest","Central Midwest","South Midwest","Pacific Northwest","California","Southwest","Hawaii/Alaska","Other"});
     static auto street_type_d = make({"Street","ST","Avenue","Ave","Boulevard","Blvd","Road","RD","Parkway","Pkwy","Way","Wy","Drive","Dr.","Circle","Cir.","Lane","Ln","Court","Ct."});
+    static auto buy_potential = make({">10000","0-500","501-1000","5001-10000","1001-5000","unknown"});
     static auto one_unknown  = make({"Unknown"});
     static auto one_dept     = make({"DEPARTMENT"});
     static auto one_us       = make({"United States"});
@@ -288,6 +300,7 @@ std::shared_ptr<arrow::Array> get_dict_for_field(const std::string& name) {
         {"ca_state", states},
         {"ca_street_type", street_type_d},
         {"p_purpose", one_unknown},
+        {"hd_buy_potential", buy_potential},
     };
 
     auto it = registry.find(name);
@@ -1168,8 +1181,8 @@ void append_household_demographics_to_builders(
         ->Append(static_cast<int64_t>(r->hd_demo_sk));
     static_cast<arrow::Int64Builder*>(builders[col::household_demographics::hd_income_band_sk].get())
         ->Append(static_cast<int64_t>(r->hd_income_band_id));
-    static_cast<arrow::StringBuilder*>(builders[col::household_demographics::hd_buy_potential].get())
-        ->Append(r->hd_buy_potential ? r->hd_buy_potential : "");
+    static_cast<arrow::Int8Builder*>(builders[col::household_demographics::hd_buy_potential].get())
+        ->Append(encode_hd_buy_potential(r->hd_buy_potential));
     static_cast<arrow::Int32Builder*>(builders[col::household_demographics::hd_dep_count].get())
         ->Append(static_cast<int32_t>(r->hd_dep_count));
     static_cast<arrow::Int32Builder*>(builders[col::household_demographics::hd_vehicle_count].get())

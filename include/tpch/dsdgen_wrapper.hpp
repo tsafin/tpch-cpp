@@ -210,7 +210,7 @@ public:
     /**
      * Return the Arrow schema for a table type.
      */
-    static std::shared_ptr<arrow::Schema> get_schema(TableType table);
+    static std::shared_ptr<arrow::Schema> get_schema(TableType table, double scale_factor = 1.0);
 
     /**
      * Return expected row count for a table at the given scale factor.

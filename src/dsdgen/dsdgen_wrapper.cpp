@@ -7,6 +7,7 @@
 
 #include "tpch/dsdgen_wrapper.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -68,8 +69,45 @@ std::string DSDGenWrapper::table_name(TableType t) {
 // Arrow schemas
 // ---------------------------------------------------------------------------
 
-std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
+// Helper: create an Arrow field with a pre-computed cardinality hint for Lance.
+// Mirrors tpch_field() in dbgen_wrapper.cpp. Only use for utf8 fields with known
+// bounded cardinality derived from TPC-DS spec or empirical measurements.
+static std::shared_ptr<arrow::Field> tpcds_field(
+    const std::string& name,
+    std::shared_ptr<arrow::DataType> type,
+    int64_t known_cardinality = -1)
+{
+    if (known_cardinality > 0) {
+        auto meta = arrow::key_value_metadata(
+            std::vector<std::string>{"lance.cardinality"},
+            std::vector<std::string>{std::to_string(known_cardinality)});
+        return arrow::field(name, type, /*nullable=*/true, meta);
+    }
+    return arrow::field(name, type);
+}
+
+std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t, double scale_factor) {
     auto dict8 = arrow::dictionary(arrow::int8(), arrow::utf8());
+
+    // TPC-DS row counts per TPC-DS v3 spec.
+    int64_t sf      = static_cast<int64_t>(std::ceil(scale_factor));
+    int64_t sf_sqrt = static_cast<int64_t>(std::ceil(std::sqrt(scale_factor)));
+    // Fixed-cardinality dimension tables
+    constexpr int64_t DATE_DIM_ROWS  = 73'049;
+    constexpr int64_t TIME_DIM_ROWS  = 86'400;
+    constexpr int64_t SHIP_MODE_ROWS = 20;
+    constexpr int64_t REASON_ROWS    = 55;
+    // SF-scaled dimension tables
+    int64_t customer     = 100'000LL * sf;
+    int64_t cust_addr    = 50'000LL  * sf;
+    int64_t item         = 18'000LL  * sf_sqrt;
+    int64_t store        = 12LL      * sf;
+    int64_t call_center  = 6LL       * sf;
+    int64_t catalog_page = 11'718LL  * sf_sqrt;
+    int64_t web_page     = 60LL      * sf_sqrt;
+    int64_t web_site     = 30LL      * sf_sqrt;
+    int64_t warehouse    = 5LL       * sf;
+    int64_t promotion    = 300LL     * sf_sqrt;
     switch (t) {
         case TableType::StoreSales:
             return arrow::schema({
@@ -185,56 +223,56 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
         case TableType::Customer:
             return arrow::schema({
                 arrow::field("c_customer_sk",            arrow::int64()),
-                arrow::field("c_customer_id",            arrow::utf8()),
+                tpcds_field("c_customer_id",             arrow::utf8(), customer),
                 arrow::field("c_current_cdemo_sk",       arrow::int64()),
                 arrow::field("c_current_hdemo_sk",       arrow::int64()),
                 arrow::field("c_current_addr_sk",        arrow::int64()),
                 arrow::field("c_first_shipto_date_id",   arrow::int32()),
                 arrow::field("c_first_sales_date_id",    arrow::int32()),
                 arrow::field("c_salutation",             dict8),
-                arrow::field("c_first_name",             arrow::utf8()),
-                arrow::field("c_last_name",              arrow::utf8()),
+                tpcds_field("c_first_name",              arrow::utf8(), 2000),
+                tpcds_field("c_last_name",               arrow::utf8(), 5000),
                 arrow::field("c_preferred_cust_flag",    arrow::int32()),
                 arrow::field("c_birth_day",              arrow::int32()),
                 arrow::field("c_birth_month",            arrow::int32()),
                 arrow::field("c_birth_year",             arrow::int32()),
-                arrow::field("c_birth_country",          arrow::utf8()),
-                arrow::field("c_login",                  arrow::utf8()),
-                arrow::field("c_email_address",          arrow::utf8()),
+                tpcds_field("c_birth_country",           arrow::utf8(), 200),
+                tpcds_field("c_login",                   arrow::utf8(), customer),
+                tpcds_field("c_email_address",           arrow::utf8(), customer),
                 arrow::field("c_last_review_date",       arrow::int32()),
             });
 
         case TableType::Item:
             return arrow::schema({
                 arrow::field("i_item_sk",           arrow::int64()),
-                arrow::field("i_item_id",           arrow::utf8()),
+                tpcds_field("i_item_id",            arrow::utf8(), item),
                 arrow::field("i_rec_start_date_id", arrow::int64()),
                 arrow::field("i_rec_end_date_id",   arrow::int64()),
-                arrow::field("i_item_desc",         arrow::utf8()),
+                tpcds_field("i_item_desc",          arrow::utf8(), item),
                 arrow::field("i_current_price",     arrow::float64()),
                 arrow::field("i_wholesale_cost",    arrow::float64()),
                 arrow::field("i_brand_id",          arrow::int64()),
-                arrow::field("i_brand",             arrow::utf8()),
+                tpcds_field("i_brand",              arrow::utf8(), 1000),
                 arrow::field("i_class_id",          arrow::int64()),
-                arrow::field("i_class",             arrow::utf8()),
+                tpcds_field("i_class",              arrow::utf8(), 100),
                 arrow::field("i_category_id",       arrow::int64()),
                 arrow::field("i_category",          dict8),
                 arrow::field("i_manufact_id",       arrow::int64()),
-                arrow::field("i_manufact",          arrow::utf8()),
+                tpcds_field("i_manufact",           arrow::utf8(), 1000),
                 arrow::field("i_size",              dict8),
-                arrow::field("i_formulation",       arrow::utf8()),
+                tpcds_field("i_formulation",        arrow::utf8(), item),
                 arrow::field("i_color",             dict8),
                 arrow::field("i_units",             dict8),
                 arrow::field("i_container",         dict8),
                 arrow::field("i_manager_id",        arrow::int64()),
-                arrow::field("i_product_name",      arrow::utf8()),
+                tpcds_field("i_product_name",       arrow::utf8(), item),
                 arrow::field("i_promo_sk",          arrow::int64()),
             });
 
         case TableType::DateDim:
             return arrow::schema({
                 arrow::field("d_date_sk",           arrow::int64()),
-                arrow::field("d_date_id",           arrow::utf8()),
+                tpcds_field("d_date_id",            arrow::utf8(), DATE_DIM_ROWS),
                 arrow::field("d_month_seq",         arrow::int32()),
                 arrow::field("d_week_seq",          arrow::int32()),
                 arrow::field("d_quarter_seq",       arrow::int32()),
@@ -346,63 +384,63 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
 
         case TableType::CallCenter:
             return arrow::schema({
-                arrow::field("cc_call_center_sk",  arrow::int64()),
-                arrow::field("cc_call_center_id",  arrow::utf8()),
+                arrow::field("cc_call_center_sk",    arrow::int64()),
+                tpcds_field("cc_call_center_id",     arrow::utf8(), call_center),
                 arrow::field("cc_rec_start_date_sk", arrow::int64()),
-                arrow::field("cc_rec_end_date_sk", arrow::int64()),
-                arrow::field("cc_closed_date_sk",  arrow::int64()),
-                arrow::field("cc_open_date_sk",    arrow::int64()),
-                arrow::field("cc_name",            dict8),
-                arrow::field("cc_class",           dict8),
-                arrow::field("cc_employees",       arrow::int32()),
-                arrow::field("cc_sq_ft",           arrow::int32()),
-                arrow::field("cc_hours",           dict8),
-                arrow::field("cc_manager",         arrow::utf8()),
-                arrow::field("cc_mkt_id",          arrow::int32()),
-                arrow::field("cc_mkt_class",       arrow::utf8()),
-                arrow::field("cc_mkt_desc",        arrow::utf8()),
-                arrow::field("cc_market_manager",  arrow::utf8()),
-                arrow::field("cc_division",        arrow::int32()),
-                arrow::field("cc_division_name",   arrow::utf8()),
-                arrow::field("cc_company",         arrow::int32()),
-                arrow::field("cc_company_name",    arrow::utf8()),
-                arrow::field("cc_street_number",   arrow::int32()),
-                arrow::field("cc_street_name",     arrow::utf8()),
-                arrow::field("cc_street_type",     dict8),
-                arrow::field("cc_suite_number",    arrow::utf8()),
-                arrow::field("cc_city",            arrow::utf8()),
-                arrow::field("cc_county",          arrow::utf8()),
-                arrow::field("cc_state",           dict8),
-                arrow::field("cc_zip",             arrow::utf8()),
-                arrow::field("cc_country",         dict8),
-                arrow::field("cc_gmt_offset",      arrow::float64()),
-                arrow::field("cc_tax_percentage",  arrow::float64()),
+                arrow::field("cc_rec_end_date_sk",   arrow::int64()),
+                arrow::field("cc_closed_date_sk",    arrow::int64()),
+                arrow::field("cc_open_date_sk",      arrow::int64()),
+                arrow::field("cc_name",              dict8),
+                arrow::field("cc_class",             dict8),
+                arrow::field("cc_employees",         arrow::int32()),
+                arrow::field("cc_sq_ft",             arrow::int32()),
+                arrow::field("cc_hours",             dict8),
+                tpcds_field("cc_manager",            arrow::utf8(), call_center),
+                arrow::field("cc_mkt_id",            arrow::int32()),
+                tpcds_field("cc_mkt_class",          arrow::utf8(), call_center),
+                tpcds_field("cc_mkt_desc",           arrow::utf8(), call_center),
+                tpcds_field("cc_market_manager",     arrow::utf8(), call_center),
+                arrow::field("cc_division",          arrow::int32()),
+                tpcds_field("cc_division_name",      arrow::utf8(), call_center),
+                arrow::field("cc_company",           arrow::int32()),
+                tpcds_field("cc_company_name",       arrow::utf8(), call_center),
+                arrow::field("cc_street_number",     arrow::int32()),
+                tpcds_field("cc_street_name",        arrow::utf8(), call_center),
+                arrow::field("cc_street_type",       dict8),
+                tpcds_field("cc_suite_number",       arrow::utf8(), call_center),
+                tpcds_field("cc_city",               arrow::utf8(), call_center),
+                tpcds_field("cc_county",             arrow::utf8(), call_center),
+                arrow::field("cc_state",             dict8),
+                tpcds_field("cc_zip",                arrow::utf8(), call_center),
+                arrow::field("cc_country",           dict8),
+                arrow::field("cc_gmt_offset",        arrow::float64()),
+                arrow::field("cc_tax_percentage",    arrow::float64()),
             });
 
         case TableType::CatalogPage:
             return arrow::schema({
                 arrow::field("cp_catalog_page_sk",     arrow::int64()),
-                arrow::field("cp_catalog_page_id",     arrow::utf8()),
+                tpcds_field("cp_catalog_page_id",      arrow::utf8(), catalog_page),
                 arrow::field("cp_start_date_sk",       arrow::int64()),
                 arrow::field("cp_end_date_sk",         arrow::int64()),
                 arrow::field("cp_department",          dict8),
                 arrow::field("cp_catalog_number",      arrow::int32()),
                 arrow::field("cp_catalog_page_number", arrow::int32()),
-                arrow::field("cp_description",         arrow::utf8()),
+                tpcds_field("cp_description",          arrow::utf8(), catalog_page),
                 arrow::field("cp_type",                dict8),
             });
 
         case TableType::WebPage:
             return arrow::schema({
                 arrow::field("wp_web_page_sk",       arrow::int64()),
-                arrow::field("wp_web_page_id",       arrow::utf8()),
+                tpcds_field("wp_web_page_id",        arrow::utf8(), web_page),
                 arrow::field("wp_rec_start_date_sk", arrow::int64()),
                 arrow::field("wp_rec_end_date_sk",   arrow::int64()),
                 arrow::field("wp_creation_date_sk",  arrow::int64()),
                 arrow::field("wp_access_date_sk",    arrow::int64()),
                 arrow::field("wp_autogen_flag",      arrow::int32()),
                 arrow::field("wp_customer_sk",       arrow::int64()),
-                arrow::field("wp_url",               arrow::utf8()),
+                tpcds_field("wp_url",                arrow::utf8(), web_page),
                 arrow::field("wp_type",              dict8),
                 arrow::field("wp_char_count",        arrow::int32()),
                 arrow::field("wp_link_count",        arrow::int32()),
@@ -412,48 +450,48 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
 
         case TableType::WebSite:
             return arrow::schema({
-                arrow::field("web_site_sk",          arrow::int64()),
-                arrow::field("web_site_id",          arrow::utf8()),
+                arrow::field("web_site_sk",           arrow::int64()),
+                tpcds_field("web_site_id",            arrow::utf8(), web_site),
                 arrow::field("web_rec_start_date_sk", arrow::int64()),
-                arrow::field("web_rec_end_date_sk",  arrow::int64()),
-                arrow::field("web_name",             arrow::utf8()),
-                arrow::field("web_open_date_sk",     arrow::int64()),
-                arrow::field("web_close_date_sk",    arrow::int64()),
-                arrow::field("web_class",            dict8),
-                arrow::field("web_manager",          arrow::utf8()),
-                arrow::field("web_mkt_id",           arrow::int32()),
-                arrow::field("web_mkt_class",        arrow::utf8()),
-                arrow::field("web_mkt_desc",         arrow::utf8()),
-                arrow::field("web_market_manager",   arrow::utf8()),
-                arrow::field("web_company_id",       arrow::int32()),
-                arrow::field("web_company_name",     arrow::utf8()),
-                arrow::field("web_street_number",    arrow::int32()),
-                arrow::field("web_street_name",      arrow::utf8()),
-                arrow::field("web_street_type",      dict8),
-                arrow::field("web_suite_number",     arrow::utf8()),
-                arrow::field("web_city",             arrow::utf8()),
-                arrow::field("web_county",           arrow::utf8()),
-                arrow::field("web_state",            dict8),
-                arrow::field("web_zip",              arrow::utf8()),
-                arrow::field("web_country",          dict8),
-                arrow::field("web_gmt_offset",       arrow::float64()),
-                arrow::field("web_tax_percentage",   arrow::float64()),
+                arrow::field("web_rec_end_date_sk",   arrow::int64()),
+                tpcds_field("web_name",               arrow::utf8(), web_site),
+                arrow::field("web_open_date_sk",      arrow::int64()),
+                arrow::field("web_close_date_sk",     arrow::int64()),
+                arrow::field("web_class",             dict8),
+                tpcds_field("web_manager",            arrow::utf8(), web_site),
+                arrow::field("web_mkt_id",            arrow::int32()),
+                tpcds_field("web_mkt_class",          arrow::utf8(), web_site),
+                tpcds_field("web_mkt_desc",           arrow::utf8(), web_site),
+                tpcds_field("web_market_manager",     arrow::utf8(), web_site),
+                arrow::field("web_company_id",        arrow::int32()),
+                tpcds_field("web_company_name",       arrow::utf8(), web_site),
+                arrow::field("web_street_number",     arrow::int32()),
+                tpcds_field("web_street_name",        arrow::utf8(), web_site),
+                arrow::field("web_street_type",       dict8),
+                tpcds_field("web_suite_number",       arrow::utf8(), web_site),
+                tpcds_field("web_city",               arrow::utf8(), web_site),
+                tpcds_field("web_county",             arrow::utf8(), web_site),
+                arrow::field("web_state",             dict8),
+                tpcds_field("web_zip",                arrow::utf8(), web_site),
+                arrow::field("web_country",           dict8),
+                arrow::field("web_gmt_offset",        arrow::float64()),
+                arrow::field("web_tax_percentage",    arrow::float64()),
             });
 
         case TableType::Warehouse:
             return arrow::schema({
                 arrow::field("w_warehouse_sk",    arrow::int64()),
-                arrow::field("w_warehouse_id",    arrow::utf8()),
-                arrow::field("w_warehouse_name",  arrow::utf8()),
+                tpcds_field("w_warehouse_id",     arrow::utf8(), warehouse),
+                tpcds_field("w_warehouse_name",   arrow::utf8(), warehouse),
                 arrow::field("w_warehouse_sq_ft", arrow::int32()),
                 arrow::field("w_street_number",   arrow::int32()),
-                arrow::field("w_street_name",     arrow::utf8()),
+                tpcds_field("w_street_name",      arrow::utf8(), warehouse),
                 arrow::field("w_street_type",     dict8),
-                arrow::field("w_suite_number",    arrow::utf8()),
-                arrow::field("w_city",            arrow::utf8()),
-                arrow::field("w_county",          arrow::utf8()),
+                tpcds_field("w_suite_number",     arrow::utf8(), warehouse),
+                tpcds_field("w_city",             arrow::utf8(), warehouse),
+                tpcds_field("w_county",           arrow::utf8(), warehouse),
                 arrow::field("w_state",           dict8),
-                arrow::field("w_zip",             arrow::utf8()),
+                tpcds_field("w_zip",              arrow::utf8(), warehouse),
                 arrow::field("w_country",         dict8),
                 arrow::field("w_gmt_offset",      arrow::float64()),
             });
@@ -461,18 +499,18 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
         case TableType::ShipMode:
             return arrow::schema({
                 arrow::field("sm_ship_mode_sk", arrow::int64()),
-                arrow::field("sm_ship_mode_id", arrow::utf8()),
+                tpcds_field("sm_ship_mode_id",  arrow::utf8(), SHIP_MODE_ROWS),
                 arrow::field("sm_type",         dict8),
                 arrow::field("sm_code",         dict8),
                 arrow::field("sm_carrier",      dict8),
-                arrow::field("sm_contract",     arrow::utf8()),
+                tpcds_field("sm_contract",      arrow::utf8(), SHIP_MODE_ROWS),
             });
 
         case TableType::HouseholdDemographics:
             return arrow::schema({
                 arrow::field("hd_demo_sk",        arrow::int64()),
                 arrow::field("hd_income_band_sk", arrow::int64()),
-                arrow::field("hd_buy_potential",  arrow::utf8()),
+                arrow::field("hd_buy_potential",  dict8),
                 arrow::field("hd_dep_count",      arrow::int32()),
                 arrow::field("hd_vehicle_count",  arrow::int32()),
             });
@@ -493,15 +531,15 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
         case TableType::CustomerAddress:
             return arrow::schema({
                 arrow::field("ca_address_sk",    arrow::int64()),
-                arrow::field("ca_address_id",    arrow::utf8()),
+                tpcds_field("ca_address_id",     arrow::utf8(), cust_addr),
                 arrow::field("ca_street_number", arrow::int32()),
-                arrow::field("ca_street_name",   arrow::utf8()),
+                tpcds_field("ca_street_name",    arrow::utf8(), 20000),
                 arrow::field("ca_street_type",   dict8),
-                arrow::field("ca_suite_number",  arrow::utf8()),
-                arrow::field("ca_city",          arrow::utf8()),
-                arrow::field("ca_county",        arrow::utf8()),
+                tpcds_field("ca_suite_number",   arrow::utf8(), cust_addr),
+                tpcds_field("ca_city",           arrow::utf8(), 1000),
+                tpcds_field("ca_county",         arrow::utf8(), 1800),
                 arrow::field("ca_state",         dict8),
-                arrow::field("ca_zip",           arrow::utf8()),
+                tpcds_field("ca_zip",            arrow::utf8(), 10000),
                 arrow::field("ca_country",       dict8),
                 arrow::field("ca_gmt_offset",    arrow::float64()),
                 arrow::field("ca_location_type", dict8),
@@ -517,14 +555,14 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
         case TableType::Reason:
             return arrow::schema({
                 arrow::field("r_reason_sk",   arrow::int64()),
-                arrow::field("r_reason_id",   arrow::utf8()),
-                arrow::field("r_reason_desc", arrow::utf8()),
+                tpcds_field("r_reason_id",    arrow::utf8(), REASON_ROWS),
+                tpcds_field("r_reason_desc",  arrow::utf8(), REASON_ROWS),
             });
 
         case TableType::TimeDim:
             return arrow::schema({
                 arrow::field("t_time_sk",   arrow::int64()),
-                arrow::field("t_time_id",   arrow::utf8()),
+                tpcds_field("t_time_id",    arrow::utf8(), TIME_DIM_ROWS),
                 arrow::field("t_time",      arrow::int32()),
                 arrow::field("t_hour",      arrow::int32()),
                 arrow::field("t_minute",    arrow::int32()),
@@ -538,13 +576,13 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
         case TableType::Promotion:
             return arrow::schema({
                 arrow::field("p_promo_sk",        arrow::int64()),
-                arrow::field("p_promo_id",         arrow::utf8()),
+                tpcds_field("p_promo_id",          arrow::utf8(), promotion),
                 arrow::field("p_start_date_sk",    arrow::int64()),
                 arrow::field("p_end_date_sk",      arrow::int64()),
                 arrow::field("p_item_sk",          arrow::int64()),
                 arrow::field("p_cost",             arrow::float64()),
                 arrow::field("p_response_target",  arrow::int32()),
-                arrow::field("p_promo_name",       arrow::utf8()),
+                tpcds_field("p_promo_name",        arrow::utf8(), promotion),
                 arrow::field("p_channel_dmail",    arrow::int32()),
                 arrow::field("p_channel_email",    arrow::int32()),
                 arrow::field("p_channel_catalog",  arrow::int32()),
@@ -553,42 +591,42 @@ std::shared_ptr<arrow::Schema> DSDGenWrapper::get_schema(TableType t) {
                 arrow::field("p_channel_press",    arrow::int32()),
                 arrow::field("p_channel_event",    arrow::int32()),
                 arrow::field("p_channel_demo",     arrow::int32()),
-                arrow::field("p_channel_details",  arrow::utf8()),
+                tpcds_field("p_channel_details",   arrow::utf8(), promotion),
                 arrow::field("p_purpose",          dict8),
                 arrow::field("p_discount_active",  arrow::int32()),
             });
 
         case TableType::Store:
             return arrow::schema({
-                arrow::field("s_store_sk",       arrow::int64()),
-                arrow::field("s_store_id",       arrow::utf8()),
-                arrow::field("s_rec_start_date", arrow::int64()),
-                arrow::field("s_rec_end_date",   arrow::int64()),
-                arrow::field("s_closed_date_sk", arrow::int64()),
-                arrow::field("s_store_name",     arrow::utf8()),
-                arrow::field("s_number_employees", arrow::int32()),
-                arrow::field("s_floor_space",    arrow::int32()),
-                arrow::field("s_hours",          dict8),
-                arrow::field("s_manager",        arrow::utf8()),
-                arrow::field("s_market_id",      arrow::int32()),
-                arrow::field("s_geography_class", dict8),
-                arrow::field("s_market_desc",    arrow::utf8()),
-                arrow::field("s_market_manager", arrow::utf8()),
-                arrow::field("s_division_id",    arrow::int64()),
-                arrow::field("s_division_name",  dict8),
-                arrow::field("s_company_id",     arrow::int64()),
-                arrow::field("s_company_name",   dict8),
-                arrow::field("s_street_number",  arrow::int32()),
-                arrow::field("s_street_name",    arrow::utf8()),
-                arrow::field("s_street_type",    dict8),
-                arrow::field("s_suite_number",   arrow::utf8()),
-                arrow::field("s_city",           arrow::utf8()),
-                arrow::field("s_county",         arrow::utf8()),
-                arrow::field("s_state",          dict8),
-                arrow::field("s_zip",            arrow::utf8()),
-                arrow::field("s_country",        dict8),
-                arrow::field("s_gmt_offset",     arrow::float64()),
-                arrow::field("s_tax_percentage", arrow::float64()),
+                arrow::field("s_store_sk",         arrow::int64()),
+                tpcds_field("s_store_id",           arrow::utf8(), store),
+                arrow::field("s_rec_start_date",    arrow::int64()),
+                arrow::field("s_rec_end_date",      arrow::int64()),
+                arrow::field("s_closed_date_sk",    arrow::int64()),
+                tpcds_field("s_store_name",         arrow::utf8(), store),
+                arrow::field("s_number_employees",  arrow::int32()),
+                arrow::field("s_floor_space",       arrow::int32()),
+                arrow::field("s_hours",             dict8),
+                tpcds_field("s_manager",            arrow::utf8(), store),
+                arrow::field("s_market_id",         arrow::int32()),
+                arrow::field("s_geography_class",   dict8),
+                tpcds_field("s_market_desc",        arrow::utf8(), store),
+                tpcds_field("s_market_manager",     arrow::utf8(), store),
+                arrow::field("s_division_id",       arrow::int64()),
+                arrow::field("s_division_name",     dict8),
+                arrow::field("s_company_id",        arrow::int64()),
+                arrow::field("s_company_name",      dict8),
+                arrow::field("s_street_number",     arrow::int32()),
+                tpcds_field("s_street_name",        arrow::utf8(), store),
+                arrow::field("s_street_type",       dict8),
+                tpcds_field("s_suite_number",       arrow::utf8(), store),
+                tpcds_field("s_city",               arrow::utf8(), store),
+                tpcds_field("s_county",             arrow::utf8(), store),
+                arrow::field("s_state",             dict8),
+                tpcds_field("s_zip",                arrow::utf8(), store),
+                arrow::field("s_country",           dict8),
+                arrow::field("s_gmt_offset",        arrow::float64()),
+                arrow::field("s_tax_percentage",    arrow::float64()),
             });
 
         default:
