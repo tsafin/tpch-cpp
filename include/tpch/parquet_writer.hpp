@@ -90,6 +90,13 @@ public:
      */
     void enable_streaming_write(bool use_threads = true);
 
+    /**
+     * Set compression codec for Parquet output.
+     * Must be called before the first write_batch().
+     * Supported: "snappy" (default), "zstd", "none"
+     */
+    void set_compression(const std::string& codec);
+
 private:
     std::string filepath_;
     std::shared_ptr<arrow::RecordBatch> first_batch_;
@@ -108,6 +115,7 @@ private:
     bool streaming_mode_ = false;
     bool use_threads_ = true;
     std::unique_ptr<parquet::arrow::FileWriter> parquet_file_writer_;
+    std::string compression_codec_ = "snappy";  // snappy, zstd, none
 
     // Initialize the Parquet FileWriter for streaming mode
     void init_file_writer();

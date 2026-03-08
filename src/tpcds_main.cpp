@@ -49,6 +49,7 @@ struct Options {
     std::string output_dir   = "/tmp";
     long        max_rows     = 1000;
     std::string table        = "store_sales";
+    std::string compression  = "snappy";  // snappy, lz4, zstd, none
     bool        verbose      = false;
 };
 
@@ -75,6 +76,7 @@ void print_usage(const char* prog) {
         "  --scale-factor <sf>    Scale factor (default: 1)\n"
         "  --output-dir <dir>     Output directory (default: /tmp)\n"
         "  --max-rows <n>         Max rows to generate (0=all, default: 1000)\n"
+        "  --compression <c>      Parquet compression: snappy (default), zstd, none\n"
         "  --verbose              Verbose output\n"
         "  --help                 Show this help\n"
         "\n"
@@ -92,12 +94,14 @@ void print_usage(const char* prog) {
 Options parse_args(int argc, char* argv[]) {
     Options opts;
 
+    enum { OPT_COMPRESSION = 1000 };
     static struct option long_opts[] = {
         {"format",       required_argument, nullptr, 'f'},
         {"table",        required_argument, nullptr, 't'},
         {"scale-factor", required_argument, nullptr, 's'},
         {"output-dir",   required_argument, nullptr, 'o'},
         {"max-rows",     required_argument, nullptr, 'm'},
+        {"compression",  required_argument, nullptr, OPT_COMPRESSION},
         {"verbose",      no_argument,       nullptr, 'v'},
         {"help",         no_argument,       nullptr, 'h'},
         {nullptr, 0, nullptr, 0}
@@ -111,6 +115,7 @@ Options parse_args(int argc, char* argv[]) {
             case 's': opts.scale_factor = std::stol(optarg); break;
             case 'o': opts.output_dir   = optarg; break;
             case 'm': opts.max_rows     = std::stol(optarg); break;
+            case OPT_COMPRESSION: opts.compression = optarg; break;
             case 'v': opts.verbose      = true;   break;
             case 'h': print_usage(argv[0]); exit(0);
             default:  print_usage(argv[0]); exit(1);
@@ -122,12 +127,15 @@ Options parse_args(int argc, char* argv[]) {
 // Create writer for the given format and output path
 std::unique_ptr<tpch::WriterInterface> create_writer(
     const std::string& format,
-    const std::string& filepath)
+    const std::string& filepath,
+    const std::string& compression)
 {
     if (format == "csv") {
         return std::make_unique<tpch::CSVWriter>(filepath);
     } else if (format == "parquet") {
-        return std::make_unique<tpch::ParquetWriter>(filepath);
+        auto w = std::make_unique<tpch::ParquetWriter>(filepath);
+        w->set_compression(compression);
+        return w;
     }
 #ifdef TPCH_ENABLE_ORC
     else if (format == "orc") {
@@ -352,7 +360,7 @@ int main(int argc, char* argv[]) {
     // Create writer
     std::unique_ptr<tpch::WriterInterface> writer;
     try {
-        writer = create_writer(opts.format, filepath);
+        writer = create_writer(opts.format, filepath, opts.compression);
     } catch (const std::exception& e) {
         fprintf(stderr, "tpcds_benchmark: failed to create writer: %s\n", e.what());
         return 1;

@@ -157,17 +157,26 @@ void ParquetWriter::write_managed_batch(const ManagedRecordBatch& managed_batch)
     }
 }
 
-// Build WriterProperties with SNAPPY compression.
+// Build WriterProperties with chosen compression.
 // Disables Parquet's auto-dict for numeric types (int64, int32, float64):
 // those are high-cardinality columns (foreign keys, prices) where the
 // Parquet DictEncoder hashtable is pure overhead.  Arrow DictionaryArray
 // columns (dict8 string fields) are unaffected — Parquet identifies them
 // by column path, not Arrow type.
+static parquet::Compression::type parse_compression(const std::string& codec)
+{
+    if (codec == "snappy") return parquet::Compression::SNAPPY;
+    if (codec == "zstd")   return parquet::Compression::ZSTD;
+    if (codec == "none" || codec == "uncompressed") return parquet::Compression::UNCOMPRESSED;
+    throw std::invalid_argument("Unknown compression codec: " + codec +
+        " (supported: snappy, zstd, none)");
+}
+
 static std::shared_ptr<parquet::WriterProperties>
-make_writer_props(const arrow::Schema& schema)
+make_writer_props(const arrow::Schema& schema, const std::string& codec)
 {
     auto builder = parquet::WriterProperties::Builder();
-    builder.compression(parquet::Compression::SNAPPY);
+    builder.compression(parse_compression(codec));
     for (const auto& field : schema.fields()) {
         auto tid = field->type()->id();
         if (tid == arrow::Type::INT64 || tid == arrow::Type::INT32 ||
@@ -176,6 +185,11 @@ make_writer_props(const arrow::Schema& schema)
         }
     }
     return builder.build();
+}
+
+void ParquetWriter::set_compression(const std::string& codec)
+{
+    compression_codec_ = codec;
 }
 
 void ParquetWriter::init_file_writer() {
@@ -188,7 +202,7 @@ void ParquetWriter::init_file_writer() {
     }
 
     // Configure Parquet writer properties
-    auto writer_props = make_writer_props(*first_batch_->schema());
+    auto writer_props = make_writer_props(*first_batch_->schema(), compression_codec_);
 
     auto arrow_props = parquet::ArrowWriterProperties::Builder()
         .set_use_threads(use_threads_)
@@ -255,7 +269,7 @@ void ParquetWriter::close() {
                 TPCH_SCOPED_TIMER("parquet_encode_batches");
 
                 // Configure Parquet writer properties
-                auto writer_props = make_writer_props(*first_batch_->schema());
+                auto writer_props = make_writer_props(*first_batch_->schema(), compression_codec_);
 
                 auto arrow_props = parquet::ArrowWriterProperties::Builder()
                     .set_use_threads(use_threads_)
@@ -343,7 +357,7 @@ void ParquetWriter::close() {
             TPCH_SCOPED_TIMER("parquet_encode_sync");
 
             // Configure Parquet writer properties
-            auto writer_props = make_writer_props(*first_batch_->schema());
+            auto writer_props = make_writer_props(*first_batch_->schema(), compression_codec_);
 
             auto arrow_props = parquet::ArrowWriterProperties::Builder()
                 .set_use_threads(use_threads_)
