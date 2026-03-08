@@ -144,6 +144,26 @@ add_custom_command(
 add_custom_target(tpcds_dsts_embedded DEPENDS "${DSTS_GENERATED_C}")
 
 # ---------------------------------------------------------------------------
+# Step 2c: Pre-parse distribution values at build time (dist_cache_generated.c)
+#
+# Generates static const int[] / decimal_t[] arrays for all TKN_INT and
+# TKN_DECIMAL value sets.  dist.c's load_dist() points int_cache[]/dec_cache[]
+# at these read-only arrays (no malloc, no atoi/strtodec) when EMBEDDED_DSDGEN.
+# ---------------------------------------------------------------------------
+set(DIST_CACHE_C "${CMAKE_CURRENT_BINARY_DIR}/dist_cache_generated.c")
+
+add_custom_command(
+    OUTPUT "${DIST_CACHE_C}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/cmake/gen_dist_cache.py"
+            "${TPCDS_IDX}"
+            "${DIST_CACHE_C}"
+    DEPENDS tpcds_idx_gen "${CMAKE_SOURCE_DIR}/cmake/gen_dist_cache.py"
+    COMMENT "Pre-parsing TPC-DS distribution values (dist_cache_generated.c)"
+)
+
+add_custom_target(tpcds_dist_cache_gen DEPENDS "${DIST_CACHE_C}")
+
+# ---------------------------------------------------------------------------
 # Step 3: Core dsdgen sources
 # ---------------------------------------------------------------------------
 
@@ -272,10 +292,11 @@ add_library(dsdgen_objs OBJECT
     ${DSDGEN_DRIVER_SOURCE}
     ${DSDGEN_STUB_SOURCE}
     "${DSTS_GENERATED_C}"
+    "${DIST_CACHE_C}"
 )
 
-# Must wait for all generated headers + embedded dist data before compiling
-add_dependencies(dsdgen_objs tpcds_headers_gen tpcds_idx_gen tpcds_dsts_embedded)
+# Must wait for all generated headers + embedded dist data + cache before compiling
+add_dependencies(dsdgen_objs tpcds_headers_gen tpcds_idx_gen tpcds_dsts_embedded tpcds_dist_cache_gen)
 
 # Rename main() in driver.c so it doesn't conflict with tpcds_benchmark's main()
 set_source_files_properties(
