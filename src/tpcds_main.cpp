@@ -367,7 +367,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Get Arrow schema
-    auto schema = tpcds::DSDGenWrapper::get_schema(table_type);
+    auto schema = tpcds::DSDGenWrapper::get_schema(table_type, opts.scale_factor);
 
     // Build dsdgen wrapper
     tpcds::DSDGenWrapper dsdgen(opts.scale_factor, opts.verbose);
