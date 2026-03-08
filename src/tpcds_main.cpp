@@ -51,6 +51,7 @@ struct Options {
     std::string table        = "store_sales";
     std::string compression  = "snappy";  // snappy, lz4, zstd, none
     bool        verbose      = false;
+    bool        zero_copy    = false;     // streaming mode: O(batch) memory instead of O(total)
 };
 
 void print_usage(const char* prog) {
@@ -77,6 +78,7 @@ void print_usage(const char* prog) {
         "  --output-dir <dir>     Output directory (default: /tmp)\n"
         "  --max-rows <n>         Max rows to generate (0=all, default: 1000)\n"
         "  --compression <c>      Parquet compression: snappy (default), zstd, none\n"
+        "  --zero-copy            Streaming mode: flush each batch immediately (O(batch) RAM)\n"
         "  --verbose              Verbose output\n"
         "  --help                 Show this help\n"
         "\n"
@@ -94,7 +96,7 @@ void print_usage(const char* prog) {
 Options parse_args(int argc, char* argv[]) {
     Options opts;
 
-    enum { OPT_COMPRESSION = 1000 };
+    enum { OPT_COMPRESSION = 1000, OPT_ZERO_COPY };
     static struct option long_opts[] = {
         {"format",       required_argument, nullptr, 'f'},
         {"table",        required_argument, nullptr, 't'},
@@ -102,13 +104,14 @@ Options parse_args(int argc, char* argv[]) {
         {"output-dir",   required_argument, nullptr, 'o'},
         {"max-rows",     required_argument, nullptr, 'm'},
         {"compression",  required_argument, nullptr, OPT_COMPRESSION},
+        {"zero-copy",    no_argument,       nullptr, OPT_ZERO_COPY},
         {"verbose",      no_argument,       nullptr, 'v'},
         {"help",         no_argument,       nullptr, 'h'},
         {nullptr, 0, nullptr, 0}
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "f:t:s:o:m:vh", long_opts, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:t:s:o:m:vzh", long_opts, nullptr)) != -1) {
         switch (c) {
             case 'f': opts.format       = optarg; break;
             case 't': opts.table        = optarg; break;
@@ -116,6 +119,8 @@ Options parse_args(int argc, char* argv[]) {
             case 'o': opts.output_dir   = optarg; break;
             case 'm': opts.max_rows     = std::stol(optarg); break;
             case OPT_COMPRESSION: opts.compression = optarg; break;
+            case OPT_ZERO_COPY: opts.zero_copy = true; break;
+            case 'z': opts.zero_copy    = true;   break;
             case 'v': opts.verbose      = true;   break;
             case 'h': print_usage(argv[0]); exit(0);
             default:  print_usage(argv[0]); exit(1);
@@ -124,17 +129,23 @@ Options parse_args(int argc, char* argv[]) {
     return opts;
 }
 
-// Create writer for the given format and output path
+// Create writer for the given format and output path.
+// When zero_copy=true, enables streaming write mode: each batch is flushed
+// immediately to disk, capping RAM usage at O(batch_size) instead of O(total_rows).
 std::unique_ptr<tpch::WriterInterface> create_writer(
     const std::string& format,
     const std::string& filepath,
-    const std::string& compression)
+    const std::string& compression,
+    bool zero_copy = false)
 {
     if (format == "csv") {
         return std::make_unique<tpch::CSVWriter>(filepath);
     } else if (format == "parquet") {
         auto w = std::make_unique<tpch::ParquetWriter>(filepath);
         w->set_compression(compression);
+        if (zero_copy) {
+            w->enable_streaming_write();
+        }
         return w;
     }
 #ifdef TPCH_ENABLE_ORC
@@ -154,7 +165,11 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
 #endif
 #ifdef TPCH_ENABLE_LANCE
     else if (format == "lance") {
-        return std::make_unique<tpch::LanceWriter>(filepath);
+        auto w = std::make_unique<tpch::LanceWriter>(filepath);
+        if (zero_copy) {
+            w->enable_streaming_write(true);
+        }
+        return w;
     }
 #endif
     throw std::invalid_argument("Unknown format: " + format);
@@ -350,17 +365,18 @@ int main(int argc, char* argv[]) {
 
     if (opts.verbose) {
         fprintf(stderr,
-            "tpcds_benchmark: table=%s  format=%s  SF=%ld  max_rows=%ld\n"
+            "tpcds_benchmark: table=%s  format=%s  SF=%ld  max_rows=%ld  zero_copy=%s\n"
             "  output: %s\n",
             opts.table.c_str(), opts.format.c_str(),
             opts.scale_factor, opts.max_rows,
+            opts.zero_copy ? "yes" : "no",
             filepath.c_str());
     }
 
     // Create writer
     std::unique_ptr<tpch::WriterInterface> writer;
     try {
-        writer = create_writer(opts.format, filepath, opts.compression);
+        writer = create_writer(opts.format, filepath, opts.compression, opts.zero_copy);
     } catch (const std::exception& e) {
         fprintf(stderr, "tpcds_benchmark: failed to create writer: %s\n", e.what());
         return 1;
