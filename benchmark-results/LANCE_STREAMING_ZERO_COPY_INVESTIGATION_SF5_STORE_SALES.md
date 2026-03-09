@@ -182,6 +182,43 @@ Updated recommendation:
 
 For single-table TPC-DS generation, keep synchronous zero-copy as the default path; treat async as experimental/optional.
 
+## Async RSS Floor Isolation (Next Step)
+
+Goal:
+
+Identify whether the async RSS floor is caused by C++ queue buffering or Rust/Lance-side processing.
+
+Method:
+
+`store_sales`, SF=5, `--format lance --zero-copy` with Rust memory profiling:
+
+- `--lance-mem-profile --lance-mem-every 100`
+
+Runs (`/tmp/tpcds_mem_isolation_store_sales_sf5.log`):
+
+1. `sync_profile`: `--zero-copy-mode sync`
+2. `async_profile_default`: `--zero-copy-mode async --lance-stream-queue 4 --lance-sg-batches 1 --lance-sg-queue-chunks 4`
+3. `async_profile_lowq`: `--zero-copy-mode async --lance-stream-queue 1 --lance-sg-batches 1 --lance-sg-queue-chunks 1`
+
+Results:
+
+| case | elapsed | rate | max RSS | C++ queue peak | Rust reader max RSS | Rust RSS after execute |
+|---|---:|---:|---:|---:|---:|---:|
+| sync_profile | 22.95s | 628,064 r/s | 103,152 KB | n/a | n/a | n/a |
+| async_profile_default | 21.14s | 681,483 r/s | 869,800 KB | 5.625 MB | 855,976 KB | 817,292 KB |
+| async_profile_lowq | 21.09s | 683,142 r/s | 850,112 KB | 1.406 MB | 822,592 KB | 791,656 KB |
+
+Interpretation:
+
+1. Shrinking C++ queue memory by `~4.2 MB` changed total RSS only by `~19.7 MB`.
+2. Async run RSS is dominated by Rust/Lance-side memory during stream execution (`reader_next` stage reaching `~823–856 MB`).
+3. `reader_input_bytes == reader_rewrap_bytes` in both async runs, confirming schema rewrap itself is not duplicating payload size.
+4. SG queue bytes were zero in this test (`sg=1`), so scatter/gather queue buffering is not the source here.
+
+Conclusion:
+
+The async memory floor is primarily inside Lance async stream execution (Tokio worker + Lance encode/accumulation), not in the C++ producer queue. Queue-depth tuning alone cannot close the gap to sync memory.
+
 ## Post-Implementation Sanity Check (SF=5 store_sales)
 
 `--format lance --table store_sales --scale-factor 5 --max-rows 0 --zero-copy`
