@@ -219,6 +219,29 @@ Conclusion:
 
 The async memory floor is primarily inside Lance async stream execution (Tokio worker + Lance encode/accumulation), not in the C++ producer queue. Queue-depth tuning alone cannot close the gap to sync memory.
 
+## Deeper Lance-Side Live-Memory Instrumentation
+
+Implemented additional Rust-side estimator:
+
+- `internal_live_est_kb = rss_kb - current_batch_bytes - sg_queue_current_bytes`
+- tracked peak as `max_internal_live_est_bytes`
+
+This instrumentation is emitted in:
+
+1. per-batch memory logs (`reader_next` / `sg_reader_next`)
+2. final copy summary (`Lance FFI copy: ... max_internal_live_est_bytes=...`)
+
+Sample run (SF=5, `store_sales`, async low queue):
+
+- command: `--zero-copy --zero-copy-mode async --lance-stream-queue 1 --lance-sg-batches 1 --lance-sg-queue-chunks 1 --lance-mem-profile`
+- `MAX_RSS_KB=869324`
+- `max_internal_live_est_bytes=868282368` (~`828 MB`)
+- C++ queue peak remained only `1.40625 MB`
+
+Key point:
+
+Even after subtracting producer queue and current batch payload, estimated Lance-internal live memory still rises to ~`828 MB`, reinforcing that the dominant async memory overhead is inside Lance async execution/encoding lifecycle.
+
 ## Post-Implementation Sanity Check (SF=5 store_sales)
 
 `--format lance --table store_sales --scale-factor 5 --max-rows 0 --zero-copy`
