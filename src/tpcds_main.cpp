@@ -54,12 +54,6 @@ struct Options {
     bool        verbose      = false;
     bool        zero_copy    = false;     // streaming mode: O(batch) memory instead of O(total)
     std::string zero_copy_mode = "sync";  // sync, auto, async (lance-specific selection)
-    long        lance_stream_queue = 4;   // bounded C++ -> Rust stream queue depth
-    long        lance_max_blocking_threads = 8;
-    bool        lance_mem_profile = false;
-    long        lance_mem_profile_every = 100;
-    long        lance_sg_batches = 1;
-    long        lance_sg_queue_chunks = 4;
 };
 
 void print_usage(const char* prog) {
@@ -89,12 +83,6 @@ void print_usage(const char* prog) {
         "  --zero-copy            Streaming mode: flush each batch immediately (O(batch) RAM)\n"
         "  --zero-copy-mode <m>   Zero-copy mode for Lance: sync, auto, async (default: sync)\n"
 #ifdef TPCH_ENABLE_LANCE
-        "  --lance-stream-queue <n> Lance streaming queue depth (default: 4)\n"
-        "  --lance-max-blocking-threads <n> Cap Tokio blocking threads for Lance (default: 8)\n"
-        "  --lance-mem-profile     Enable Rust-side stage/batch RSS logging\n"
-        "  --lance-mem-every <n>   RSS log cadence in batches (default: 100)\n"
-        "  --lance-sg-batches <n>  Scatter/gather chunk size in batches (default: 1=off)\n"
-        "  --lance-sg-queue-chunks <n> Scatter/gather queue size in chunks (default: 4)\n"
 #endif
         "  --verbose              Verbose output\n"
         "  --help                 Show this help\n"
@@ -116,13 +104,7 @@ Options parse_args(int argc, char* argv[]) {
     enum {
         OPT_COMPRESSION = 1000,
         OPT_ZERO_COPY,
-        OPT_ZERO_COPY_MODE,
-        OPT_LANCE_STREAM_QUEUE,
-        OPT_LANCE_MAX_BLOCKING_THREADS,
-        OPT_LANCE_MEM_PROFILE,
-        OPT_LANCE_MEM_EVERY,
-        OPT_LANCE_SG_BATCHES,
-        OPT_LANCE_SG_QUEUE_CHUNKS
+        OPT_ZERO_COPY_MODE
     };
     static struct option long_opts[] = {
         {"format",       required_argument, nullptr, 'f'},
@@ -133,12 +115,6 @@ Options parse_args(int argc, char* argv[]) {
         {"compression",  required_argument, nullptr, OPT_COMPRESSION},
         {"zero-copy",    no_argument,       nullptr, OPT_ZERO_COPY},
         {"zero-copy-mode", required_argument, nullptr, OPT_ZERO_COPY_MODE},
-        {"lance-stream-queue", required_argument, nullptr, OPT_LANCE_STREAM_QUEUE},
-        {"lance-max-blocking-threads", required_argument, nullptr, OPT_LANCE_MAX_BLOCKING_THREADS},
-        {"lance-mem-profile", no_argument, nullptr, OPT_LANCE_MEM_PROFILE},
-        {"lance-mem-every", required_argument, nullptr, OPT_LANCE_MEM_EVERY},
-        {"lance-sg-batches", required_argument, nullptr, OPT_LANCE_SG_BATCHES},
-        {"lance-sg-queue-chunks", required_argument, nullptr, OPT_LANCE_SG_QUEUE_CHUNKS},
         {"verbose",      no_argument,       nullptr, 'v'},
         {"help",         no_argument,       nullptr, 'h'},
         {nullptr, 0, nullptr, 0}
@@ -155,12 +131,6 @@ Options parse_args(int argc, char* argv[]) {
             case OPT_COMPRESSION: opts.compression = optarg; break;
             case OPT_ZERO_COPY: opts.zero_copy = true; break;
             case OPT_ZERO_COPY_MODE: opts.zero_copy_mode = optarg; break;
-            case OPT_LANCE_STREAM_QUEUE: opts.lance_stream_queue = std::stol(optarg); break;
-            case OPT_LANCE_MAX_BLOCKING_THREADS: opts.lance_max_blocking_threads = std::stol(optarg); break;
-            case OPT_LANCE_MEM_PROFILE: opts.lance_mem_profile = true; break;
-            case OPT_LANCE_MEM_EVERY: opts.lance_mem_profile_every = std::stol(optarg); break;
-            case OPT_LANCE_SG_BATCHES: opts.lance_sg_batches = std::stol(optarg); break;
-            case OPT_LANCE_SG_QUEUE_CHUNKS: opts.lance_sg_queue_chunks = std::stol(optarg); break;
             case 'z': opts.zero_copy    = true;   break;
             case 'v': opts.verbose      = true;   break;
             case 'h': print_usage(argv[0]); exit(0);
@@ -434,27 +404,6 @@ int main(int argc, char* argv[]) {
             filepath.c_str());
     }
 
-    if (opts.lance_stream_queue < 1) {
-        fprintf(stderr, "tpcds_benchmark: --lance-stream-queue must be >= 1\n");
-        return 1;
-    }
-    if (opts.lance_max_blocking_threads < 1) {
-        fprintf(stderr, "tpcds_benchmark: --lance-max-blocking-threads must be >= 1\n");
-        return 1;
-    }
-    if (opts.lance_mem_profile_every < 1) {
-        fprintf(stderr, "tpcds_benchmark: --lance-mem-every must be >= 1\n");
-        return 1;
-    }
-    if (opts.lance_sg_batches < 1) {
-        fprintf(stderr, "tpcds_benchmark: --lance-sg-batches must be >= 1\n");
-        return 1;
-    }
-    if (opts.lance_sg_queue_chunks < 1) {
-        fprintf(stderr, "tpcds_benchmark: --lance-sg-queue-chunks must be >= 1\n");
-        return 1;
-    }
-
     // Create writer
     std::unique_ptr<tpch::WriterInterface> writer;
     try {
@@ -472,14 +421,6 @@ int main(int argc, char* argv[]) {
 #ifdef TPCH_ENABLE_LANCE
     if (opts.format == "lance") {
         if (auto* lw = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
-            lw->set_stream_queue_depth(static_cast<size_t>(opts.lance_stream_queue));
-            lw->set_runtime_config(static_cast<int>(opts.lance_max_blocking_threads));
-            lw->set_profile_config(
-                opts.lance_mem_profile,
-                static_cast<size_t>(opts.lance_mem_profile_every));
-            lw->set_scatter_gather_config(
-                static_cast<size_t>(opts.lance_sg_batches),
-                static_cast<size_t>(opts.lance_sg_queue_chunks));
             if (opts.zero_copy && !lance_async_streaming) {
                 // bounded synchronous path to cap memory without Tokio background streaming
                 lw->set_buffered_flush_config(8, 65'536);

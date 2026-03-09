@@ -187,12 +187,13 @@ private:
     bool use_io_uring_ = false;
 #endif
 
-    size_t stream_queue_depth_ = 16;
+    // Winning async default from SF=5 tuning: minimal queueing.
+    size_t stream_queue_depth_ = 1;
     int stream_max_blocking_threads_ = 8;
     bool stream_mem_profile_enabled_ = false;
     size_t stream_mem_profile_every_batches_ = 100;
     size_t stream_scatter_gather_batches_ = 1;
-    size_t stream_scatter_gather_queue_chunks_ = 4;
+    size_t stream_scatter_gather_queue_chunks_ = 1;
     size_t buffered_flush_batch_threshold_ = 200;
     size_t buffered_flush_row_threshold_ = 1'000'000;
     std::shared_ptr<StreamState> stream_state_;
