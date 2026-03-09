@@ -295,6 +295,14 @@ void LanceWriter::initialize_lance_dataset(
         throw std::runtime_error("Failed to configure Lance scatter/gather parameters");
     }
 
+    int buffered_cfg_result = lance_writer_set_buffered_flush_config(
+        reinterpret_cast<::LanceWriter*>(rust_writer_),
+        static_cast<int>(buffered_flush_batch_threshold_),
+        static_cast<int>(buffered_flush_row_threshold_));
+    if (buffered_cfg_result != 0) {
+        throw std::runtime_error("Failed to configure Lance buffered flush parameters");
+    }
+
     if (streaming_enabled_) {
         auto state = std::make_shared<StreamState>(stream_queue_depth_);
         auto reader = std::make_shared<StreamRecordBatchReader>(schema_, state);

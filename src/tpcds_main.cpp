@@ -16,8 +16,7 @@
 #include <memory>
 #include <string>
 #include <chrono>
-#include <cmath>
-#include <array>
+#include <cctype>
 #include <getopt.h>
 #include <sys/stat.h>
 
@@ -29,11 +28,6 @@
 #include "tpch/parquet_writer.hpp"
 #include "tpch/dsdgen_wrapper.hpp"
 #include "tpch/dsdgen_converter.hpp"
-#include "tpch/dsdgen_col_idx.hpp"
-
-extern "C" {
-#include "tpcds_dsdgen.h"
-}
 
 #ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
@@ -59,6 +53,7 @@ struct Options {
     std::string compression  = "snappy";  // snappy, lz4, zstd, none
     bool        verbose      = false;
     bool        zero_copy    = false;     // streaming mode: O(batch) memory instead of O(total)
+    std::string zero_copy_mode = "auto";  // auto, sync, async (lance-specific selection)
     long        lance_stream_queue = 4;   // bounded C++ -> Rust stream queue depth
     long        lance_max_blocking_threads = 8;
     bool        lance_mem_profile = false;
@@ -92,6 +87,7 @@ void print_usage(const char* prog) {
         "  --max-rows <n>         Max rows to generate (0=all, default: 1000)\n"
         "  --compression <c>      Parquet compression: snappy (default), zstd, none\n"
         "  --zero-copy            Streaming mode: flush each batch immediately (O(batch) RAM)\n"
+        "  --zero-copy-mode <m>   Zero-copy mode for Lance: auto, sync, async (default: auto)\n"
 #ifdef TPCH_ENABLE_LANCE
         "  --lance-stream-queue <n> Lance streaming queue depth (default: 4)\n"
         "  --lance-max-blocking-threads <n> Cap Tokio blocking threads for Lance (default: 8)\n"
@@ -120,6 +116,7 @@ Options parse_args(int argc, char* argv[]) {
     enum {
         OPT_COMPRESSION = 1000,
         OPT_ZERO_COPY,
+        OPT_ZERO_COPY_MODE,
         OPT_LANCE_STREAM_QUEUE,
         OPT_LANCE_MAX_BLOCKING_THREADS,
         OPT_LANCE_MEM_PROFILE,
@@ -135,6 +132,7 @@ Options parse_args(int argc, char* argv[]) {
         {"max-rows",     required_argument, nullptr, 'm'},
         {"compression",  required_argument, nullptr, OPT_COMPRESSION},
         {"zero-copy",    no_argument,       nullptr, OPT_ZERO_COPY},
+        {"zero-copy-mode", required_argument, nullptr, OPT_ZERO_COPY_MODE},
         {"lance-stream-queue", required_argument, nullptr, OPT_LANCE_STREAM_QUEUE},
         {"lance-max-blocking-threads", required_argument, nullptr, OPT_LANCE_MAX_BLOCKING_THREADS},
         {"lance-mem-profile", no_argument, nullptr, OPT_LANCE_MEM_PROFILE},
@@ -156,6 +154,7 @@ Options parse_args(int argc, char* argv[]) {
             case 'm': opts.max_rows     = std::stol(optarg); break;
             case OPT_COMPRESSION: opts.compression = optarg; break;
             case OPT_ZERO_COPY: opts.zero_copy = true; break;
+            case OPT_ZERO_COPY_MODE: opts.zero_copy_mode = optarg; break;
             case OPT_LANCE_STREAM_QUEUE: opts.lance_stream_queue = std::stol(optarg); break;
             case OPT_LANCE_MAX_BLOCKING_THREADS: opts.lance_max_blocking_threads = std::stol(optarg); break;
             case OPT_LANCE_MEM_PROFILE: opts.lance_mem_profile = true; break;
@@ -171,6 +170,13 @@ Options parse_args(int argc, char* argv[]) {
     return opts;
 }
 
+std::string normalize_zero_copy_mode(std::string mode) {
+    for (char& c : mode) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return mode;
+}
+
 // Create writer for the given format and output path.
 // When zero_copy=true, enables streaming write mode: each batch is flushed
 // immediately to disk, capping RAM usage at O(batch_size) instead of O(total_rows).
@@ -178,7 +184,8 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
     const std::string& format,
     const std::string& filepath,
     const std::string& compression,
-    bool zero_copy = false)
+    bool zero_copy = false,
+    bool lance_async_streaming = false)
 {
     if (format == "csv") {
         return std::make_unique<tpch::CSVWriter>(filepath);
@@ -208,7 +215,7 @@ std::unique_ptr<tpch::WriterInterface> create_writer(
 #ifdef TPCH_ENABLE_LANCE
     else if (format == "lance") {
         auto w = std::make_unique<tpch::LanceWriter>(filepath);
-        if (zero_copy) {
+        if (zero_copy && lance_async_streaming) {
             w->enable_streaming_write(true);
         }
         return w;
@@ -291,123 +298,6 @@ finish_batch(
 
 void reset_builders(tpcds::BuilderMap& builders) {
     for (auto& b : builders) { b->Reset(); }
-}
-
-inline double dec_to_double_local(const decimal_t* d) {
-    if (!d) return 0.0;
-    if (d->precision == 0) return static_cast<double>(d->number);
-    double result = static_cast<double>(d->number);
-    for (int i = 0; i < d->precision; ++i) {
-        result /= 10.0;
-    }
-    return result;
-}
-
-struct StoreSalesBatchBuffers {
-    std::array<std::shared_ptr<arrow::Buffer>, 10> i64;
-    std::array<std::shared_ptr<arrow::Buffer>, 1> i32;
-    std::array<std::shared_ptr<arrow::Buffer>, 12> f64;
-    std::array<int64_t*, 10> i64_ptr{};
-    std::array<int32_t*, 1> i32_ptr{};
-    std::array<double*, 12> f64_ptr{};
-};
-
-StoreSalesBatchBuffers allocate_store_sales_batch_buffers(size_t rows_capacity) {
-    StoreSalesBatchBuffers b;
-    for (size_t i = 0; i < b.i64.size(); ++i) {
-        auto res = arrow::AllocateBuffer(static_cast<int64_t>(rows_capacity * sizeof(int64_t)));
-        if (!res.ok()) throw std::runtime_error("store_sales int64 buffer alloc failed: " + res.status().ToString());
-        std::unique_ptr<arrow::Buffer> up = std::move(res).ValueOrDie();
-        b.i64[i] = std::shared_ptr<arrow::Buffer>(std::move(up));
-        b.i64_ptr[i] = reinterpret_cast<int64_t*>(b.i64[i]->mutable_data());
-    }
-    for (size_t i = 0; i < b.i32.size(); ++i) {
-        auto res = arrow::AllocateBuffer(static_cast<int64_t>(rows_capacity * sizeof(int32_t)));
-        if (!res.ok()) throw std::runtime_error("store_sales int32 buffer alloc failed: " + res.status().ToString());
-        std::unique_ptr<arrow::Buffer> up = std::move(res).ValueOrDie();
-        b.i32[i] = std::shared_ptr<arrow::Buffer>(std::move(up));
-        b.i32_ptr[i] = reinterpret_cast<int32_t*>(b.i32[i]->mutable_data());
-    }
-    for (size_t i = 0; i < b.f64.size(); ++i) {
-        auto res = arrow::AllocateBuffer(static_cast<int64_t>(rows_capacity * sizeof(double)));
-        if (!res.ok()) throw std::runtime_error("store_sales double buffer alloc failed: " + res.status().ToString());
-        std::unique_ptr<arrow::Buffer> up = std::move(res).ValueOrDie();
-        b.f64[i] = std::shared_ptr<arrow::Buffer>(std::move(up));
-        b.f64_ptr[i] = reinterpret_cast<double*>(b.f64[i]->mutable_data());
-    }
-    return b;
-}
-
-size_t run_store_sales_column_batched(
-    const Options& opts,
-    std::shared_ptr<arrow::Schema> schema,
-    std::unique_ptr<tpch::WriterInterface>& writer,
-    tpcds::DSDGenWrapper& dsdgen)
-{
-    const size_t batch_size = 8192;
-    size_t rows_in_batch = 0;
-    size_t total_rows = 0;
-    StoreSalesBatchBuffers buffers = allocate_store_sales_batch_buffers(batch_size);
-
-    auto flush_batch = [&]() {
-        if (rows_in_batch == 0) {
-            return;
-        }
-        std::vector<std::shared_ptr<arrow::Array>> arrays;
-        arrays.reserve(23);
-        for (const auto& buf : buffers.i64) {
-            arrays.push_back(std::make_shared<arrow::Int64Array>(static_cast<int64_t>(rows_in_batch), buf));
-        }
-        arrays.push_back(std::make_shared<arrow::Int32Array>(static_cast<int64_t>(rows_in_batch), buffers.i32[0]));
-        for (const auto& buf : buffers.f64) {
-            arrays.push_back(std::make_shared<arrow::DoubleArray>(static_cast<int64_t>(rows_in_batch), buf));
-        }
-        writer->write_batch(arrow::RecordBatch::Make(schema, static_cast<int64_t>(rows_in_batch), arrays));
-        rows_in_batch = 0;
-        buffers = allocate_store_sales_batch_buffers(batch_size);
-    };
-
-    dsdgen.generate_store_sales([&](const void* row) {
-        auto* r = static_cast<const W_STORE_SALES_TBL*>(row);
-        const ds_pricing_t* p = &r->ss_pricing;
-
-        const size_t idx = rows_in_batch;
-        buffers.i64_ptr[0][idx] = static_cast<int64_t>(r->ss_sold_date_sk);
-        buffers.i64_ptr[1][idx] = static_cast<int64_t>(r->ss_sold_time_sk);
-        buffers.i64_ptr[2][idx] = static_cast<int64_t>(r->ss_sold_item_sk);
-        buffers.i64_ptr[3][idx] = static_cast<int64_t>(r->ss_sold_customer_sk);
-        buffers.i64_ptr[4][idx] = static_cast<int64_t>(r->ss_sold_cdemo_sk);
-        buffers.i64_ptr[5][idx] = static_cast<int64_t>(r->ss_sold_hdemo_sk);
-        buffers.i64_ptr[6][idx] = static_cast<int64_t>(r->ss_sold_addr_sk);
-        buffers.i64_ptr[7][idx] = static_cast<int64_t>(r->ss_sold_store_sk);
-        buffers.i64_ptr[8][idx] = static_cast<int64_t>(r->ss_sold_promo_sk);
-        buffers.i64_ptr[9][idx] = static_cast<int64_t>(r->ss_ticket_number);
-        buffers.i32_ptr[0][idx] = static_cast<int32_t>(p->quantity);
-        buffers.f64_ptr[0][idx] = dec_to_double_local(&p->wholesale_cost);
-        buffers.f64_ptr[1][idx] = dec_to_double_local(&p->list_price);
-        buffers.f64_ptr[2][idx] = dec_to_double_local(&p->sales_price);
-        buffers.f64_ptr[3][idx] = dec_to_double_local(&p->ext_discount_amt);
-        buffers.f64_ptr[4][idx] = dec_to_double_local(&p->ext_sales_price);
-        buffers.f64_ptr[5][idx] = dec_to_double_local(&p->ext_wholesale_cost);
-        buffers.f64_ptr[6][idx] = dec_to_double_local(&p->ext_list_price);
-        buffers.f64_ptr[7][idx] = dec_to_double_local(&p->ext_tax);
-        buffers.f64_ptr[8][idx] = dec_to_double_local(&p->coupon_amt);
-        buffers.f64_ptr[9][idx] = dec_to_double_local(&p->net_paid);
-        buffers.f64_ptr[10][idx] = dec_to_double_local(&p->net_paid_inc_tax);
-        buffers.f64_ptr[11][idx] = dec_to_double_local(&p->net_profit);
-
-        ++rows_in_batch;
-        ++total_rows;
-        if (rows_in_batch >= batch_size) {
-            flush_batch();
-            if (opts.verbose && (total_rows % 100000 == 0)) {
-                fprintf(stderr, "  Generated %zu rows...\n", total_rows);
-            }
-        }
-    }, opts.max_rows);
-
-    flush_batch();
-    return total_rows;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +401,11 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "Error parsing arguments: %s\n", e.what());
         return 1;
     }
+    opts.zero_copy_mode = normalize_zero_copy_mode(opts.zero_copy_mode);
+    if (opts.zero_copy_mode != "auto" && opts.zero_copy_mode != "sync" && opts.zero_copy_mode != "async") {
+        fprintf(stderr, "tpcds_benchmark: --zero-copy-mode must be one of: auto, sync, async\n");
+        return 1;
+    }
 
     // Resolve table
     tpcds::TableType table_type;
@@ -524,13 +419,18 @@ int main(int argc, char* argv[]) {
     // Build output path
     std::string filepath = opts.output_dir + "/" + opts.table + file_extension(opts.format);
 
+    // single-table tpcds_benchmark: prefer synchronous bounded path by default
+    bool lance_async_streaming =
+        (opts.format == "lance" && opts.zero_copy && opts.zero_copy_mode == "async");
+
     if (opts.verbose) {
         fprintf(stderr,
-            "tpcds_benchmark: table=%s  format=%s  SF=%ld  max_rows=%ld  zero_copy=%s\n"
+            "tpcds_benchmark: table=%s  format=%s  SF=%ld  max_rows=%ld  zero_copy=%s mode=%s\n"
             "  output: %s\n",
             opts.table.c_str(), opts.format.c_str(),
             opts.scale_factor, opts.max_rows,
             opts.zero_copy ? "yes" : "no",
+            opts.zero_copy_mode.c_str(),
             filepath.c_str());
     }
 
@@ -558,7 +458,12 @@ int main(int argc, char* argv[]) {
     // Create writer
     std::unique_ptr<tpch::WriterInterface> writer;
     try {
-        writer = create_writer(opts.format, filepath, opts.compression, opts.zero_copy);
+        writer = create_writer(
+            opts.format,
+            filepath,
+            opts.compression,
+            opts.zero_copy,
+            lance_async_streaming);
     } catch (const std::exception& e) {
         fprintf(stderr, "tpcds_benchmark: failed to create writer: %s\n", e.what());
         return 1;
@@ -575,6 +480,10 @@ int main(int argc, char* argv[]) {
             lw->set_scatter_gather_config(
                 static_cast<size_t>(opts.lance_sg_batches),
                 static_cast<size_t>(opts.lance_sg_queue_chunks));
+            if (opts.zero_copy && !lance_async_streaming) {
+                // bounded synchronous path to cap memory without Tokio background streaming
+                lw->set_buffered_flush_config(8, 65'536);
+            }
         }
     }
 #endif
@@ -591,7 +500,8 @@ int main(int argc, char* argv[]) {
     size_t actual_rows = 0;
     try {
         if (table_type == tpcds::TableType::StoreSales) {
-            actual_rows = run_store_sales_column_batched(opts, schema, writer, dsdgen);
+            actual_rows = run_generation(opts, schema, writer,
+                [&](auto cb) { dsdgen.generate_store_sales(cb, opts.max_rows); });
         } else if (table_type == tpcds::TableType::Inventory) {
             actual_rows = run_generation(opts, schema, writer,
                 [&](auto cb) { dsdgen.generate_inventory(cb, opts.max_rows); });

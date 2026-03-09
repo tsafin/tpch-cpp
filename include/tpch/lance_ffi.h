@@ -117,6 +117,20 @@ int lance_writer_set_scatter_gather_config(
     int queue_chunks);
 
 /**
+ * Configure buffered backend flush thresholds.
+ * Must be called before writes begin.
+ *
+ * @param writer Pointer to LanceWriter from lance_writer_create()
+ * @param batch_threshold Flush when buffered batch count reaches this value (>0)
+ * @param row_threshold Flush when buffered row count reaches this value (>0)
+ * @return 0 on success, non-zero on failure
+ */
+int lance_writer_set_buffered_flush_config(
+    LanceWriter* writer,
+    int batch_threshold,
+    int row_threshold);
+
+/**
  * Enable or disable the io_uring write path for this writer.
  * Must be called before writing the first batch.
  * Only available when building lance_ffi from source with the io-uring
