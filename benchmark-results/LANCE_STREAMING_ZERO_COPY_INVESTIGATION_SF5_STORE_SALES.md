@@ -66,28 +66,37 @@ Kept:
 The dominant copy hotspot is still inside Rust/Lance processing path (Tokio worker), not in the C++ row-builder layer.  
 Scatter/gather is useful as a throughput/stall tuning lever, but not a direct fix for Tokio memmove overhead.
 
-## SF=5 Re-evaluation Across 3 Largest Tables
+## SF=5 Re-evaluation Across 3 Largest TPC-DS Tables
 
-Additional profiling was run for:
+Tables:
 
-1. `inventory`
-2. `store_sales`
-3. `catalog_sales`
+1. `store_sales` (`14,400,052` rows)
+2. `catalog_sales` (`7,199,490` rows)
+3. `web_sales` (`3,599,503` rows)
 
-with `--format lance` and both modes:
+Command shape:
 
-1. streaming (`--zero-copy`, current async/Tokio path)
-2. buffered sync (no `--zero-copy`)
+- `./tpcds_benchmark --format lance --scale-factor 5 --max-rows 0 --zero-copy --zero-copy-mode <sync|async|auto>`
 
-Observed in this run set:
+Initial sweep (`/tmp/tpcds_lance_sf5_modes.txt`):
 
-1. `--zero-copy` async was slower than sync on all three tables.
-2. `--zero-copy` async used higher RSS than sync on all three tables.
-3. Tokio worker memmove remained visible/hot in streaming mode.
+| table | sync (time, RSS) | async (time, RSS) | auto (time, RSS) |
+|---|---|---|---|
+| store_sales | 18.92s, 101,476 KB | 21.09s, 876,036 KB | 18.61s, 101,732 KB |
+| catalog_sales | 41.80s, 110,636 KB | 10.03s, 1,099,008 KB | 8.08s, 111,252 KB |
+| web_sales | 50.91s, 110,244 KB | 3.78s, 1,068,776 KB | 3.95s, 110,052 KB |
 
-Implication:
+Run-order check showed strong outliers in sync mode for `catalog_sales` and `web_sales`.
+When rerun with flipped order (`auto` then `sync`) on `web_sales`, results were close:
 
-For single-table generation, current async streaming path is not justified by either speed or memory.
+1. `auto`: 4.25s, 109,240 KB
+2. `sync`: 4.37s, 109,428 KB
+
+Conclusion from stable runs:
+
+1. `sync` and `auto` are similar for single-table generation.
+2. `async` consistently increases peak RSS by about `8x-10x`.
+3. Throughput differences are workload/noise-sensitive; memory delta is robust.
 
 ## Agreed Next Plan
 
@@ -113,6 +122,29 @@ Implemented in code:
 Still pending:
 
 1. Table-agnostic generalized columnar batching framework (clean replacement for specialized experiments).
+
+## Perf Profiling (SF=5, Lance, zero-copy)
+
+Using `~/CLAUDE.md` workflow:
+
+- `sudo perf record --no-buildid -e cpu-clock:u -g -F 99 -o /tmp/perf_*.data -- ./tpcds_benchmark ...`
+- `sudo perf report --stdio --no-children ...`
+
+Top-40 `tokio-runtime-w` share in report:
+
+| table | sync | async |
+|---|---:|---:|
+| store_sales | 0.00% | 11.87% |
+| catalog_sales | 0.00% | 12.50% |
+| web_sales | 0.40% | 12.88% |
+
+Recurring async-specific hotspots:
+
+1. `tokio-runtime-w libc.so.6 __memmove_avx_unaligned_erms`
+2. `tokio-runtime-w ...run_count::count_runs`
+3. `tokio-runtime-w ...Iterator::fold`
+
+This confirms meaningful CPU work migration into Tokio worker threads in async mode, together with much higher RSS.
 
 ## Post-Implementation Sanity Check (SF=5 store_sales)
 
