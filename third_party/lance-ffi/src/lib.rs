@@ -6,6 +6,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Instant;
 
@@ -137,6 +138,81 @@ fn current_rss_kb() -> Option<u64> {
         return value.parse::<u64>().ok();
     }
     None
+}
+
+fn estimate_batch_bytes(batch: &RecordBatch) -> u64 {
+    let mut total: u64 = 0;
+    for col in batch.columns() {
+        let data = col.to_data();
+        for buf in data.buffers() {
+            total = total.saturating_add(buf.len() as u64);
+        }
+    }
+    total
+}
+
+#[derive(Default)]
+struct StreamCopyStats {
+    reader_batches: AtomicU64,
+    reader_rows: AtomicU64,
+    reader_input_bytes: AtomicU64,
+    reader_rewrap_bytes: AtomicU64,
+    sg_queue_current_bytes: AtomicU64,
+    sg_queue_peak_bytes: AtomicU64,
+    sg_queue_enqueued_bytes: AtomicU64,
+    sg_queue_chunks: AtomicU64,
+}
+
+impl StreamCopyStats {
+    fn note_reader_batch(&self, rows: usize, input_bytes: u64, rewrap_bytes: u64) {
+        self.reader_batches.fetch_add(1, Ordering::Relaxed);
+        self.reader_rows.fetch_add(rows as u64, Ordering::Relaxed);
+        self.reader_input_bytes.fetch_add(input_bytes, Ordering::Relaxed);
+        self.reader_rewrap_bytes.fetch_add(rewrap_bytes, Ordering::Relaxed);
+    }
+
+    fn note_sg_chunk_enqueued(&self, chunk_bytes: u64) {
+        self.sg_queue_enqueued_bytes.fetch_add(chunk_bytes, Ordering::Relaxed);
+        self.sg_queue_chunks.fetch_add(1, Ordering::Relaxed);
+        let cur = self
+            .sg_queue_current_bytes
+            .fetch_add(chunk_bytes, Ordering::Relaxed)
+            .saturating_add(chunk_bytes);
+        let mut peak = self.sg_queue_peak_bytes.load(Ordering::Relaxed);
+        while cur > peak {
+            match self.sg_queue_peak_bytes.compare_exchange_weak(
+                peak,
+                cur,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(next) => peak = next,
+            }
+        }
+    }
+
+    fn note_sg_chunk_dequeued(&self, chunk_bytes: u64) {
+        let _ = self.sg_queue_current_bytes.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |cur| Some(cur.saturating_sub(chunk_bytes)),
+        );
+    }
+
+    fn log_summary(&self) {
+        eprintln!(
+            "Lance FFI copy: reader_batches={} reader_rows={} reader_input_bytes={} reader_rewrap_bytes={} sg_queue_enqueued_bytes={} sg_queue_chunks={} sg_queue_peak_bytes={} sg_queue_current_bytes={}",
+            self.reader_batches.load(Ordering::Relaxed),
+            self.reader_rows.load(Ordering::Relaxed),
+            self.reader_input_bytes.load(Ordering::Relaxed),
+            self.reader_rewrap_bytes.load(Ordering::Relaxed),
+            self.sg_queue_enqueued_bytes.load(Ordering::Relaxed),
+            self.sg_queue_chunks.load(Ordering::Relaxed),
+            self.sg_queue_peak_bytes.load(Ordering::Relaxed),
+            self.sg_queue_current_bytes.load(Ordering::Relaxed),
+        );
+    }
 }
 
 fn log_mem_stage(profile: ProfileConfig, stage: &str, elapsed: Option<f64>) {
@@ -332,20 +408,24 @@ impl LanceWriterHandle {
                 let reader = result.map_err(|e| format!("Failed to import ArrowArrayStream: {}", e))?;
 
                 let profile = self.profile_config;
+                let copy_stats = Arc::new(StreamCopyStats::default());
                 let source: Box<dyn RecordBatchReader + Send> = if config.scatter_gather_batches > 1 {
                     Box::new(ScatterGatherReader::spawn(
                         reader,
                         profile,
                         config.scatter_gather_batches,
                         config.scatter_gather_queue_chunks,
+                        copy_stats.clone(),
                     )?)
                 } else {
                     let compressed_schema = Arc::new(apply_compression_metadata(reader.schema().as_ref()));
-                    let compression_reader = CompressionReader::new(reader, compressed_schema, profile);
+                    let compression_reader =
+                        CompressionReader::new(reader, compressed_schema, profile, copy_stats.clone());
                     Box::new(compression_reader)
                 };
                 let uri_clone = self.uri.clone();
                 let write_params = build_write_params_from(config, WriteMode::Overwrite);
+                let copy_stats_for_task = copy_stats.clone();
 
                 eprintln!("Lance FFI: Starting streaming background task with Arrow C Stream...");
                 eprintln!(
@@ -404,6 +484,7 @@ impl LanceWriterHandle {
                         "after_commit_execute",
                         Some(commit_begin.elapsed().as_secs_f64()),
                     );
+                    copy_stats_for_task.log_summary();
                     result
                 });
 
@@ -448,15 +529,22 @@ struct CompressionReader {
     schema: Arc<Schema>,
     profile: ProfileConfig,
     batch_count: usize,
+    copy_stats: Arc<StreamCopyStats>,
 }
 
 impl CompressionReader {
-    fn new(inner: ArrowArrayStreamReader, schema: Arc<Schema>, profile: ProfileConfig) -> Self {
+    fn new(
+        inner: ArrowArrayStreamReader,
+        schema: Arc<Schema>,
+        profile: ProfileConfig,
+        copy_stats: Arc<StreamCopyStats>,
+    ) -> Self {
         Self {
             inner,
             schema,
             profile,
             batch_count: 0,
+            copy_stats,
         }
     }
 }
@@ -474,6 +562,7 @@ impl Iterator for CompressionReader {
         self.inner.next().map(|res| {
             res.and_then(|batch| {
                 self.batch_count += 1;
+                let input_bytes = estimate_batch_bytes(&batch);
                 if self.profile.enable_mem_profile
                     && (self.batch_count <= 3
                         || self.batch_count % self.profile.report_every_batches == 0)
@@ -486,14 +575,18 @@ impl Iterator for CompressionReader {
                         rss
                     );
                 }
-                RecordBatch::try_new(self.schema.clone(), batch.columns().to_vec())
+                let out = RecordBatch::try_new(self.schema.clone(), batch.columns().to_vec())?;
+                let rewrap_bytes = estimate_batch_bytes(&out);
+                self.copy_stats
+                    .note_reader_batch(out.num_rows(), input_bytes, rewrap_bytes);
+                Ok(out)
             })
         })
     }
 }
 
 enum ScatterGatherMsg {
-    Chunk(Vec<RecordBatch>),
+    Chunk { batches: Vec<RecordBatch>, chunk_bytes: u64 },
     End,
     Err(String),
 }
@@ -503,6 +596,7 @@ struct ScatterGatherReader {
     rx: Receiver<ScatterGatherMsg>,
     current_chunk: Vec<RecordBatch>,
     chunk_idx: usize,
+    copy_stats: Arc<StreamCopyStats>,
 }
 
 impl ScatterGatherReader {
@@ -511,19 +605,23 @@ impl ScatterGatherReader {
         profile: ProfileConfig,
         batches_per_chunk: usize,
         queue_chunks: usize,
+        copy_stats: Arc<StreamCopyStats>,
     ) -> Result<Self, String> {
         let schema = Arc::new(apply_compression_metadata(inner.schema().as_ref()));
         let (tx, rx) = sync_channel::<ScatterGatherMsg>(queue_chunks.max(1));
         let out_schema = schema.clone();
         let chunk_size = batches_per_chunk.max(1);
+        let stats = copy_stats.clone();
 
         thread::spawn(move || {
             let mut chunk = Vec::with_capacity(chunk_size);
+            let mut chunk_bytes: u64 = 0;
             let mut seen_batches: usize = 0;
             loop {
                 let next = inner.next();
                 match next {
                     Some(Ok(batch)) => {
+                        let input_bytes = estimate_batch_bytes(&batch);
                         let out_batch = match RecordBatch::try_new(out_schema.clone(), batch.columns().to_vec()) {
                             Ok(b) => b,
                             Err(e) => {
@@ -534,6 +632,8 @@ impl ScatterGatherReader {
                                 return;
                             }
                         };
+                        let out_bytes = estimate_batch_bytes(&out_batch);
+                        stats.note_reader_batch(out_batch.num_rows(), input_bytes, out_bytes);
                         seen_batches += 1;
                         if profile.enable_mem_profile
                             && (seen_batches <= 3
@@ -547,11 +647,21 @@ impl ScatterGatherReader {
                                 rss
                             );
                         }
+                        chunk_bytes = chunk_bytes.saturating_add(out_bytes);
                         chunk.push(out_batch);
                         if chunk.len() >= chunk_size {
-                            if tx.send(ScatterGatherMsg::Chunk(std::mem::take(&mut chunk))).is_err() {
+                            let send_bytes = chunk_bytes;
+                            if tx
+                                .send(ScatterGatherMsg::Chunk {
+                                    batches: std::mem::take(&mut chunk),
+                                    chunk_bytes: send_bytes,
+                                })
+                                .is_err()
+                            {
                                 return;
                             }
+                            stats.note_sg_chunk_enqueued(send_bytes);
+                            chunk_bytes = 0;
                         }
                     }
                     Some(Err(e)) => {
@@ -560,7 +670,16 @@ impl ScatterGatherReader {
                     }
                     None => {
                         if !chunk.is_empty() {
-                            let _ = tx.send(ScatterGatherMsg::Chunk(chunk));
+                            let send_bytes = chunk_bytes;
+                            if tx
+                                .send(ScatterGatherMsg::Chunk {
+                                    batches: chunk,
+                                    chunk_bytes: send_bytes,
+                                })
+                                .is_ok()
+                            {
+                                stats.note_sg_chunk_enqueued(send_bytes);
+                            }
                         }
                         let _ = tx.send(ScatterGatherMsg::End);
                         return;
@@ -574,6 +693,7 @@ impl ScatterGatherReader {
             rx,
             current_chunk: Vec::new(),
             chunk_idx: 0,
+            copy_stats,
         })
     }
 }
@@ -597,8 +717,9 @@ impl Iterator for ScatterGatherReader {
         self.chunk_idx = 0;
 
         match self.rx.recv() {
-            Ok(ScatterGatherMsg::Chunk(chunk)) => {
-                self.current_chunk = chunk;
+            Ok(ScatterGatherMsg::Chunk { batches, chunk_bytes }) => {
+                self.copy_stats.note_sg_chunk_dequeued(chunk_bytes);
+                self.current_chunk = batches;
                 if self.current_chunk.is_empty() {
                     return self.next();
                 }

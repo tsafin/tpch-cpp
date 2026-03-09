@@ -53,7 +53,7 @@ struct Options {
     std::string compression  = "snappy";  // snappy, lz4, zstd, none
     bool        verbose      = false;
     bool        zero_copy    = false;     // streaming mode: O(batch) memory instead of O(total)
-    std::string zero_copy_mode = "auto";  // auto, sync, async (lance-specific selection)
+    std::string zero_copy_mode = "sync";  // sync, auto, async (lance-specific selection)
     long        lance_stream_queue = 4;   // bounded C++ -> Rust stream queue depth
     long        lance_max_blocking_threads = 8;
     bool        lance_mem_profile = false;
@@ -87,7 +87,7 @@ void print_usage(const char* prog) {
         "  --max-rows <n>         Max rows to generate (0=all, default: 1000)\n"
         "  --compression <c>      Parquet compression: snappy (default), zstd, none\n"
         "  --zero-copy            Streaming mode: flush each batch immediately (O(batch) RAM)\n"
-        "  --zero-copy-mode <m>   Zero-copy mode for Lance: auto, sync, async (default: auto)\n"
+        "  --zero-copy-mode <m>   Zero-copy mode for Lance: sync, auto, async (default: sync)\n"
 #ifdef TPCH_ENABLE_LANCE
         "  --lance-stream-queue <n> Lance streaming queue depth (default: 4)\n"
         "  --lance-max-blocking-threads <n> Cap Tokio blocking threads for Lance (default: 8)\n"
@@ -419,7 +419,7 @@ int main(int argc, char* argv[]) {
     // Build output path
     std::string filepath = opts.output_dir + "/" + opts.table + file_extension(opts.format);
 
-    // single-table tpcds_benchmark: prefer synchronous bounded path by default
+    // single-table tpcds_benchmark: synchronous bounded path is default.
     bool lance_async_streaming =
         (opts.format == "lance" && opts.zero_copy && opts.zero_copy_mode == "async");
 
