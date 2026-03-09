@@ -161,6 +161,8 @@ struct StreamCopyStats {
     sg_queue_peak_bytes: AtomicU64,
     sg_queue_enqueued_bytes: AtomicU64,
     sg_queue_chunks: AtomicU64,
+    last_batch_bytes: AtomicU64,
+    max_internal_live_est_bytes: AtomicU64,
 }
 
 impl StreamCopyStats {
@@ -169,6 +171,7 @@ impl StreamCopyStats {
         self.reader_rows.fetch_add(rows as u64, Ordering::Relaxed);
         self.reader_input_bytes.fetch_add(input_bytes, Ordering::Relaxed);
         self.reader_rewrap_bytes.fetch_add(rewrap_bytes, Ordering::Relaxed);
+        self.last_batch_bytes.store(rewrap_bytes, Ordering::Relaxed);
     }
 
     fn note_sg_chunk_enqueued(&self, chunk_bytes: u64) {
@@ -200,9 +203,32 @@ impl StreamCopyStats {
         );
     }
 
+    fn estimate_internal_live_bytes(&self, rss_kb: u64) -> u64 {
+        let rss_bytes = rss_kb.saturating_mul(1024);
+        let queue_bytes = self.sg_queue_current_bytes.load(Ordering::Relaxed);
+        let batch_bytes = self.last_batch_bytes.load(Ordering::Relaxed);
+        rss_bytes.saturating_sub(queue_bytes.saturating_add(batch_bytes))
+    }
+
+    fn note_internal_estimate(&self, rss_kb: u64) {
+        let est = self.estimate_internal_live_bytes(rss_kb);
+        let mut peak = self.max_internal_live_est_bytes.load(Ordering::Relaxed);
+        while est > peak {
+            match self.max_internal_live_est_bytes.compare_exchange_weak(
+                peak,
+                est,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(next) => peak = next,
+            }
+        }
+    }
+
     fn log_summary(&self) {
         eprintln!(
-            "Lance FFI copy: reader_batches={} reader_rows={} reader_input_bytes={} reader_rewrap_bytes={} sg_queue_enqueued_bytes={} sg_queue_chunks={} sg_queue_peak_bytes={} sg_queue_current_bytes={}",
+            "Lance FFI copy: reader_batches={} reader_rows={} reader_input_bytes={} reader_rewrap_bytes={} sg_queue_enqueued_bytes={} sg_queue_chunks={} sg_queue_peak_bytes={} sg_queue_current_bytes={} max_internal_live_est_bytes={}",
             self.reader_batches.load(Ordering::Relaxed),
             self.reader_rows.load(Ordering::Relaxed),
             self.reader_input_bytes.load(Ordering::Relaxed),
@@ -211,6 +237,7 @@ impl StreamCopyStats {
             self.sg_queue_chunks.load(Ordering::Relaxed),
             self.sg_queue_peak_bytes.load(Ordering::Relaxed),
             self.sg_queue_current_bytes.load(Ordering::Relaxed),
+            self.max_internal_live_est_bytes.load(Ordering::Relaxed),
         );
     }
 }
@@ -568,11 +595,14 @@ impl Iterator for CompressionReader {
                         || self.batch_count % self.profile.report_every_batches == 0)
                 {
                     let rss = current_rss_kb().unwrap_or(0);
+                    self.copy_stats.note_internal_estimate(rss);
+                    let est = self.copy_stats.estimate_internal_live_bytes(rss);
                     eprintln!(
-                        "Lance FFI mem: stage=reader_next batch={} rows={} rss_kb={}",
+                        "Lance FFI mem: stage=reader_next batch={} rows={} rss_kb={} internal_live_est_kb={}",
                         self.batch_count,
                         batch.num_rows(),
-                        rss
+                        rss,
+                        est / 1024
                     );
                 }
                 let out = RecordBatch::try_new(self.schema.clone(), batch.columns().to_vec())?;
@@ -640,11 +670,14 @@ impl ScatterGatherReader {
                                 || seen_batches % profile.report_every_batches == 0)
                         {
                             let rss = current_rss_kb().unwrap_or(0);
+                            stats.note_internal_estimate(rss);
+                            let est = stats.estimate_internal_live_bytes(rss);
                             eprintln!(
-                                "Lance FFI mem: stage=sg_reader_next batch={} rows={} rss_kb={}",
+                                "Lance FFI mem: stage=sg_reader_next batch={} rows={} rss_kb={} internal_live_est_kb={}",
                                 seen_batches,
                                 out_batch.num_rows(),
-                                rss
+                                rss,
+                                est / 1024
                             );
                         }
                         chunk_bytes = chunk_bytes.saturating_add(out_bytes);
