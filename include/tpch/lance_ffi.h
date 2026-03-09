@@ -77,6 +77,46 @@ int lance_writer_set_write_params(
     int skip_auto_cleanup);
 
 /**
+ * Configure Tokio runtime settings for Lance streaming mode.
+ * Must be called before lance_writer_start_stream().
+ *
+ * @param writer Pointer to LanceWriter from lance_writer_create()
+ * @param max_blocking_threads 0 = keep current, >0 = cap Tokio blocking pool size
+ * @return 0 on success, non-zero on failure
+ */
+int lance_writer_set_runtime_config(
+    LanceWriter* writer,
+    int max_blocking_threads);
+
+/**
+ * Configure runtime memory profiling for Lance streaming mode.
+ * Must be called before lance_writer_start_stream().
+ *
+ * @param writer Pointer to LanceWriter from lance_writer_create()
+ * @param enable_mem_profile 1 to enable stage/batch RSS logging, 0 to disable
+ * @param report_every_batches Log every N batches when enabled (0 keeps default)
+ * @return 0 on success, non-zero on failure
+ */
+int lance_writer_set_profile_config(
+    LanceWriter* writer,
+    int enable_mem_profile,
+    int report_every_batches);
+
+/**
+ * Configure scatter/gather stream mode.
+ * Must be called before lance_writer_start_stream().
+ *
+ * @param writer Pointer to LanceWriter from lance_writer_create()
+ * @param batches_per_chunk 1 = disabled, >1 enables chunked queue handoff
+ * @param queue_chunks Bounded queue capacity in chunks
+ * @return 0 on success, non-zero on failure
+ */
+int lance_writer_set_scatter_gather_config(
+    LanceWriter* writer,
+    int batches_per_chunk,
+    int queue_chunks);
+
+/**
  * Enable or disable the io_uring write path for this writer.
  * Must be called before writing the first batch.
  * Only available when building lance_ffi from source with the io-uring

@@ -4,7 +4,10 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::Arc;
+use std::thread;
+use std::time::Instant;
 
 use arrow::ffi::{FFI_ArrowSchema, FFI_ArrowArray};
 use arrow::ffi_stream::{FFI_ArrowArrayStream, ArrowArrayStreamReader};
@@ -72,8 +75,11 @@ pub struct LanceWriterHandle {
     row_count: usize,
     closed: bool,
     runtime: Runtime,
+    use_streaming: bool,
     backend: WriterBackend,
     write_params: WriteParamsConfig,
+    runtime_config: RuntimeConfig,
+    profile_config: ProfileConfig,
 }
 
 const FLUSH_BATCH_THRESHOLD: usize = 200;
@@ -86,6 +92,64 @@ struct WriteParamsConfig {
     max_bytes_per_file: usize,
     skip_auto_cleanup: bool,
     use_io_uring: bool,
+    scatter_gather_batches: usize,
+    scatter_gather_queue_chunks: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RuntimeConfig {
+    /// Cap Tokio blocking pool size to avoid large stack reservations.
+    max_blocking_threads: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProfileConfig {
+    enable_mem_profile: bool,
+    report_every_batches: usize,
+}
+
+impl Default for ProfileConfig {
+    fn default() -> Self {
+        Self {
+            enable_mem_profile: false,
+            report_every_batches: 100,
+        }
+    }
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            max_blocking_threads: 8,
+        }
+    }
+}
+
+fn current_rss_kb() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if !line.starts_with("VmRSS:") {
+            continue;
+        }
+        let value = line.split_whitespace().nth(1)?;
+        return value.parse::<u64>().ok();
+    }
+    None
+}
+
+fn log_mem_stage(profile: ProfileConfig, stage: &str, elapsed: Option<f64>) {
+    if !profile.enable_mem_profile {
+        return;
+    }
+    let rss = current_rss_kb().unwrap_or(0);
+    if let Some(sec) = elapsed {
+        eprintln!(
+            "Lance FFI mem: stage={} rss_kb={} elapsed_s={:.6}",
+            stage, rss, sec
+        );
+    } else {
+        eprintln!("Lance FFI mem: stage={} rss_kb={}", stage, rss);
+    }
 }
 
 impl Default for WriteParamsConfig {
@@ -96,30 +160,33 @@ impl Default for WriteParamsConfig {
             max_bytes_per_file: 0,
             skip_auto_cleanup: false,
             use_io_uring: false,
+            scatter_gather_batches: 1,
+            scatter_gather_queue_chunks: 4,
         }
     }
 }
 
 impl LanceWriterHandle {
-    fn new(uri: String, use_streaming: bool) -> Result<Self, String> {
-        // Buffered path: all work happens synchronously inside block_on() calls.
-        // A single-threaded executor is sufficient and avoids thread pool overhead.
-        //
-        // Streaming path: exactly one background task runs the Lance consumer.
-        // More than 1 worker thread adds unnecessary context-switch overhead and
-        // cross-core cache coherency cost without any parallelism benefit.
-        let runtime = if use_streaming {
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .map_err(|e| format!("Failed to create Tokio runtime: {}", e))?
+    fn build_runtime(use_streaming: bool, runtime_config: RuntimeConfig) -> Result<Runtime, String> {
+        let max_blocking_threads = runtime_config.max_blocking_threads.max(1);
+        let mut builder = if use_streaming {
+            let mut b = tokio::runtime::Builder::new_multi_thread();
+            b.worker_threads(1);
+            b
         } else {
             tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| format!("Failed to create Tokio runtime: {}", e))?
         };
+
+        builder
+            .max_blocking_threads(max_blocking_threads)
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Failed to create Tokio runtime: {}", e))
+    }
+
+    fn new(uri: String, use_streaming: bool) -> Result<Self, String> {
+        let runtime_config = RuntimeConfig::default();
+        let runtime = Self::build_runtime(use_streaming, runtime_config)?;
 
         let backend = if use_streaming {
             WriterBackend::Streaming {
@@ -142,9 +209,45 @@ impl LanceWriterHandle {
             row_count: 0,
             closed: false,
             runtime,
+            use_streaming,
             backend,
             write_params: WriteParamsConfig::default(),
+            runtime_config,
+            profile_config: ProfileConfig::default(),
         })
+    }
+
+    fn set_runtime_config(&mut self, max_blocking_threads: usize) -> Result<(), String> {
+        let WriterBackend::Streaming { task } = &self.backend else {
+            return Ok(());
+        };
+        if task.is_some() {
+            return Err("Cannot change runtime config after streaming task has started".to_string());
+        }
+
+        if max_blocking_threads > 0 {
+            self.runtime_config.max_blocking_threads = max_blocking_threads;
+        }
+        self.runtime = Self::build_runtime(self.use_streaming, self.runtime_config)?;
+        Ok(())
+    }
+
+    fn set_profile_config(&mut self, enable_mem_profile: bool, report_every_batches: usize) -> Result<(), String> {
+        let WriterBackend::Streaming { task } = &self.backend else {
+            self.profile_config.enable_mem_profile = enable_mem_profile;
+            if report_every_batches > 0 {
+                self.profile_config.report_every_batches = report_every_batches;
+            }
+            return Ok(());
+        };
+        if task.is_some() {
+            return Err("Cannot change profile config after streaming task has started".to_string());
+        }
+        self.profile_config.enable_mem_profile = enable_mem_profile;
+        if report_every_batches > 0 {
+            self.profile_config.report_every_batches = report_every_batches;
+        }
+        Ok(())
     }
 
     fn import_ffi_batch(arrow_array_ptr: *mut FFI_ArrowArray, arrow_schema_ptr: *mut FFI_ArrowSchema) -> Result<RecordBatch, String> {
@@ -224,19 +327,52 @@ impl LanceWriterHandle {
                 unsafe { libc::free(stream_ptr as *mut c_void) };
                 let reader = result.map_err(|e| format!("Failed to import ArrowArrayStream: {}", e))?;
 
-                let compressed_schema = Arc::new(apply_compression_metadata(reader.schema().as_ref()));
-                let compression_reader = CompressionReader::new(reader, compressed_schema);
-                let source: Box<dyn RecordBatchReader + Send> = Box::new(compression_reader);
+                let profile = self.profile_config;
+                let source: Box<dyn RecordBatchReader + Send> = if config.scatter_gather_batches > 1 {
+                    Box::new(ScatterGatherReader::spawn(
+                        reader,
+                        profile,
+                        config.scatter_gather_batches,
+                        config.scatter_gather_queue_chunks,
+                    )?)
+                } else {
+                    let compressed_schema = Arc::new(apply_compression_metadata(reader.schema().as_ref()));
+                    let compression_reader = CompressionReader::new(reader, compressed_schema, profile);
+                    Box::new(compression_reader)
+                };
                 let uri_clone = self.uri.clone();
                 let write_params = build_write_params_from(config, WriteMode::Overwrite);
 
                 eprintln!("Lance FFI: Starting streaming background task with Arrow C Stream...");
+                eprintln!(
+                    "Lance FFI: Tokio runtime mode=multi-thread(1 worker), max_blocking_threads={}",
+                    self.runtime_config.max_blocking_threads
+                );
+                if self.profile_config.enable_mem_profile {
+                    eprintln!(
+                        "Lance FFI mem: enabled=1 report_every_batches={}",
+                        self.profile_config.report_every_batches
+                    );
+                }
+                eprintln!(
+                    "Lance FFI: scatter/gather batches_per_chunk={}, queue_chunks={}",
+                    config.scatter_gather_batches,
+                    config.scatter_gather_queue_chunks
+                );
 
                 let task_handle = self.runtime.spawn(async move {
+                    log_mem_stage(profile, "stream_task_start", None);
+                    let stream_begin = Instant::now();
+                    log_mem_stage(profile, "before_execute_uncommitted_stream", None);
                     let transaction = lance::dataset::InsertBuilder::new(&uri_clone)
                         .with_params(&write_params)
                         .execute_uncommitted_stream(source)
                         .await?;
+                    log_mem_stage(
+                        profile,
+                        "after_execute_uncommitted_stream",
+                        Some(stream_begin.elapsed().as_secs_f64()),
+                    );
 
                     let mut commit_builder = CommitBuilder::new(&uri_clone)
                         .use_stable_row_ids(write_params.enable_stable_row_ids)
@@ -256,7 +392,15 @@ impl LanceWriterHandle {
                         commit_builder = commit_builder.with_session(session);
                     }
 
-                    commit_builder.execute(transaction).await.map(|_| ())
+                    let commit_begin = Instant::now();
+                    log_mem_stage(profile, "before_commit_execute", None);
+                    let result = commit_builder.execute(transaction).await.map(|_| ());
+                    log_mem_stage(
+                        profile,
+                        "after_commit_execute",
+                        Some(commit_begin.elapsed().as_secs_f64()),
+                    );
+                    result
                 });
 
                 *task = Some(task_handle);
@@ -298,11 +442,18 @@ fn build_write_params_from(config: WriteParamsConfig, mode: WriteMode) -> WriteP
 struct CompressionReader {
     inner: ArrowArrayStreamReader,
     schema: Arc<Schema>,
+    profile: ProfileConfig,
+    batch_count: usize,
 }
 
 impl CompressionReader {
-    fn new(inner: ArrowArrayStreamReader, schema: Arc<Schema>) -> Self {
-        Self { inner, schema }
+    fn new(inner: ArrowArrayStreamReader, schema: Arc<Schema>, profile: ProfileConfig) -> Self {
+        Self {
+            inner,
+            schema,
+            profile,
+            batch_count: 0,
+        }
     }
 }
 
@@ -318,9 +469,145 @@ impl Iterator for CompressionReader {
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|res| {
             res.and_then(|batch| {
+                self.batch_count += 1;
+                if self.profile.enable_mem_profile
+                    && (self.batch_count <= 3
+                        || self.batch_count % self.profile.report_every_batches == 0)
+                {
+                    let rss = current_rss_kb().unwrap_or(0);
+                    eprintln!(
+                        "Lance FFI mem: stage=reader_next batch={} rows={} rss_kb={}",
+                        self.batch_count,
+                        batch.num_rows(),
+                        rss
+                    );
+                }
                 RecordBatch::try_new(self.schema.clone(), batch.columns().to_vec())
             })
         })
+    }
+}
+
+enum ScatterGatherMsg {
+    Chunk(Vec<RecordBatch>),
+    End,
+    Err(String),
+}
+
+struct ScatterGatherReader {
+    schema: Arc<Schema>,
+    rx: Receiver<ScatterGatherMsg>,
+    current_chunk: Vec<RecordBatch>,
+    chunk_idx: usize,
+}
+
+impl ScatterGatherReader {
+    fn spawn(
+        mut inner: ArrowArrayStreamReader,
+        profile: ProfileConfig,
+        batches_per_chunk: usize,
+        queue_chunks: usize,
+    ) -> Result<Self, String> {
+        let schema = Arc::new(apply_compression_metadata(inner.schema().as_ref()));
+        let (tx, rx) = sync_channel::<ScatterGatherMsg>(queue_chunks.max(1));
+        let out_schema = schema.clone();
+        let chunk_size = batches_per_chunk.max(1);
+
+        thread::spawn(move || {
+            let mut chunk = Vec::with_capacity(chunk_size);
+            let mut seen_batches: usize = 0;
+            loop {
+                let next = inner.next();
+                match next {
+                    Some(Ok(batch)) => {
+                        let out_batch = match RecordBatch::try_new(out_schema.clone(), batch.columns().to_vec()) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                let _ = tx.send(ScatterGatherMsg::Err(format!(
+                                    "Scatter/gather schema rewrite failed: {}",
+                                    e
+                                )));
+                                return;
+                            }
+                        };
+                        seen_batches += 1;
+                        if profile.enable_mem_profile
+                            && (seen_batches <= 3
+                                || seen_batches % profile.report_every_batches == 0)
+                        {
+                            let rss = current_rss_kb().unwrap_or(0);
+                            eprintln!(
+                                "Lance FFI mem: stage=sg_reader_next batch={} rows={} rss_kb={}",
+                                seen_batches,
+                                out_batch.num_rows(),
+                                rss
+                            );
+                        }
+                        chunk.push(out_batch);
+                        if chunk.len() >= chunk_size {
+                            if tx.send(ScatterGatherMsg::Chunk(std::mem::take(&mut chunk))).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        let _ = tx.send(ScatterGatherMsg::Err(format!("Scatter/gather reader error: {}", e)));
+                        return;
+                    }
+                    None => {
+                        if !chunk.is_empty() {
+                            let _ = tx.send(ScatterGatherMsg::Chunk(chunk));
+                        }
+                        let _ = tx.send(ScatterGatherMsg::End);
+                        return;
+                    }
+                }
+            }
+        });
+
+        Ok(Self {
+            schema,
+            rx,
+            current_chunk: Vec::new(),
+            chunk_idx: 0,
+        })
+    }
+}
+
+impl RecordBatchReader for ScatterGatherReader {
+    fn schema(&self) -> Arc<Schema> {
+        self.schema.clone()
+    }
+}
+
+impl Iterator for ScatterGatherReader {
+    type Item = std::result::Result<RecordBatch, ArrowError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.chunk_idx < self.current_chunk.len() {
+            let out = self.current_chunk[self.chunk_idx].clone();
+            self.chunk_idx += 1;
+            return Some(Ok(out));
+        }
+        self.current_chunk.clear();
+        self.chunk_idx = 0;
+
+        match self.rx.recv() {
+            Ok(ScatterGatherMsg::Chunk(chunk)) => {
+                self.current_chunk = chunk;
+                if self.current_chunk.is_empty() {
+                    return self.next();
+                }
+                let out = self.current_chunk[0].clone();
+                self.chunk_idx = 1;
+                Some(Ok(out))
+            }
+            Ok(ScatterGatherMsg::End) => None,
+            Ok(ScatterGatherMsg::Err(msg)) => Some(Err(ArrowError::ExternalError(Box::new(
+                std::io::Error::new(std::io::ErrorKind::Other, msg),
+            )))),
+            Err(_) => None,
+        }
     }
 }
 
@@ -444,6 +731,98 @@ pub extern "C" fn lance_writer_set_write_params(
         }
         writer.write_params.skip_auto_cleanup = skip_auto_cleanup != 0;
         0
+    })).unwrap_or(3)
+}
+
+/// Configure scatter/gather stream mode.
+///
+/// batches_per_chunk:
+///   1 = disabled (default)
+///   >1 = producer groups this many RecordBatches per queue chunk
+///
+/// queue_chunks:
+///   Number of chunk slots in the bounded producer/consumer queue.
+#[no_mangle]
+pub extern "C" fn lance_writer_set_scatter_gather_config(
+    writer_ptr: *mut LanceWriterHandle,
+    batches_per_chunk: c_int,
+    queue_chunks: c_int,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if writer_ptr.is_null() { return 1; }
+        let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
+        if let WriterBackend::Streaming { task } = &writer.backend {
+            if task.is_some() {
+                eprintln!("Scatter/Gather Config Error: cannot change after stream start");
+                return 5;
+            }
+        }
+        if batches_per_chunk > 0 {
+            writer.write_params.scatter_gather_batches = batches_per_chunk as usize;
+        }
+        if queue_chunks > 0 {
+            writer.write_params.scatter_gather_queue_chunks = queue_chunks as usize;
+        }
+        0
+    })).unwrap_or(3)
+}
+
+/// Configure Tokio runtime for streaming mode.
+///
+/// max_blocking_threads:
+///   0 = keep current value
+///   >0 = set blocking pool cap
+///
+/// Must be called before lance_writer_start_stream().
+#[no_mangle]
+pub extern "C" fn lance_writer_set_runtime_config(
+    writer_ptr: *mut LanceWriterHandle,
+    max_blocking_threads: c_int,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if writer_ptr.is_null() { return 1; }
+        let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
+
+        let max_threads = if max_blocking_threads > 0 {
+            max_blocking_threads as usize
+        } else {
+            0
+        };
+        match writer.set_runtime_config(max_threads) {
+            Ok(_) => 0,
+            Err(e) => {
+                eprintln!("Runtime Config Error: {}", e);
+                5
+            }
+        }
+    })).unwrap_or(3)
+}
+
+#[no_mangle]
+pub extern "C" fn lance_writer_set_profile_config(
+    writer_ptr: *mut LanceWriterHandle,
+    enable_mem_profile: c_int,
+    report_every_batches: c_int,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if writer_ptr.is_null() { return 1; }
+        let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
+
+        let every = if report_every_batches > 0 {
+            report_every_batches as usize
+        } else {
+            0
+        };
+        match writer.set_profile_config(enable_mem_profile != 0, every) {
+            Ok(_) => 0,
+            Err(e) => {
+                eprintln!("Profile Config Error: {}", e);
+                5
+            }
+        }
     })).unwrap_or(3)
 }
 

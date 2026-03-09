@@ -272,6 +272,29 @@ void LanceWriter::initialize_lance_dataset(
         }
     }
 
+    int runtime_result = lance_writer_set_runtime_config(
+        reinterpret_cast<::LanceWriter*>(rust_writer_),
+        stream_max_blocking_threads_);
+    if (runtime_result != 0) {
+        throw std::runtime_error("Failed to configure Lance runtime parameters");
+    }
+
+    int profile_result = lance_writer_set_profile_config(
+        reinterpret_cast<::LanceWriter*>(rust_writer_),
+        stream_mem_profile_enabled_ ? 1 : 0,
+        static_cast<int>(stream_mem_profile_every_batches_));
+    if (profile_result != 0) {
+        throw std::runtime_error("Failed to configure Lance profile parameters");
+    }
+
+    int sg_cfg_result = lance_writer_set_scatter_gather_config(
+        reinterpret_cast<::LanceWriter*>(rust_writer_),
+        static_cast<int>(stream_scatter_gather_batches_),
+        static_cast<int>(stream_scatter_gather_queue_chunks_));
+    if (sg_cfg_result != 0) {
+        throw std::runtime_error("Failed to configure Lance scatter/gather parameters");
+    }
+
     if (streaming_enabled_) {
         auto state = std::make_shared<StreamState>(stream_queue_depth_);
         auto reader = std::make_shared<StreamRecordBatchReader>(schema_, state);

@@ -101,6 +101,45 @@ public:
     void set_stream_queue_depth(size_t depth) { stream_queue_depth_ = depth; }
 
     /**
+     * Configure Tokio runtime settings used by Rust streaming writer.
+     *
+     * @param max_blocking_threads Cap for Tokio blocking thread pool (0 keeps default)
+     */
+    void set_runtime_config(int max_blocking_threads) {
+        if (max_blocking_threads > 0) {
+            stream_max_blocking_threads_ = max_blocking_threads;
+        }
+    }
+
+    /**
+     * Enable/disable Rust-side memory profiling logs for streaming mode.
+     *
+     * @param enabled Emit stage and per-batch RSS logs from Lance FFI
+     * @param report_every_batches Emit per-batch log every N batches
+     */
+    void set_profile_config(bool enabled, size_t report_every_batches) {
+        stream_mem_profile_enabled_ = enabled;
+        if (report_every_batches > 0) {
+            stream_mem_profile_every_batches_ = report_every_batches;
+        }
+    }
+
+    /**
+     * Configure Rust-side scatter/gather chunked stream handoff.
+     *
+     * @param batches_per_chunk 1 disables, >1 enables chunking
+     * @param queue_chunks Bounded queue size in chunks
+     */
+    void set_scatter_gather_config(size_t batches_per_chunk, size_t queue_chunks) {
+        if (batches_per_chunk > 0) {
+            stream_scatter_gather_batches_ = batches_per_chunk;
+        }
+        if (queue_chunks > 0) {
+            stream_scatter_gather_queue_chunks_ = queue_chunks;
+        }
+    }
+
+    /**
      * Enable io_uring write path (Linux only, requires io-uring feature compiled in).
      * Must be called before the first batch is written.
      */
@@ -137,6 +176,11 @@ private:
 #endif
 
     size_t stream_queue_depth_ = 16;
+    int stream_max_blocking_threads_ = 8;
+    bool stream_mem_profile_enabled_ = false;
+    size_t stream_mem_profile_every_batches_ = 100;
+    size_t stream_scatter_gather_batches_ = 1;
+    size_t stream_scatter_gather_queue_chunks_ = 4;
     std::shared_ptr<StreamState> stream_state_;
     std::shared_ptr<StreamRecordBatchReader> stream_reader_;
 
