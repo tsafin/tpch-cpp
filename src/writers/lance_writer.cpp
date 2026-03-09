@@ -526,6 +526,13 @@ void LanceWriter::close() {
             double stall_ms = static_cast<double>(stats.first) / 1e6;
             std::cout << "Lance: Stream stalls " << stats.second << " times, "
                       << stall_ms << " ms total\n";
+            double peak_mb = static_cast<double>(stream_state_->peak_bytes()) / (1024.0 * 1024.0);
+            std::cout << "Lance Copy Profile: mode=async"
+                      << " cxx_to_rust_bytes=" << total_byte_count_
+                      << " cxx_queue_peak_mb=" << peak_mb << "\n";
+        } else {
+            std::cout << "Lance Copy Profile: mode=sync"
+                      << " cxx_to_rust_bytes=" << total_byte_count_ << "\n";
         }
 
         std::cout << "Lance dataset finalized: " << dataset_path_ << "\n"

@@ -118,6 +118,10 @@ Implemented in code:
    - `async` keeps Tokio background streaming mode
 3. New bounded buffered flush configuration in Rust FFI (for sync mode memory capping).
 4. Removed `store_sales`-specific column-buffer hack path and switched `store_sales` back to generic generation flow for consistency.
+5. `tpcds_benchmark` default `--zero-copy-mode` changed to `sync` for single-table Lance generation.
+6. Added explicit copy telemetry at close:
+   - C++ side: `Lance Copy Profile: mode=<sync|async> cxx_to_rust_bytes=...` and async queue peak MB
+   - Rust side: `Lance FFI copy: reader_batches/rows/input_bytes/rewrap_bytes + SG queue bytes/chunks/peak`
 
 Still pending:
 
@@ -145,6 +149,38 @@ Recurring async-specific hotspots:
 3. `tokio-runtime-w ...Iterator::fold`
 
 This confirms meaningful CPU work migration into Tokio worker threads in async mode, together with much higher RSS.
+
+## Async Memory-Tuning Experiment (Requested Follow-up)
+
+Target:
+
+- `store_sales`, SF=5, Lance, `--zero-copy --zero-copy-mode async`
+
+Matrix (`/tmp/tpcds_async_tuning_store_sales_sf5.log`):
+
+| config | key params | elapsed | rate | max RSS |
+|---|---|---:|---:|---:|
+| baseline | `queue=4, sg=1, sgq=4, blocking=8` | 32.21s | 447,177 r/s | 864,288 KB |
+| q1_sg1 | `queue=1, sg=1, sgq=1, blocking=8` | 28.00s | 517,007 r/s | 895,780 KB |
+| q1_sg2 | `queue=1, sg=2, sgq=1, blocking=8` | 28.52s | 505,492 r/s | 896,136 KB |
+| q2_sg2 | `queue=2, sg=2, sgq=2, blocking=8` | 33.15s | 434,802 r/s | 895,072 KB |
+| q1_sg4 | `queue=1, sg=4, sgq=1, blocking=8` | 27.91s | 516,731 r/s | 890,796 KB |
+| q1_sg1_b2 | `queue=1, sg=1, sgq=1, blocking=2` | 66.09s | 217,918 r/s | 864,548 KB |
+
+Reference sync run:
+
+- `--zero-copy --zero-copy-mode sync`: `20.30s`, `709,727 r/s`, `102,308 KB` RSS
+
+Outcome:
+
+1. Async queue/chunk tuning changed throughput and queue behavior, but did **not** bring async RSS close to sync.
+2. Async RSS stayed in a narrow high band (`~864–896 MB`) despite aggressive queue reduction.
+3. Lowering Tokio blocking threads to 2 did not reduce RSS materially, but severely hurt performance.
+4. Best async throughput in this sample (`q1_sg4`) is still significantly slower and much higher memory than sync reference.
+
+Updated recommendation:
+
+For single-table TPC-DS generation, keep synchronous zero-copy as the default path; treat async as experimental/optional.
 
 ## Post-Implementation Sanity Check (SF=5 store_sales)
 
