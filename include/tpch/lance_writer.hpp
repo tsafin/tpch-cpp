@@ -140,6 +140,18 @@ public:
     }
 
     /**
+     * Configure bounded buffering thresholds for synchronous Lance writes.
+     */
+    void set_buffered_flush_config(size_t batch_threshold, size_t row_threshold) {
+        if (batch_threshold > 0) {
+            buffered_flush_batch_threshold_ = batch_threshold;
+        }
+        if (row_threshold > 0) {
+            buffered_flush_row_threshold_ = row_threshold;
+        }
+    }
+
+    /**
      * Enable io_uring write path (Linux only, requires io-uring feature compiled in).
      * Must be called before the first batch is written.
      */
@@ -181,6 +193,8 @@ private:
     size_t stream_mem_profile_every_batches_ = 100;
     size_t stream_scatter_gather_batches_ = 1;
     size_t stream_scatter_gather_queue_chunks_ = 4;
+    size_t buffered_flush_batch_threshold_ = 200;
+    size_t buffered_flush_row_threshold_ = 1'000'000;
     std::shared_ptr<StreamState> stream_state_;
     std::shared_ptr<StreamRecordBatchReader> stream_reader_;
 

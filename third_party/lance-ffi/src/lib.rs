@@ -94,6 +94,8 @@ struct WriteParamsConfig {
     use_io_uring: bool,
     scatter_gather_batches: usize,
     scatter_gather_queue_chunks: usize,
+    buffered_flush_batch_threshold: usize,
+    buffered_flush_row_threshold: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -162,6 +164,8 @@ impl Default for WriteParamsConfig {
             use_io_uring: false,
             scatter_gather_batches: 1,
             scatter_gather_queue_chunks: 4,
+            buffered_flush_batch_threshold: FLUSH_BATCH_THRESHOLD,
+            buffered_flush_row_threshold: FLUSH_ROW_THRESHOLD,
         }
     }
 }
@@ -662,7 +666,9 @@ pub extern "C" fn lance_writer_write_batch(writer_ptr: *mut LanceWriterHandle, a
             WriterBackend::Buffered { batches, pending_row_count, .. } => {
                 *pending_row_count += record_batch.num_rows();
                 batches.push(record_batch);
-                if batches.len() >= FLUSH_BATCH_THRESHOLD || *pending_row_count >= FLUSH_ROW_THRESHOLD {
+                let flush_batch_threshold = writer.write_params.buffered_flush_batch_threshold.max(1);
+                let flush_row_threshold = writer.write_params.buffered_flush_row_threshold.max(1);
+                if batches.len() >= flush_batch_threshold || *pending_row_count >= flush_row_threshold {
                     if let Err(e) = writer.flush_batches() { eprintln!("Flush Error: {}", e); return 5; }
                 }
             },
@@ -763,6 +769,33 @@ pub extern "C" fn lance_writer_set_scatter_gather_config(
         }
         if queue_chunks > 0 {
             writer.write_params.scatter_gather_queue_chunks = queue_chunks as usize;
+        }
+        0
+    })).unwrap_or(3)
+}
+
+/// Configure flush thresholds for buffered backend.
+#[no_mangle]
+pub extern "C" fn lance_writer_set_buffered_flush_config(
+    writer_ptr: *mut LanceWriterHandle,
+    batch_threshold: c_int,
+    row_threshold: c_int,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if writer_ptr.is_null() { return 1; }
+        let writer = unsafe { &mut *writer_ptr };
+        if writer.closed { return 2; }
+        if let WriterBackend::Streaming { task } = &writer.backend {
+            if task.is_some() {
+                eprintln!("Buffered Flush Config Error: cannot change after stream start");
+                return 5;
+            }
+        }
+        if batch_threshold > 0 {
+            writer.write_params.buffered_flush_batch_threshold = batch_threshold as usize;
+        }
+        if row_threshold > 0 {
+            writer.write_params.buffered_flush_row_threshold = row_threshold as usize;
         }
         0
     })).unwrap_or(3)
