@@ -161,6 +161,16 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Resolve base image
+        id: base-image
+        run: |
+          BRANCH_TAG=$(echo "${GITHUB_REF_NAME}" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+          if [ "${{ needs.build-base.result }}" = "success" ]; then
+            echo "image=${{ env.IMAGE_PREFIX }}-base:${BRANCH_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${{ env.IMAGE_PREFIX }}-base:latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -187,6 +197,8 @@ jobs:
           context: .
           file: .docker/Dockerfile.orc
           push: true
+          build-args: |
+            BASE_IMAGE=${{ steps.base-image.outputs.image }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
@@ -219,6 +231,16 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Resolve base image
+        id: base-image
+        run: |
+          BRANCH_TAG=$(echo "${GITHUB_REF_NAME}" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+          if [ "${{ needs.build-base.result }}" = "success" ]; then
+            echo "image=${{ env.IMAGE_PREFIX }}-base:${BRANCH_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${{ env.IMAGE_PREFIX }}-base:latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -245,6 +267,8 @@ jobs:
           context: .
           file: .docker/Dockerfile.lance
           push: true
+          build-args: |
+            BASE_IMAGE=${{ steps.base-image.outputs.image }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |

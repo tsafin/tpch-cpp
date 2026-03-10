@@ -1,5 +1,6 @@
 # ORC Docker image extending base with ORC support for TPC-H benchmarks
-FROM ghcr.io/tsafin/tpch-cpp-base:latest
+ARG BASE_IMAGE=ghcr.io/tsafin/tpch-cpp-base:latest
+FROM ${BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/tsafin/tpch-cpp"
 LABEL org.opencontainers.image.description="TPC-H C++ ORC Build Environment with Arrow/Parquet/ORC"
