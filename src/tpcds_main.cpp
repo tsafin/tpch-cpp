@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cctype>
 #include <getopt.h>
+#include <stdexcept>
 #include <sys/stat.h>
 
 #include <arrow/api.h>
@@ -253,12 +254,26 @@ finish_batch(
     arrays.reserve(schema->num_fields());
     for (int i = 0; i < schema->num_fields(); ++i) {
         const auto& field = schema->field(i);
-        auto array = builders[static_cast<size_t>(i)]->Finish().ValueOrDie();
+        std::shared_ptr<arrow::Array> array;
+        arrow::Status finish_status =
+            builders[static_cast<size_t>(i)]->Finish(&array);
+        if (!finish_status.ok()) {
+            throw std::runtime_error(
+                "Failed to finish Arrow builder for field '" +
+                field->name() + "': " + finish_status.ToString());
+        }
         // Convert Int8 indices to DictionaryArray for DICTIONARY fields
         if (field->type()->id() == arrow::Type::DICTIONARY) {
             auto dict = tpcds::get_dict_for_field(field->name());
             if (dict) {
-                array = arrow::DictionaryArray::FromArrays(field->type(), array, dict).ValueOrDie();
+                auto dict_result =
+                    arrow::DictionaryArray::FromArrays(field->type(), array, dict);
+                if (!dict_result.ok()) {
+                    throw std::runtime_error(
+                        "Failed to build dictionary array for field '" +
+                        field->name() + "': " + dict_result.status().ToString());
+                }
+                array = dict_result.ValueOrDie();
             }
         }
         arrays.push_back(array);
@@ -369,6 +384,10 @@ int main(int argc, char* argv[]) {
         opts = parse_args(argc, argv);
     } catch (const std::exception& e) {
         fprintf(stderr, "Error parsing arguments: %s\n", e.what());
+        return 1;
+    }
+    if (opts.scale_factor <= 0) {
+        fprintf(stderr, "tpcds_benchmark: --scale-factor must be > 0\n");
         return 1;
     }
     opts.zero_copy_mode = normalize_zero_copy_mode(opts.zero_copy_mode);
