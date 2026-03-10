@@ -758,70 +758,44 @@ long DSDGenWrapper::get_row_count(TableType t) const {
 
 // C-linkage trampolines for master-detail tables
 namespace {
-struct StoreSalesCtx {
+template <typename Row>
+struct CallbackState {
     std::function<void(const void*)>* cb;
     long max_rows;
     long emitted;
     std::exception_ptr error;
 };
+
+template <typename Row>
+static void callback_trampoline_impl(const Row* row, void* ctx) {
+    auto* c = static_cast<CallbackState<Row>*>(ctx);
+    if (c->error != nullptr || (c->max_rows > 0 && c->emitted >= c->max_rows)) {
+        return;
+    }
+    try {
+        (*c->cb)(static_cast<const void*>(row));
+        ++c->emitted;
+    } catch (...) {
+        c->error = std::current_exception();
+    }
+}
 
 extern "C" void store_sales_trampoline(
     const struct W_STORE_SALES_TBL* row, void* ctx)
 {
-    auto* c = static_cast<StoreSalesCtx*>(ctx);
-    if (c->error != nullptr || (c->max_rows > 0 && c->emitted >= c->max_rows)) {
-        return;
-    }
-    try {
-        (*c->cb)(static_cast<const void*>(row));
-        ++c->emitted;
-    } catch (...) {
-        c->error = std::current_exception();
-    }
+    callback_trampoline_impl(row, ctx);
 }
-
-struct CatalogSalesCtx {
-    std::function<void(const void*)>* cb;
-    long max_rows;
-    long emitted;
-    std::exception_ptr error;
-};
 
 extern "C" void catalog_sales_trampoline(
     const struct W_CATALOG_SALES_TBL* row, void* ctx)
 {
-    auto* c = static_cast<CatalogSalesCtx*>(ctx);
-    if (c->error != nullptr || (c->max_rows > 0 && c->emitted >= c->max_rows)) {
-        return;
-    }
-    try {
-        (*c->cb)(static_cast<const void*>(row));
-        ++c->emitted;
-    } catch (...) {
-        c->error = std::current_exception();
-    }
+    callback_trampoline_impl(row, ctx);
 }
-
-struct WebSalesCtx {
-    std::function<void(const void*)>* cb;
-    long max_rows;
-    long emitted;
-    std::exception_ptr error;
-};
 
 extern "C" void web_sales_trampoline(
     const struct W_WEB_SALES_TBL* row, void* ctx)
 {
-    auto* c = static_cast<WebSalesCtx*>(ctx);
-    if (c->error != nullptr || (c->max_rows > 0 && c->emitted >= c->max_rows)) {
-        return;
-    }
-    try {
-        (*c->cb)(static_cast<const void*>(row));
-        ++c->emitted;
-    } catch (...) {
-        c->error = std::current_exception();
-    }
+    callback_trampoline_impl(row, ctx);
 }
 
 template <typename Row>
@@ -834,6 +808,49 @@ struct CallbackGuard {
         *ctx_slot = nullptr;
     }
 };
+
+template <typename Row>
+using MasterDetailCallbackSlot = void (*)(const Row*, void*);
+
+template <typename Row>
+static void run_master_detail_generation(
+    std::function<void(const void* row)> callback,
+    long max_rows,
+    ds_key_t n_tickets,
+    const char* table_name,
+    bool verbose,
+    MasterDetailCallbackSlot<Row>* callback_slot,
+    void** callback_ctx_slot,
+    MasterDetailCallbackSlot<Row> trampoline,
+    int (*mk_row)(void*, ds_key_t))
+{
+    CallbackState<Row> ctx{&callback, max_rows, 0L, nullptr};
+    *callback_slot = trampoline;
+    *callback_ctx_slot = &ctx;
+    CallbackGuard<Row> guard{callback_slot, callback_ctx_slot};
+
+    if (verbose) {
+        std::fprintf(stderr,
+            "DSDGenWrapper: generating %s from %lld tickets\n",
+            table_name,
+            static_cast<long long>(n_tickets));
+    }
+
+    for (ds_key_t i = 1; i <= n_tickets; ++i) {
+        if (ctx.error != nullptr || (max_rows > 0 && ctx.emitted >= max_rows)) {
+            break;
+        }
+        mk_row(nullptr, i);
+    }
+    if (ctx.error != nullptr) {
+        std::rethrow_exception(ctx.error);
+    }
+
+    if (verbose) {
+        std::fprintf(stderr,
+            "DSDGenWrapper: emitted %ld %s rows\n", ctx.emitted, table_name);
+    }
+}
 } // anonymous namespace
 
 void DSDGenWrapper::generate_store_sales(
@@ -841,35 +858,16 @@ void DSDGenWrapper::generate_store_sales(
     long max_rows)
 {
     init_dsdgen();
-
-    ds_key_t n_tickets = get_rowcount(TPCDS_STORE_SALES);
-
-    if (verbose_) {
-        std::fprintf(stderr,
-            "DSDGenWrapper: generating store_sales from %lld tickets\n",
-            static_cast<long long>(n_tickets));
-    }
-
-    StoreSalesCtx ctx{&callback, max_rows, 0L, nullptr};
-    g_w_store_sales_callback     = store_sales_trampoline;
-    g_w_store_sales_callback_ctx = &ctx;
-    CallbackGuard<W_STORE_SALES_TBL> guard{
+    run_master_detail_generation<W_STORE_SALES_TBL>(
+        std::move(callback),
+        max_rows,
+        get_rowcount(TPCDS_STORE_SALES),
+        "store_sales",
+        verbose_,
         &g_w_store_sales_callback,
         &g_w_store_sales_callback_ctx,
-    };
-
-    for (ds_key_t i = 1; i <= n_tickets; ++i) {
-        if (ctx.error != nullptr || (max_rows > 0 && ctx.emitted >= max_rows)) break;
-        mk_w_store_sales(nullptr, i);
-    }
-    if (ctx.error != nullptr) {
-        std::rethrow_exception(ctx.error);
-    }
-
-    if (verbose_) {
-        std::fprintf(stderr,
-            "DSDGenWrapper: emitted %ld store_sales rows\n", ctx.emitted);
-    }
+        store_sales_trampoline,
+        mk_w_store_sales);
 }
 
 // ---------------------------------------------------------------------------
@@ -909,35 +907,16 @@ void DSDGenWrapper::generate_catalog_sales(
     long max_rows)
 {
     init_dsdgen();
-
-    ds_key_t n_tickets = get_rowcount(TPCDS_CATALOG_SALES);
-
-    if (verbose_) {
-        std::fprintf(stderr,
-            "DSDGenWrapper: generating catalog_sales from %lld tickets\n",
-            static_cast<long long>(n_tickets));
-    }
-
-    CatalogSalesCtx ctx{&callback, max_rows, 0L, nullptr};
-    g_w_catalog_sales_callback     = catalog_sales_trampoline;
-    g_w_catalog_sales_callback_ctx = &ctx;
-    CallbackGuard<W_CATALOG_SALES_TBL> guard{
+    run_master_detail_generation<W_CATALOG_SALES_TBL>(
+        std::move(callback),
+        max_rows,
+        get_rowcount(TPCDS_CATALOG_SALES),
+        "catalog_sales",
+        verbose_,
         &g_w_catalog_sales_callback,
         &g_w_catalog_sales_callback_ctx,
-    };
-
-    for (ds_key_t i = 1; i <= n_tickets; ++i) {
-        if (ctx.error != nullptr || (max_rows > 0 && ctx.emitted >= max_rows)) break;
-        mk_w_catalog_sales(nullptr, i);
-    }
-    if (ctx.error != nullptr) {
-        std::rethrow_exception(ctx.error);
-    }
-
-    if (verbose_) {
-        std::fprintf(stderr,
-            "DSDGenWrapper: emitted %ld catalog_sales rows\n", ctx.emitted);
-    }
+        catalog_sales_trampoline,
+        mk_w_catalog_sales);
 }
 
 // ---------------------------------------------------------------------------
@@ -949,35 +928,16 @@ void DSDGenWrapper::generate_web_sales(
     long max_rows)
 {
     init_dsdgen();
-
-    ds_key_t n_tickets = get_rowcount(TPCDS_WEB_SALES);
-
-    if (verbose_) {
-        std::fprintf(stderr,
-            "DSDGenWrapper: generating web_sales from %lld tickets\n",
-            static_cast<long long>(n_tickets));
-    }
-
-    WebSalesCtx ctx{&callback, max_rows, 0L, nullptr};
-    g_w_web_sales_callback     = web_sales_trampoline;
-    g_w_web_sales_callback_ctx = &ctx;
-    CallbackGuard<W_WEB_SALES_TBL> guard{
+    run_master_detail_generation<W_WEB_SALES_TBL>(
+        std::move(callback),
+        max_rows,
+        get_rowcount(TPCDS_WEB_SALES),
+        "web_sales",
+        verbose_,
         &g_w_web_sales_callback,
         &g_w_web_sales_callback_ctx,
-    };
-
-    for (ds_key_t i = 1; i <= n_tickets; ++i) {
-        if (ctx.error != nullptr || (max_rows > 0 && ctx.emitted >= max_rows)) break;
-        mk_w_web_sales(nullptr, i);
-    }
-    if (ctx.error != nullptr) {
-        std::rethrow_exception(ctx.error);
-    }
-
-    if (verbose_) {
-        std::fprintf(stderr,
-            "DSDGenWrapper: emitted %ld web_sales rows\n", ctx.emitted);
-    }
+        web_sales_trampoline,
+        mk_w_web_sales);
 }
 
 // ---------------------------------------------------------------------------
