@@ -117,6 +117,7 @@ jobs:
             -DCMAKE_PREFIX_PATH=${{ matrix.deps_path }} \
             -DTPCH_ENABLE_ORC=${{ matrix.enable_orc }} \
             -DTPCH_ENABLE_LANCE=${{ matrix.enable_lance }} \
+            -DTPCH_ENABLE_NATIVE_OPTIMIZATIONS=OFF \
             -DTPCH_ENABLE_ASYNC_IO=ON \
             -DTPCH_ENABLE_ASAN=OFF \
             -DTPCH_BUILD_TESTS=${{ matrix.enable_tests }}
