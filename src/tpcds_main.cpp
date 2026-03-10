@@ -422,8 +422,9 @@ int main(int argc, char* argv[]) {
     if (opts.format == "lance") {
         if (auto* lw = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
             if (opts.zero_copy && !lance_async_streaming) {
-                // bounded synchronous path to cap memory without Tokio background streaming
-                lw->set_buffered_flush_config(8, 65'536);
+                // Keep sync zero-copy bounded, but avoid tiny ~65K-row fragments that
+                // amplify Lance append/commit overhead at higher scale factors.
+                lw->set_buffered_flush_config(128, 1'048'576);
             }
         }
     }
