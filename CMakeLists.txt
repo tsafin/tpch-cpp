@@ -30,6 +30,7 @@ option(TPCH_USE_PREBUILT_LANCE_FFI "Use pre-compiled Lance FFI library when avai
 option(TPCH_ENABLE_PERF_COUNTERS "Enable performance counters instrumentation" OFF)
 option(TPCH_ENABLE_MOLD "Enable mold linker if available (incompatible with GTest in this project)" ON)
 option(TPCDS_ENABLE "Enable TPC-DS data generation (tpcds_benchmark executable)" OFF)
+option(TPCH_ENABLE_NATIVE_OPTIMIZATIONS "Enable host-specific CPU optimizations such as -march=native" ON)
 
 # Compiler configuration
 include(cmake/CompilerWarnings.cmake)
@@ -38,7 +39,11 @@ include(cmake/CompilerWarnings.cmake)
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     # Enable aggressive optimizations with SIMD support
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        add_compile_options(-O3 -march=native)
+        add_compile_options(-O3)
+
+        if(TPCH_ENABLE_NATIVE_OPTIMIZATIONS)
+            add_compile_options(-march=native)
+        endif()
 
         # Enable auto-vectorization and report optimizations
         add_compile_options(
@@ -46,22 +51,26 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebI
             -fopt-info-vec-optimized      # Report successful vectorizations
         )
 
-        # Check for AVX2 support (preferred)
-        include(CheckCXXCompilerFlag)
-        check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+        if(TPCH_ENABLE_NATIVE_OPTIMIZATIONS)
+            # Check for AVX2 support (preferred)
+            include(CheckCXXCompilerFlag)
+            check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
 
-        if(COMPILER_SUPPORTS_AVX2)
-            message(STATUS "Enabling AVX2 SIMD optimizations")
-            add_compile_options(-mavx2 -mfma)
-        else()
-            # Fallback to SSE4.2 (required for SIMD string utils)
-            check_cxx_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE42)
-            if(COMPILER_SUPPORTS_SSE42)
-                message(STATUS "Enabling SSE4.2 SIMD optimizations")
-                add_compile_options(-msse4.2)
+            if(COMPILER_SUPPORTS_AVX2)
+                message(STATUS "Enabling AVX2 SIMD optimizations")
+                add_compile_options(-mavx2 -mfma)
             else()
-                message(WARNING "No SIMD support detected - performance will be degraded")
+                # Fallback to SSE4.2 (required for SIMD string utils)
+                check_cxx_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE42)
+                if(COMPILER_SUPPORTS_SSE42)
+                    message(STATUS "Enabling SSE4.2 SIMD optimizations")
+                    add_compile_options(-msse4.2)
+                else()
+                    message(WARNING "No SIMD support detected - performance will be degraded")
+                endif()
             endif()
+        else()
+            message(STATUS "Host-specific CPU optimizations disabled (TPCH_ENABLE_NATIVE_OPTIMIZATIONS=OFF)")
         endif()
     endif()
 elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
