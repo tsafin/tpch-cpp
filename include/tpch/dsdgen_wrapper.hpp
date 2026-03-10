@@ -11,7 +11,9 @@ namespace tpcds {
 
 /**
  * TPC-DS table identifiers for the 24 standard W_ (warehouse) tables.
- * Numeric values match the generated tables.h constants (STORE_SALES=17, etc.).
+ *
+ * The integer values are pinned to the generated `tables.h` constants and
+ * verified via static_asserts in the implementation TU.
  */
 enum class TableType {
     CallCenter           = 0,

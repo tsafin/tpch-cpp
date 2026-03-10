@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <stdexcept>
 #include <unistd.h>
 
@@ -30,6 +31,31 @@ namespace tpcds {
 // ---------------------------------------------------------------------------
 // Static helpers
 // ---------------------------------------------------------------------------
+
+static_assert(static_cast<int>(TableType::CallCenter) == TPCDS_CALL_CENTER);
+static_assert(static_cast<int>(TableType::CatalogPage) == TPCDS_CATALOG_PAGE);
+static_assert(static_cast<int>(TableType::CatalogReturns) == TPCDS_CATALOG_RETURNS);
+static_assert(static_cast<int>(TableType::CatalogSales) == TPCDS_CATALOG_SALES);
+static_assert(static_cast<int>(TableType::Customer) == TPCDS_CUSTOMER);
+static_assert(static_cast<int>(TableType::CustomerAddress) == TPCDS_CUSTOMER_ADDRESS);
+static_assert(static_cast<int>(TableType::CustomerDemographics) == TPCDS_CUSTOMER_DEMOGRAPHICS);
+static_assert(static_cast<int>(TableType::DateDim) == TPCDS_DATE);
+static_assert(static_cast<int>(TableType::HouseholdDemographics) == TPCDS_HOUSEHOLD_DEMOGRAPHICS);
+static_assert(static_cast<int>(TableType::IncomeBand) == TPCDS_INCOME_BAND);
+static_assert(static_cast<int>(TableType::Inventory) == TPCDS_INVENTORY);
+static_assert(static_cast<int>(TableType::Item) == TPCDS_ITEM);
+static_assert(static_cast<int>(TableType::Promotion) == TPCDS_PROMOTION);
+static_assert(static_cast<int>(TableType::Reason) == TPCDS_REASON);
+static_assert(static_cast<int>(TableType::ShipMode) == TPCDS_SHIP_MODE);
+static_assert(static_cast<int>(TableType::Store) == TPCDS_STORE);
+static_assert(static_cast<int>(TableType::StoreReturns) == TPCDS_STORE_RETURNS);
+static_assert(static_cast<int>(TableType::StoreSales) == TPCDS_STORE_SALES);
+static_assert(static_cast<int>(TableType::TimeDim) == TPCDS_TIME);
+static_assert(static_cast<int>(TableType::Warehouse) == TPCDS_WAREHOUSE);
+static_assert(static_cast<int>(TableType::WebPage) == TPCDS_WEB_PAGE);
+static_assert(static_cast<int>(TableType::WebReturns) == TPCDS_WEB_RETURNS);
+static_assert(static_cast<int>(TableType::WebSales) == TPCDS_WEB_SALES);
+static_assert(static_cast<int>(TableType::WebSite) == TPCDS_WEB_SITE);
 
 int DSDGenWrapper::table_id(TableType t) {
     return static_cast<int>(t);
@@ -736,46 +762,78 @@ struct StoreSalesCtx {
     std::function<void(const void*)>* cb;
     long max_rows;
     long emitted;
+    std::exception_ptr error;
 };
 
 extern "C" void store_sales_trampoline(
     const struct W_STORE_SALES_TBL* row, void* ctx)
 {
     auto* c = static_cast<StoreSalesCtx*>(ctx);
-    if (c->max_rows > 0 && c->emitted >= c->max_rows) return;
-    (*c->cb)(static_cast<const void*>(row));
-    ++c->emitted;
+    if (c->error != nullptr || (c->max_rows > 0 && c->emitted >= c->max_rows)) {
+        return;
+    }
+    try {
+        (*c->cb)(static_cast<const void*>(row));
+        ++c->emitted;
+    } catch (...) {
+        c->error = std::current_exception();
+    }
 }
 
 struct CatalogSalesCtx {
     std::function<void(const void*)>* cb;
     long max_rows;
     long emitted;
+    std::exception_ptr error;
 };
 
 extern "C" void catalog_sales_trampoline(
     const struct W_CATALOG_SALES_TBL* row, void* ctx)
 {
     auto* c = static_cast<CatalogSalesCtx*>(ctx);
-    if (c->max_rows > 0 && c->emitted >= c->max_rows) return;
-    (*c->cb)(static_cast<const void*>(row));
-    ++c->emitted;
+    if (c->error != nullptr || (c->max_rows > 0 && c->emitted >= c->max_rows)) {
+        return;
+    }
+    try {
+        (*c->cb)(static_cast<const void*>(row));
+        ++c->emitted;
+    } catch (...) {
+        c->error = std::current_exception();
+    }
 }
 
 struct WebSalesCtx {
     std::function<void(const void*)>* cb;
     long max_rows;
     long emitted;
+    std::exception_ptr error;
 };
 
 extern "C" void web_sales_trampoline(
     const struct W_WEB_SALES_TBL* row, void* ctx)
 {
     auto* c = static_cast<WebSalesCtx*>(ctx);
-    if (c->max_rows > 0 && c->emitted >= c->max_rows) return;
-    (*c->cb)(static_cast<const void*>(row));
-    ++c->emitted;
+    if (c->error != nullptr || (c->max_rows > 0 && c->emitted >= c->max_rows)) {
+        return;
+    }
+    try {
+        (*c->cb)(static_cast<const void*>(row));
+        ++c->emitted;
+    } catch (...) {
+        c->error = std::current_exception();
+    }
 }
+
+template <typename Row>
+struct CallbackGuard {
+    void (**slot)(const Row*, void*);
+    void** ctx_slot;
+
+    ~CallbackGuard() {
+        *slot = nullptr;
+        *ctx_slot = nullptr;
+    }
+};
 } // anonymous namespace
 
 void DSDGenWrapper::generate_store_sales(
@@ -792,18 +850,21 @@ void DSDGenWrapper::generate_store_sales(
             static_cast<long long>(n_tickets));
     }
 
-    StoreSalesCtx ctx{&callback, max_rows, 0L};
+    StoreSalesCtx ctx{&callback, max_rows, 0L, nullptr};
     g_w_store_sales_callback     = store_sales_trampoline;
     g_w_store_sales_callback_ctx = &ctx;
+    CallbackGuard<W_STORE_SALES_TBL> guard{
+        &g_w_store_sales_callback,
+        &g_w_store_sales_callback_ctx,
+    };
 
     for (ds_key_t i = 1; i <= n_tickets; ++i) {
-        if (max_rows > 0 && ctx.emitted >= max_rows) break;
+        if (ctx.error != nullptr || (max_rows > 0 && ctx.emitted >= max_rows)) break;
         mk_w_store_sales(nullptr, i);
     }
-
-    // Always clear the callback to avoid dangling pointer
-    g_w_store_sales_callback     = nullptr;
-    g_w_store_sales_callback_ctx = nullptr;
+    if (ctx.error != nullptr) {
+        std::rethrow_exception(ctx.error);
+    }
 
     if (verbose_) {
         std::fprintf(stderr,
@@ -857,17 +918,21 @@ void DSDGenWrapper::generate_catalog_sales(
             static_cast<long long>(n_tickets));
     }
 
-    CatalogSalesCtx ctx{&callback, max_rows, 0L};
+    CatalogSalesCtx ctx{&callback, max_rows, 0L, nullptr};
     g_w_catalog_sales_callback     = catalog_sales_trampoline;
     g_w_catalog_sales_callback_ctx = &ctx;
+    CallbackGuard<W_CATALOG_SALES_TBL> guard{
+        &g_w_catalog_sales_callback,
+        &g_w_catalog_sales_callback_ctx,
+    };
 
     for (ds_key_t i = 1; i <= n_tickets; ++i) {
-        if (max_rows > 0 && ctx.emitted >= max_rows) break;
+        if (ctx.error != nullptr || (max_rows > 0 && ctx.emitted >= max_rows)) break;
         mk_w_catalog_sales(nullptr, i);
     }
-
-    g_w_catalog_sales_callback     = nullptr;
-    g_w_catalog_sales_callback_ctx = nullptr;
+    if (ctx.error != nullptr) {
+        std::rethrow_exception(ctx.error);
+    }
 
     if (verbose_) {
         std::fprintf(stderr,
@@ -893,17 +958,21 @@ void DSDGenWrapper::generate_web_sales(
             static_cast<long long>(n_tickets));
     }
 
-    WebSalesCtx ctx{&callback, max_rows, 0L};
+    WebSalesCtx ctx{&callback, max_rows, 0L, nullptr};
     g_w_web_sales_callback     = web_sales_trampoline;
     g_w_web_sales_callback_ctx = &ctx;
+    CallbackGuard<W_WEB_SALES_TBL> guard{
+        &g_w_web_sales_callback,
+        &g_w_web_sales_callback_ctx,
+    };
 
     for (ds_key_t i = 1; i <= n_tickets; ++i) {
-        if (max_rows > 0 && ctx.emitted >= max_rows) break;
+        if (ctx.error != nullptr || (max_rows > 0 && ctx.emitted >= max_rows)) break;
         mk_w_web_sales(nullptr, i);
     }
-
-    g_w_web_sales_callback     = nullptr;
-    g_w_web_sales_callback_ctx = nullptr;
+    if (ctx.error != nullptr) {
+        std::rethrow_exception(ctx.error);
+    }
 
     if (verbose_) {
         std::fprintf(stderr,
@@ -1032,6 +1101,10 @@ void DSDGenWrapper::generate_store_returns(
     // Use a no-op callback to suppress sales output while still populating g_w_store_sales.
     g_w_store_sales_callback     = [](const struct W_STORE_SALES_TBL*, void*) {};
     g_w_store_sales_callback_ctx = nullptr;
+    CallbackGuard<W_STORE_SALES_TBL> guard{
+        &g_w_store_sales_callback,
+        &g_w_store_sales_callback_ctx,
+    };
 
     W_STORE_RETURNS_TBL row;
     long emitted = 0;
@@ -1044,10 +1117,6 @@ void DSDGenWrapper::generate_store_returns(
         ++emitted;
         if (max_rows > 0 && emitted >= max_rows) break;
     }
-
-    g_w_store_sales_callback     = nullptr;
-    g_w_store_sales_callback_ctx = nullptr;
-
     if (verbose_) {
         std::fprintf(stderr,
             "DSDGenWrapper: emitted %ld store_returns rows\n", emitted);
@@ -1081,6 +1150,10 @@ void DSDGenWrapper::generate_catalog_returns(
     // Use a no-op callback to suppress sales output while still populating g_w_catalog_sales.
     g_w_catalog_sales_callback     = [](const struct W_CATALOG_SALES_TBL*, void*) {};
     g_w_catalog_sales_callback_ctx = nullptr;
+    CallbackGuard<W_CATALOG_SALES_TBL> guard{
+        &g_w_catalog_sales_callback,
+        &g_w_catalog_sales_callback_ctx,
+    };
 
     W_CATALOG_RETURNS_TBL row;
     long emitted = 0;
@@ -1092,10 +1165,6 @@ void DSDGenWrapper::generate_catalog_returns(
         ++emitted;
         if (max_rows > 0 && emitted >= max_rows) break;
     }
-
-    g_w_catalog_sales_callback     = nullptr;
-    g_w_catalog_sales_callback_ctx = nullptr;
-
     if (verbose_) {
         std::fprintf(stderr,
             "DSDGenWrapper: emitted %ld catalog_returns rows\n", emitted);
@@ -1129,6 +1198,10 @@ void DSDGenWrapper::generate_web_returns(
     // Use a no-op callback to suppress sales output while still populating g_w_web_sales.
     g_w_web_sales_callback     = [](const struct W_WEB_SALES_TBL*, void*) {};
     g_w_web_sales_callback_ctx = nullptr;
+    CallbackGuard<W_WEB_SALES_TBL> guard{
+        &g_w_web_sales_callback,
+        &g_w_web_sales_callback_ctx,
+    };
 
     W_WEB_RETURNS_TBL row;
     long emitted = 0;
@@ -1140,10 +1213,6 @@ void DSDGenWrapper::generate_web_returns(
         ++emitted;
         if (max_rows > 0 && emitted >= max_rows) break;
     }
-
-    g_w_web_sales_callback     = nullptr;
-    g_w_web_sales_callback_ctx = nullptr;
-
     if (verbose_) {
         std::fprintf(stderr,
             "DSDGenWrapper: emitted %ld web_returns rows\n", emitted);

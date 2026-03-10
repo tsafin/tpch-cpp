@@ -1,7 +1,7 @@
 /**
  * dsdgen_converter.cpp — Convert dsdgen C structs to Arrow array builders.
  *
- * Uses dectof() to convert decimal_t (scaled integer) fields to double.
+ * Uses dec_to_double() to convert decimal_t (scaled integer) fields to double.
  * ds_key_t (= int64_t on Linux) is mapped to arrow::int64().
  */
 
@@ -20,8 +20,10 @@ namespace tpcds {
 // ---------------------------------------------------------------------------
 // Helper: decimal_t → double
 //
-// dsdgen stores decimals as scaled integers: number = value * 10^precision.
-// Example: "12.34" → scale=2, precision=2, number=1234.
+// In this dsdgen tree, decimal_t stores the number of fractional digits in
+// `precision` (matching dectostr()/dectof() in decimal.c), while `scale`
+// carries related metadata used by arithmetic helpers.
+// Example: "12.34" → precision=2, number=1234.
 // Conversion: (double)number / 10^precision.
 //
 // NOTE: dectoflt() in decimal.c is buggy (divides by 10^(precision-1) and

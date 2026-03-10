@@ -18,7 +18,7 @@ using BuilderMap = std::vector<std::shared_ptr<arrow::ArrayBuilder>>;
 
 /**
  * Append a store_sales row (W_STORE_SALES_TBL*) to Arrow builders.
- * Schema matches DSDGenWrapper::get_schema(TableType::STORE_SALES).
+ * Schema matches DSDGenWrapper::get_schema(TableType::StoreSales).
  */
 void append_store_sales_to_builders(
     const void* row,
@@ -26,7 +26,7 @@ void append_store_sales_to_builders(
 
 /**
  * Append an inventory row (W_INVENTORY_TBL*) to Arrow builders.
- * Schema matches DSDGenWrapper::get_schema(TableType::INVENTORY).
+ * Schema matches DSDGenWrapper::get_schema(TableType::Inventory).
  */
 void append_inventory_to_builders(
     const void* row,
