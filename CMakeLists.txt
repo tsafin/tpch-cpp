@@ -290,9 +290,16 @@ if(TPCH_ENABLE_LANCE AND Lance_FOUND)
 
     set(LANCE_FFI_PREBUILT "")
     if(TPCH_USE_PREBUILT_LANCE_FFI)
-        # Optional fast path for controlled environments where the image-provided
-        # archive is known to match the current C++/Rust FFI API.
-        find_library(LANCE_FFI_PREBUILT lance_ffi PATHS "${CMAKE_PREFIX_PATH}/lib" NO_DEFAULT_PATH)
+        # In CI containers we know the exact archive name and location pattern.
+        # Prefer an explicit path probe over find_library() so a semicolon-based
+        # CMAKE_PREFIX_PATH cannot cause us to miss the prebuilt archive and
+        # fall back to a full Rust rebuild.
+        foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+            if(EXISTS "${_prefix}/lib/liblance_ffi.a")
+                set(LANCE_FFI_PREBUILT "${_prefix}/lib/liblance_ffi.a")
+                break()
+            endif()
+        endforeach()
     endif()
 
     if(LANCE_FFI_PREBUILT)
