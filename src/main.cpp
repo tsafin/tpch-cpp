@@ -49,6 +49,7 @@ struct Options {
     bool parallel = false;
     bool zero_copy = false;
     std::string zero_copy_mode = "sync";  // sync, auto, async (Lance-specific)
+    std::string compression = "snappy";   // snappy, zstd, none
     std::string table = "lineitem";
     long lance_rows_per_file = 0;
     long lance_rows_per_group = 0;
@@ -69,6 +70,7 @@ constexpr int OPT_LANCE_STATS_LEVEL = 1005;
 constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
 constexpr int OPT_LANCE_IO_URING = 1007;
 constexpr int OPT_ZERO_COPY_MODE = 1008;
+constexpr int OPT_COMPRESSION   = 1009;
 
 constexpr size_t DBGEN_BATCH_SIZE = 8192;  // aligned with Lance max_rows_per_group
 
@@ -97,6 +99,7 @@ void print_usage(const char* prog) {
               << "  --parallel            Generate all 8 tables in parallel (Phase 12.6)\n"
               << "  --zero-copy           Enable zero-copy streaming writes (O(batch) RAM)\n"
               << "  --zero-copy-mode <m>  Zero-copy mode for Lance: sync (default), auto, async\n"
+              << "  --compression <c>     Parquet compression: snappy (default), zstd, none\n"
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
@@ -128,6 +131,7 @@ Options parse_args(int argc, char* argv[]) {
         {"parallel", no_argument, nullptr, 'p'},  // Phase 12.6: Fork-after-init
         {"zero-copy", no_argument, nullptr, 'z'},
         {"zero-copy-mode", required_argument, nullptr, OPT_ZERO_COPY_MODE},
+        {"compression",  required_argument, nullptr, OPT_COMPRESSION},
 #ifdef TPCH_ENABLE_LANCE
         {"lance-rows-per-file", required_argument, nullptr, OPT_LANCE_ROWS_PER_FILE},
         {"lance-rows-per-group", required_argument, nullptr, OPT_LANCE_ROWS_PER_GROUP},
@@ -180,6 +184,9 @@ Options parse_args(int argc, char* argv[]) {
                     std::cerr << "Error: --zero-copy-mode must be sync, auto, or async\n";
                     exit(1);
                 }
+                break;
+            case OPT_COMPRESSION:
+                opts.compression = optarg;
                 break;
             case OPT_LANCE_ROWS_PER_FILE:
                 opts.lance_rows_per_file = std::stol(optarg);
@@ -276,11 +283,13 @@ long get_file_size(const std::string& filename) {
 std::unique_ptr<tpch::WriterInterface> create_writer(
     const std::string& format,
     const std::string& filepath,
+    const std::string& compression = "snappy",
     bool zero_copy = false) {
     if (format == "csv") {
         return std::make_unique<tpch::CSVWriter>(filepath);
     } else if (format == "parquet") {
         auto w = std::make_unique<tpch::ParquetWriter>(filepath);
+        w->set_compression(compression);
         if (zero_copy) w->enable_streaming_write();
         return w;
     }
@@ -1162,7 +1171,7 @@ int generate_all_tables_parallel_v2(const Options& opts) {
                 }
 
                 // Create writer
-                auto writer = create_writer(opts.format, output_path, opts.zero_copy);
+                auto writer = create_writer(opts.format, output_path, opts.compression, opts.zero_copy);
 
 #ifdef TPCH_ENABLE_LANCE
                 if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
@@ -1393,7 +1402,7 @@ int main(int argc, char* argv[]) {
 #endif
 
         // Create writer
-        auto writer = create_writer(opts.format, output_path, opts.zero_copy);
+        auto writer = create_writer(opts.format, output_path, opts.compression, opts.zero_copy);
 
 #ifdef TPCH_ENABLE_LANCE
         if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
