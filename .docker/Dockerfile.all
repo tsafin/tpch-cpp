@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1.4
 ###############################################################################
-# Dockerfile.all — tpch_benchmark with ALL supported formats
+# Dockerfile.all — tpch_benchmark + tpcds_benchmark with ALL supported formats
 #
 # Formats included:  CSV · Parquet · ORC · Paimon · Iceberg · Lance
 # Features included: async I/O (io_uring), io_uring Lance write path
+# Benchmarks:        TPC-H (tpch_benchmark) · TPC-DS (tpcds_benchmark)
 #
 # Multi-stage build — each stage can be cached independently:
 #
@@ -186,6 +187,8 @@ COPY third_party/lance     third_party/lance
 COPY third_party/lance-ffi third_party/lance-ffi
 COPY third_party/dbgen     third_party/dbgen
 COPY third_party/tpch      third_party/tpch
+COPY third_party/dsdgen    third_party/dsdgen
+COPY third_party/tpcds     third_party/tpcds
 COPY third_party/xsimd     third_party/xsimd
 
 # Project source (changes more frequently — near the end)
@@ -209,11 +212,12 @@ RUN cmake -S . -B build \
         -DTPCH_ENABLE_LANCE=ON \
         -DTPCH_ENABLE_ASYNC_IO=ON \
         -DTPCH_BUILD_EXAMPLES=OFF \
-        -DTPCH_BUILD_TESTS=OFF && \
-    cmake --build build -j$(nproc) --target tpch_benchmark
+        -DTPCH_BUILD_TESTS=OFF \
+        -DTPCDS_ENABLE=ON && \
+    cmake --build build -j$(nproc) --target tpch_benchmark --target tpcds_benchmark
 
-RUN ls -lh build/tpch_benchmark && \
-    echo "builder: tpch_benchmark compiled with all formats"
+RUN ls -lh build/tpch_benchmark build/tpcds_benchmark && \
+    echo "builder: tpch_benchmark and tpcds_benchmark compiled with all formats"
 
 ###############################################################################
 # runtime: minimal image — binary + shared libs only
@@ -229,7 +233,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     INSTALL_PREFIX=${INSTALL_PREFIX}
 
 LABEL org.opencontainers.image.source="https://github.com/tsafin/tpch-cpp"
-LABEL org.opencontainers.image.description="tpch_benchmark — all formats: CSV, Parquet, ORC, Paimon, Iceberg, Lance"
+LABEL org.opencontainers.image.description="tpch_benchmark + tpcds_benchmark — all formats: CSV, Parquet, ORC, Paimon, Iceberg, Lance"
 LABEL maintainer="tsafin"
 
 # Runtime-only system libraries required by the shared Arrow/Parquet libs
@@ -253,13 +257,16 @@ COPY --from=builder ${INSTALL_PREFIX}/lib/libparquet*.so* ${INSTALL_PREFIX}/lib/
 
 ENV LD_LIBRARY_PATH=${INSTALL_PREFIX}/lib
 
-# The benchmark binary
-COPY --from=builder /src/tpch-cpp/build/tpch_benchmark /usr/local/bin/tpch_benchmark
+# The benchmark binaries
+COPY --from=builder /src/tpch-cpp/build/tpch_benchmark   /usr/local/bin/tpch_benchmark
+COPY --from=builder /src/tpch-cpp/build/tpcds_benchmark  /usr/local/bin/tpcds_benchmark
 
-# Verify the binary loads correctly and record what formats are available
+# Verify the binaries load correctly and record what formats are available
 RUN ldconfig && \
     ldd /usr/local/bin/tpch_benchmark && \
-    tpch_benchmark --help
+    tpch_benchmark --help && \
+    ldd /usr/local/bin/tpcds_benchmark && \
+    tpcds_benchmark --help
 
 # Output data directory (mount a host volume here for generated files)
 WORKDIR /data
