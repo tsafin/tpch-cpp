@@ -49,7 +49,7 @@ struct Options {
     bool parallel = false;
     bool zero_copy = false;
     std::string zero_copy_mode = "sync";  // sync, auto, async (Lance-specific)
-    std::string compression = "snappy";   // snappy, zstd, none
+    std::string compression = "zstd";     // snappy, zstd, none
     std::string table = "lineitem";
     long lance_rows_per_file = 0;
     long lance_rows_per_group = 0;
@@ -99,7 +99,7 @@ void print_usage(const char* prog) {
               << "  --parallel            Generate all 8 tables in parallel (Phase 12.6)\n"
               << "  --zero-copy           Enable zero-copy streaming writes (O(batch) RAM)\n"
               << "  --zero-copy-mode <m>  Zero-copy mode for Lance: sync (default), auto, async\n"
-              << "  --compression <c>     Parquet compression: snappy (default), zstd, none\n"
+              << "  --compression <c>     Parquet compression: zstd (default), snappy, none\n"
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
@@ -283,7 +283,7 @@ long get_file_size(const std::string& filename) {
 std::unique_ptr<tpch::WriterInterface> create_writer(
     const std::string& format,
     const std::string& filepath,
-    const std::string& compression = "snappy",
+    const std::string& compression = "zstd",
     bool zero_copy = false) {
     if (format == "csv") {
         return std::make_unique<tpch::CSVWriter>(filepath);

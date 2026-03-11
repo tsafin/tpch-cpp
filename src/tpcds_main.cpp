@@ -51,7 +51,7 @@ struct Options {
     std::string output_dir   = "/tmp";
     long        max_rows     = 1000;
     std::string table        = "store_sales";
-    std::string compression  = "snappy";  // snappy, lz4, zstd, none
+    std::string compression  = "zstd";    // snappy, zstd, none
     bool        verbose      = false;
     bool        zero_copy    = false;     // streaming mode: O(batch) memory instead of O(total)
     std::string zero_copy_mode = "sync";  // sync, auto, async (lance-specific selection)
@@ -80,7 +80,7 @@ void print_usage(const char* prog) {
         "  --scale-factor <sf>    Scale factor (default: 1)\n"
         "  --output-dir <dir>     Output directory (default: /tmp)\n"
         "  --max-rows <n>         Max rows to generate (0=all, default: 1000)\n"
-        "  --compression <c>      Parquet compression: snappy (default), zstd, none\n"
+        "  --compression <c>      Parquet compression: zstd (default), snappy, none\n"
         "  --zero-copy            Streaming mode: flush each batch immediately (O(batch) RAM)\n"
         "  --zero-copy-mode <m>   Zero-copy mode for Lance: sync, auto, async (default: sync)\n"
 #ifdef TPCH_ENABLE_LANCE
