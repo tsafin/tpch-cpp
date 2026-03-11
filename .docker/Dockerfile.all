@@ -271,5 +271,4 @@ RUN ldconfig && \
 # Output data directory (mount a host volume here for generated files)
 WORKDIR /data
 
-ENTRYPOINT ["tpch_benchmark"]
-CMD ["--help"]
+CMD ["tpch_benchmark", "--help"]
