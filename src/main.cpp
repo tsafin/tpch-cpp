@@ -46,10 +46,9 @@ struct Options {
     long max_rows = 1000;
     bool async_io = false;
     bool verbose = false;
-    bool use_dbgen = false;
     bool parallel = false;
-    bool zero_copy = false;  // Phase 13.4: Enable zero-copy optimizations
-    bool true_zero_copy = false;  // DISABLED: Always false. Use --zero-copy instead (simpler, no Buffer::Wrap complexity)
+    bool zero_copy = false;
+    std::string zero_copy_mode = "sync";  // sync, auto, async (Lance-specific)
     std::string table = "lineitem";
     long lance_rows_per_file = 0;
     long lance_rows_per_group = 0;
@@ -69,6 +68,7 @@ constexpr int OPT_LANCE_STREAM_QUEUE = 1004;
 constexpr int OPT_LANCE_STATS_LEVEL = 1005;
 constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
 constexpr int OPT_LANCE_IO_URING = 1007;
+constexpr int OPT_ZERO_COPY_MODE = 1008;
 
 void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
@@ -90,12 +90,11 @@ void print_usage(const char* prog) {
               << " (default: parquet)\n"
               << "  --output-dir <dir>    Output directory (default: /tmp)\n"
               << "  --max-rows <N>        Maximum rows to generate (default: 1000, 0=all)\n"
-              << "  --use-dbgen           Use official TPC-H dbgen (default: synthetic data)\n"
               << "  --table <name>        TPC-H table: lineitem, orders, customer, part,\n"
               << "                        partsupp, supplier, nation, region (default: lineitem)\n"
               << "  --parallel            Generate all 8 tables in parallel (Phase 12.6)\n"
-              << "  --zero-copy           Enable zero-copy optimizations (Phase 13.4)\n"
-              // Removed --true-zero-copy option (use --zero-copy instead)
+              << "  --zero-copy           Enable zero-copy streaming writes (O(batch) RAM)\n"
+              << "  --zero-copy-mode <m>  Zero-copy mode for Lance: sync (default), auto, async\n"
 #ifdef TPCH_ENABLE_ASYNC_IO
               << "  --async-io            Enable async I/O with io_uring\n"
 #endif
@@ -123,11 +122,10 @@ Options parse_args(int argc, char* argv[]) {
         {"format", required_argument, nullptr, 'f'},
         {"output-dir", required_argument, nullptr, 'o'},
         {"max-rows", required_argument, nullptr, 'm'},
-        {"use-dbgen", no_argument, nullptr, 'u'},
         {"table", required_argument, nullptr, 't'},
         {"parallel", no_argument, nullptr, 'p'},  // Phase 12.6: Fork-after-init
-        {"zero-copy", no_argument, nullptr, 'z'},  // Phase 13.4: Zero-copy optimization
-        // {"true-zero-copy", no_argument, nullptr, 'Z'},  // DISABLED: Removed to simplify
+        {"zero-copy", no_argument, nullptr, 'z'},
+        {"zero-copy-mode", required_argument, nullptr, OPT_ZERO_COPY_MODE},
 #ifdef TPCH_ENABLE_LANCE
         {"lance-rows-per-file", required_argument, nullptr, OPT_LANCE_ROWS_PER_FILE},
         {"lance-rows-per-group", required_argument, nullptr, OPT_LANCE_ROWS_PER_GROUP},
@@ -148,9 +146,9 @@ Options parse_args(int argc, char* argv[]) {
 
     int c;
 #ifdef TPCH_ENABLE_ASYNC_IO
-    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pzZavh", long_options, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:f:o:m:t:pzavh", long_options, nullptr)) != -1) {
 #else
-    while ((c = getopt_long(argc, argv, "s:f:o:m:ut:pzZvh", long_options, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:f:o:m:t:pzvh", long_options, nullptr)) != -1) {
 #endif
         switch (c) {
             case 's':
@@ -165,9 +163,6 @@ Options parse_args(int argc, char* argv[]) {
             case 'm':
                 opts.max_rows = std::stol(optarg);
                 break;
-            case 'u':
-                opts.use_dbgen = true;
-                break;
             case 't':
                 opts.table = optarg;
                 break;
@@ -176,6 +171,13 @@ Options parse_args(int argc, char* argv[]) {
                 break;
             case 'z':
                 opts.zero_copy = true;
+                break;
+            case OPT_ZERO_COPY_MODE:
+                opts.zero_copy_mode = optarg;
+                if (opts.zero_copy_mode != "sync" && opts.zero_copy_mode != "auto" && opts.zero_copy_mode != "async") {
+                    std::cerr << "Error: --zero-copy-mode must be sync, auto, or async\n";
+                    exit(1);
+                }
                 break;
             case OPT_LANCE_ROWS_PER_FILE:
                 opts.lance_rows_per_file = std::stol(optarg);
@@ -205,7 +207,6 @@ Options parse_args(int argc, char* argv[]) {
             case OPT_LANCE_IO_URING:
                 opts.lance_io_uring = true;
                 break;
-            // case 'Z': DISABLED - true-zero-copy removed, use --zero-copy instead
 #ifdef TPCH_ENABLE_ASYNC_IO
             case 'a':
                 opts.async_io = true;
@@ -1160,8 +1161,10 @@ int generate_all_tables_parallel_v2(const Options& opts) {
 
 #ifdef TPCH_ENABLE_LANCE
                 if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
-                    if (opts.zero_copy || opts.true_zero_copy) {
-                        lance_writer->enable_streaming_write(true);
+                    if (opts.zero_copy) {
+                        bool use_async = (opts.zero_copy_mode == "async") ||
+                                         (opts.zero_copy_mode == "auto");
+                        lance_writer->enable_streaming_write(!use_async);
                     }
                     #ifdef TPCH_LANCE_IO_URING
                     if (opts.lance_io_uring) {
@@ -1177,28 +1180,36 @@ int generate_all_tables_parallel_v2(const Options& opts) {
                 child_opts.table = table;
 
                 if (table == "lineitem") {
-                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                    if (opts.zero_copy) generate_lineitem_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
                 } else if (table == "orders") {
-                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                    if (opts.zero_copy) generate_orders_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);
                 } else if (table == "customer") {
-                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                    if (opts.zero_copy) generate_customer_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_customer(cb, opts.max_rows); }, total_rows);
                 } else if (table == "part") {
-                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                    if (opts.zero_copy) generate_part_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_part(cb, opts.max_rows); }, total_rows);
                 } else if (table == "partsupp") {
-                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                    if (opts.zero_copy) generate_partsupp_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_partsupp(cb, opts.max_rows); }, total_rows);
                 } else if (table == "supplier") {
-                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                    if (opts.zero_copy) generate_supplier_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_supplier(cb, opts.max_rows); }, total_rows);
                 } else if (table == "nation") {
-                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                    if (opts.zero_copy) generate_nation_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
                 } else if (table == "region") {
-                    generate_with_dbgen(dbgen, child_opts, schema, writer,
+                    if (opts.zero_copy) generate_region_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
                         [&](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
                 }
 
@@ -1297,10 +1308,6 @@ int main(int argc, char* argv[]) {
 
         // Phase 12.6: Fork-after-init parallel generation
         if (opts.parallel) {
-            if (!opts.use_dbgen) {
-                std::cerr << "Error: --parallel requires --use-dbgen\n";
-                return 1;
-            }
             return generate_all_tables_parallel_v2(opts);
         }
 
@@ -1325,58 +1332,39 @@ int main(int argc, char* argv[]) {
 
         if (opts.verbose) {
             std::cout << "TPC-H Benchmark Driver\n";
-            std::cout << "Data source: " << (opts.use_dbgen ? "Official TPC-H dbgen" : "TPC-H-compliant synthetic") << "\n";
+            std::cout << "Data source: Official TPC-H dbgen\n";
             std::cout << "Scale factor: " << opts.scale_factor << "\n";
             std::cout << "Format: " << opts.format << "\n";
             std::cout << "Table: " << opts.table << "\n";
             std::cout << "Max rows: " << (opts.max_rows > 0 ? std::to_string(opts.max_rows) : std::string("all")) << "\n";
         }
 
-        // Create output path (include table name if using dbgen)
-        std::string output_path = get_output_filename(opts.output_dir, opts.format,
-                                                       opts.use_dbgen ? opts.table : "");
+        std::string output_path = get_output_filename(opts.output_dir, opts.format, opts.table);
         if (opts.verbose) {
             std::cout << "Output file: " << output_path << "\n";
         }
 
         // Create schema based on selected table
         std::shared_ptr<arrow::Schema> schema;
-        if (opts.use_dbgen) {
-            // Use dbgen schema definitions
-            if (opts.table == "lineitem") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM, opts.scale_factor);
-            } else if (opts.table == "orders") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS, opts.scale_factor);
-            } else if (opts.table == "customer") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER, opts.scale_factor);
-            } else if (opts.table == "part") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART, opts.scale_factor);
-            } else if (opts.table == "partsupp") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP, opts.scale_factor);
-            } else if (opts.table == "supplier") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER, opts.scale_factor);
-            } else if (opts.table == "nation") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION, opts.scale_factor);
-            } else if (opts.table == "region") {
-                schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION, opts.scale_factor);
-            } else {
-                std::cerr << "Error: Unknown table '" << opts.table << "'\n";
-                return 1;
-            }
+        if (opts.table == "lineitem") {
+            schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM, opts.scale_factor);
+        } else if (opts.table == "orders") {
+            schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS, opts.scale_factor);
+        } else if (opts.table == "customer") {
+            schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER, opts.scale_factor);
+        } else if (opts.table == "part") {
+            schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART, opts.scale_factor);
+        } else if (opts.table == "partsupp") {
+            schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP, opts.scale_factor);
+        } else if (opts.table == "supplier") {
+            schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER, opts.scale_factor);
+        } else if (opts.table == "nation") {
+            schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION, opts.scale_factor);
+        } else if (opts.table == "region") {
+            schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION, opts.scale_factor);
         } else {
-            // Keep existing synthetic schema (lineitem only)
-            schema = arrow::schema({
-                arrow::field("l_orderkey", arrow::int64()),
-                arrow::field("l_partkey", arrow::int64()),
-                arrow::field("l_suppkey", arrow::int64()),
-                arrow::field("l_linenumber", arrow::int64()),
-                arrow::field("l_quantity", arrow::float64()),
-                arrow::field("l_extendedprice", arrow::float64()),
-                arrow::field("l_discount", arrow::float64()),
-                arrow::field("l_tax", arrow::float64()),
-                arrow::field("l_returnflag", arrow::utf8()),
-                arrow::field("l_linestatus", arrow::utf8()),
-            });
+            std::cerr << "Error: Unknown table '" << opts.table << "'\n";
+            return 1;
         }
 
         if (opts.verbose) {
@@ -1427,11 +1415,13 @@ int main(int argc, char* argv[]) {
                 lance_writer->set_stream_queue_depth(static_cast<size_t>(opts.lance_stream_queue));
             }
 
-            // Phase 2.0c: Enable streaming mode for Lance if zero-copy is requested
-            if (opts.zero_copy || opts.true_zero_copy) {
-                lance_writer->enable_streaming_write(true);
+            if (opts.zero_copy) {
+                bool use_async = (opts.zero_copy_mode == "async") ||
+                                 (opts.zero_copy_mode == "auto");
+                lance_writer->enable_streaming_write(!use_async);
                 if (opts.verbose) {
-                    std::cout << "Lance streaming write mode enabled (zero-copy)\n";
+                    std::cout << "Lance streaming write mode enabled (zero-copy, mode="
+                              << opts.zero_copy_mode << ")\n";
                 }
             }
 
@@ -1464,171 +1454,68 @@ int main(int argc, char* argv[]) {
             std::cout << "Starting data generation...\n";
         }
 
-        // Generate data (either real dbgen or synthetic)
-        if (opts.use_dbgen) {
-            // Use official TPC-H dbgen
-            tpch::DBGenWrapper dbgen(opts.scale_factor, opts.verbose);
+        // Generate data using official TPC-H dbgen
+        tpch::DBGenWrapper dbgen(opts.scale_factor, opts.verbose);
 
-            if (opts.table == "lineitem") {
-                // Phase 14.2.3: Use true zero-copy path if enabled
-                if (opts.true_zero_copy) {
-                    generate_lineitem_true_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else if (opts.zero_copy) {
-                    generate_lineitem_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else {
-                    generate_with_dbgen(dbgen, opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
-                }
-            } else if (opts.table == "orders") {
-                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
-                if (opts.true_zero_copy) {
-                    generate_orders_true_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else if (opts.zero_copy) {
-                    generate_orders_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else {
-                    generate_with_dbgen(dbgen, opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);
-                }
-            } else if (opts.table == "customer") {
-                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
-                if (opts.true_zero_copy) {
-                    generate_customer_true_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else if (opts.zero_copy) {
-                    generate_customer_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else {
-                    generate_with_dbgen(dbgen, opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_customer(cb, opts.max_rows); }, total_rows);
-                }
-            } else if (opts.table == "part") {
-                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
-                if (opts.true_zero_copy) {
-                    generate_part_true_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else if (opts.zero_copy) {
-                    generate_part_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else {
-                    generate_with_dbgen(dbgen, opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_part(cb, opts.max_rows); }, total_rows);
-                }
-            } else if (opts.table == "partsupp") {
-                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
-                if (opts.true_zero_copy) {
-                    generate_partsupp_true_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else if (opts.zero_copy) {
-                    generate_partsupp_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else {
-                    generate_with_dbgen(dbgen, opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_partsupp(cb, opts.max_rows); }, total_rows);
-                }
-            } else if (opts.table == "supplier") {
-                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
-                if (opts.true_zero_copy) {
-                    generate_supplier_true_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else if (opts.zero_copy) {
-                    generate_supplier_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else {
-                    generate_with_dbgen(dbgen, opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_supplier(cb, opts.max_rows); }, total_rows);
-                }
-            } else if (opts.table == "nation") {
-                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
-                if (opts.true_zero_copy) {
-                    generate_nation_true_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else if (opts.zero_copy) {
-                    generate_nation_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else {
-                    generate_with_dbgen(dbgen, opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
-                }
-            } else if (opts.table == "region") {
-                // Phase 14.2.3: Use true zero-copy if enabled, else zero-copy
-                if (opts.true_zero_copy) {
-                    generate_region_true_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else if (opts.zero_copy) {
-                    generate_region_zero_copy(dbgen, opts, schema, writer, total_rows);
-                } else {
-                    generate_with_dbgen(dbgen, opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
-                }
+        if (opts.table == "lineitem") {
+            if (opts.zero_copy) {
+                generate_lineitem_zero_copy(dbgen, opts, schema, writer, total_rows);
             } else {
-                std::cerr << "Error: Unknown table '" << opts.table << "'\n";
-                return 1;
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
+            }
+        } else if (opts.table == "orders") {
+            if (opts.zero_copy) {
+                generate_orders_zero_copy(dbgen, opts, schema, writer, total_rows);
+            } else {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);
+            }
+        } else if (opts.table == "customer") {
+            if (opts.zero_copy) {
+                generate_customer_zero_copy(dbgen, opts, schema, writer, total_rows);
+            } else {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [&](auto& g, auto& cb) { g.generate_customer(cb, opts.max_rows); }, total_rows);
+            }
+        } else if (opts.table == "part") {
+            if (opts.zero_copy) {
+                generate_part_zero_copy(dbgen, opts, schema, writer, total_rows);
+            } else {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [&](auto& g, auto& cb) { g.generate_part(cb, opts.max_rows); }, total_rows);
+            }
+        } else if (opts.table == "partsupp") {
+            if (opts.zero_copy) {
+                generate_partsupp_zero_copy(dbgen, opts, schema, writer, total_rows);
+            } else {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [&](auto& g, auto& cb) { g.generate_partsupp(cb, opts.max_rows); }, total_rows);
+            }
+        } else if (opts.table == "supplier") {
+            if (opts.zero_copy) {
+                generate_supplier_zero_copy(dbgen, opts, schema, writer, total_rows);
+            } else {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [&](auto& g, auto& cb) { g.generate_supplier(cb, opts.max_rows); }, total_rows);
+            }
+        } else if (opts.table == "nation") {
+            if (opts.zero_copy) {
+                generate_nation_zero_copy(dbgen, opts, schema, writer, total_rows);
+            } else {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [&](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
+            }
+        } else if (opts.table == "region") {
+            if (opts.zero_copy) {
+                generate_region_zero_copy(dbgen, opts, schema, writer, total_rows);
+            } else {
+                generate_with_dbgen(dbgen, opts, schema, writer,
+                    [&](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
             }
         } else {
-            // Synthetic data (current implementation, kept for backward compatibility)
-            const size_t batch_size = 10000;
-            size_t batch_count = 0;
-            size_t rows_in_batch = 0;
-
-            // Create builders for each column
-            auto orderkey_builder = std::make_shared<arrow::Int64Builder>();
-            auto partkey_builder = std::make_shared<arrow::Int64Builder>();
-            auto suppkey_builder = std::make_shared<arrow::Int64Builder>();
-            auto linenumber_builder = std::make_shared<arrow::Int64Builder>();
-            auto quantity_builder = std::make_shared<arrow::DoubleBuilder>();
-            auto extprice_builder = std::make_shared<arrow::DoubleBuilder>();
-            auto discount_builder = std::make_shared<arrow::DoubleBuilder>();
-            auto tax_builder = std::make_shared<arrow::DoubleBuilder>();
-            auto returnflag_builder = std::make_shared<arrow::StringBuilder>();
-            auto linestatus_builder = std::make_shared<arrow::StringBuilder>();
-
-            // Generate synthetic data
-            for (long row_idx = 0; row_idx < opts.max_rows; ++row_idx) {
-                // Add synthetic data to builders
-                (void)orderkey_builder->Append(row_idx + 1);
-                (void)partkey_builder->Append((row_idx % 200000) + 1);
-                (void)suppkey_builder->Append((row_idx % 10000) + 1);
-                (void)linenumber_builder->Append((row_idx % 7) + 1);
-                (void)quantity_builder->Append(10.0 + static_cast<double>(row_idx % 50));
-                (void)extprice_builder->Append(static_cast<double>(row_idx % 100) * 100.0);
-                (void)discount_builder->Append(static_cast<double>(row_idx % 10) * 0.1);
-                (void)tax_builder->Append(static_cast<double>(row_idx % 8) * 0.01);
-                (void)returnflag_builder->Append(row_idx % 3 == 0 ? "R" : (row_idx % 2 == 0 ? "A" : "N"));
-                (void)linestatus_builder->Append(row_idx % 2 == 0 ? "O" : "F");
-
-                rows_in_batch++;
-                total_rows++;
-
-                // Flush batch when it reaches batch_size or at the end
-                if (rows_in_batch >= batch_size || row_idx == opts.max_rows - 1) {
-                    auto orderkey_array = orderkey_builder->Finish().ValueOrDie();
-                    auto partkey_array = partkey_builder->Finish().ValueOrDie();
-                    auto suppkey_array = suppkey_builder->Finish().ValueOrDie();
-                    auto linenumber_array = linenumber_builder->Finish().ValueOrDie();
-                    auto quantity_array = quantity_builder->Finish().ValueOrDie();
-                    auto extprice_array = extprice_builder->Finish().ValueOrDie();
-                    auto discount_array = discount_builder->Finish().ValueOrDie();
-                    auto tax_array = tax_builder->Finish().ValueOrDie();
-                    auto returnflag_array = returnflag_builder->Finish().ValueOrDie();
-                    auto linestatus_array = linestatus_builder->Finish().ValueOrDie();
-
-                    std::vector<std::shared_ptr<arrow::Array>> arrays = {
-                        orderkey_array, partkey_array, suppkey_array, linenumber_array,
-                        quantity_array, extprice_array, discount_array, tax_array,
-                        returnflag_array, linestatus_array
-                    };
-
-                    auto batch = arrow::RecordBatch::Make(schema, rows_in_batch, arrays);
-                    writer->write_batch(batch);
-
-                    batch_count++;
-                    if (opts.verbose && batch_count % 10 == 0) {
-                        std::cout << "  Batch " << batch_count << " (" << total_rows << " rows)\n";
-                    }
-
-                    // Reset builders for next batch
-                    rows_in_batch = 0;
-                    orderkey_builder->Reset();
-                    partkey_builder->Reset();
-                    suppkey_builder->Reset();
-                    linenumber_builder->Reset();
-                    quantity_builder->Reset();
-                    extprice_builder->Reset();
-                    discount_builder->Reset();
-                    tax_builder->Reset();
-                    returnflag_builder->Reset();
-                    linestatus_builder->Reset();
-                }
-            }
+            std::cerr << "Error: Unknown table '" << opts.table << "'\n";
+            return 1;
         }
 
         // Close writer
@@ -1644,7 +1531,7 @@ int main(int argc, char* argv[]) {
 
         // Print summary
         std::cout << "\n=== TPC-H Data Generation Complete ===\n";
-        std::cout << "Data source: " << (opts.use_dbgen ? "Official TPC-H dbgen" : "TPC-H-compliant synthetic") << "\n";
+        std::cout << "Data source: Official TPC-H dbgen\n";
         std::cout << "Format: " << opts.format << "\n";
         std::cout << "Output file: " << output_path << "\n";
         std::cout << "Rows written: " << total_rows << "\n";
