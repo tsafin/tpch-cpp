@@ -158,11 +158,12 @@ void ParquetWriter::write_managed_batch(const ManagedRecordBatch& managed_batch)
 }
 
 // Build WriterProperties with chosen compression.
-// Disables Parquet's auto-dict for numeric types (int64, int32, float64):
-// those are high-cardinality columns (foreign keys, prices) where the
-// Parquet DictEncoder hashtable is pure overhead.  Arrow DictionaryArray
-// columns (dict8 string fields) are unaffected — Parquet identifies them
-// by column path, not Arrow type.
+// Disables Parquet's auto-dict for:
+//   - numeric types (int64, int32, float64): high-cardinality FK/price cols
+//   - plain string types (utf8, large_utf8, binary): high-cardinality comment/name cols
+//     where BinaryMemoTable hashtable is pure overhead.
+// Arrow DictionaryArray columns (dict8 string fields) are NOT affected —
+// Parquet receives pre-built index arrays for those and never runs its own dict encoder.
 static parquet::Compression::type parse_compression(const std::string& codec)
 {
     if (codec == "snappy") return parquet::Compression::SNAPPY;
@@ -179,8 +180,10 @@ make_writer_props(const arrow::Schema& schema, const std::string& codec)
     builder.compression(parse_compression(codec));
     for (const auto& field : schema.fields()) {
         auto tid = field->type()->id();
-        if (tid == arrow::Type::INT64 || tid == arrow::Type::INT32 ||
-            tid == arrow::Type::DOUBLE || tid == arrow::Type::FLOAT) {
+        if (tid == arrow::Type::INT64  || tid == arrow::Type::INT32  ||
+            tid == arrow::Type::DOUBLE || tid == arrow::Type::FLOAT  ||
+            tid == arrow::Type::STRING  || tid == arrow::Type::LARGE_STRING ||
+            tid == arrow::Type::BINARY) {
             builder.disable_dictionary(field->name());
         }
     }
