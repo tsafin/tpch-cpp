@@ -70,6 +70,8 @@ constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
 constexpr int OPT_LANCE_IO_URING = 1007;
 constexpr int OPT_ZERO_COPY_MODE = 1008;
 
+constexpr size_t DBGEN_BATCH_SIZE = 8192;  // aligned with Lance max_rows_per_group
+
 void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
               << "Options:\n"
@@ -273,11 +275,14 @@ long get_file_size(const std::string& filename) {
 
 std::unique_ptr<tpch::WriterInterface> create_writer(
     const std::string& format,
-    const std::string& filepath) {
+    const std::string& filepath,
+    bool zero_copy = false) {
     if (format == "csv") {
         return std::make_unique<tpch::CSVWriter>(filepath);
     } else if (format == "parquet") {
-        return std::make_unique<tpch::ParquetWriter>(filepath);
+        auto w = std::make_unique<tpch::ParquetWriter>(filepath);
+        if (zero_copy) w->enable_streaming_write();
+        return w;
     }
 #ifdef TPCH_ENABLE_ORC
     else if (format == "orc") {
@@ -380,7 +385,7 @@ void generate_with_dbgen(
     GenerateFn generate_fn,
     size_t& total_rows) {
 
-    const size_t batch_size = 10000;
+    const size_t batch_size = DBGEN_BATCH_SIZE;
     size_t rows_in_batch = 0;
 
     auto builders = create_builders_from_schema(schema);
@@ -1157,7 +1162,7 @@ int generate_all_tables_parallel_v2(const Options& opts) {
                 }
 
                 // Create writer
-                auto writer = create_writer(opts.format, output_path);
+                auto writer = create_writer(opts.format, output_path, opts.zero_copy);
 
 #ifdef TPCH_ENABLE_LANCE
                 if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
@@ -1388,7 +1393,7 @@ int main(int argc, char* argv[]) {
 #endif
 
         // Create writer
-        auto writer = create_writer(opts.format, output_path);
+        auto writer = create_writer(opts.format, output_path, opts.zero_copy);
 
 #ifdef TPCH_ENABLE_LANCE
         if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
