@@ -120,7 +120,8 @@ jobs:
             -DTPCH_ENABLE_NATIVE_OPTIMIZATIONS=OFF \
             -DTPCH_ENABLE_ASYNC_IO=ON \
             -DTPCH_ENABLE_ASAN=OFF \
-            -DTPCH_BUILD_TESTS=${{ matrix.enable_tests }}
+            -DTPCH_BUILD_TESTS=${{ matrix.enable_tests }} \
+            -DTPCDS_ENABLE=ON
 
       - name: Build project
         run: cmake --build build -j$(nproc)
@@ -128,6 +129,7 @@ jobs:
       - name: Verify executable and tests
         run: |
           test -f build/tpch_benchmark && echo "✓ tpch_benchmark created"
+          test -f build/tpcds_benchmark && echo "✓ tpcds_benchmark created"
           test -f build/tests/buffer_lifetime_manager_test && echo "✓ buffer_lifetime_manager_test created" || true
           test -f build/tests/dbgen_batch_iterator_test && echo "✓ dbgen_batch_iterator_test created" || true
           if [ "${{ matrix.enable_lance }}" = "ON" ]; then
@@ -177,12 +179,13 @@ jobs:
           name: tpch-benchmark-${{ matrix.config }}
           path: |
             build/tpch_benchmark
+            build/tpcds_benchmark
             build/tests/*_test
           retention-days: 1
           if-no-files-found: error
 
-  benchmark-suite:
-    name: Benchmark Suite
+  tpch-benchmark-suite:
+    name: TPC-H Benchmark Suite
     runs-on: ubuntu-22.04
     needs: [resolve-images, build-matrix]
     timeout-minutes: 20
@@ -331,13 +334,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-logs-suite-${{ matrix.format }}-${{ matrix.table }}
+          name: tpch-benchmark-logs-suite-${{ matrix.format }}-${{ matrix.table }}
           path: benchmark-results/${{ matrix.format }}_${{ matrix.table }}_baseline.log
           retention-days: 30
           if-no-files-found: ignore
 
-  optimization-benchmarks:
-    name: Optimization Benchmarks (${{ matrix.format }}-${{ matrix.mode }})
+  tpch-optimization-benchmarks:
+    name: TPC-H Optimization Benchmarks (${{ matrix.format }}-${{ matrix.mode }})
     runs-on: ubuntu-22.04
     needs: [resolve-images, build-matrix]
     timeout-minutes: 20
@@ -534,15 +537,229 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-logs-optimization-${{ matrix.format }}-${{ matrix.mode }}-${{ matrix.table }}
+          name: tpch-benchmark-logs-optimization-${{ matrix.format }}-${{ matrix.mode }}-${{ matrix.table }}
           path: benchmark-results/${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log
+          retention-days: 30
+          if-no-files-found: ignore
+
+  tpcds-benchmark-suite:
+    name: TPC-DS Benchmark Suite
+    runs-on: ubuntu-22.04
+    needs: [resolve-images, build-matrix]
+    timeout-minutes: 20
+    container:
+      image: ${{ matrix.build == 'base' && needs.resolve-images.outputs.base_image || matrix.build == 'orc' && needs.resolve-images.outputs.orc_image || needs.resolve-images.outputs.lance_image }}
+      options: --user root
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CSV format
+          - format: csv
+            table: store_returns
+            build: base
+          - format: csv
+            table: store_sales
+            build: base
+          - format: csv
+            table: customer
+            build: base
+          - format: csv
+            table: item
+            build: base
+          # Parquet format
+          - format: parquet
+            table: store_returns
+            build: base
+          - format: parquet
+            table: store_sales
+            build: base
+          - format: parquet
+            table: customer
+            build: base
+          - format: parquet
+            table: item
+            build: base
+          # ORC format
+          - format: orc
+            table: store_returns
+            build: orc
+          - format: orc
+            table: store_sales
+            build: orc
+          # Lance format
+          - format: lance
+            table: store_returns
+            build: lance
+          - format: lance
+            table: store_sales
+            build: lance
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tpch-benchmark-${{ matrix.build }}
+          path: .
+
+      - name: Setup benchmark executable
+        run: |
+          chmod +x tpcds_benchmark
+          mkdir -p benchmark-results
+          export LD_LIBRARY_PATH=/opt/dependencies/lib:$LD_LIBRARY_PATH
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Run format coverage benchmark
+        run: |
+          if ! timeout 600 ./tpcds_benchmark \
+            --scale-factor 1 \
+            --format ${{ matrix.format }} \
+            --table ${{ matrix.table }} \
+            --output-dir benchmark-results/ \
+            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/tpcds_${{ matrix.format }}_${{ matrix.table }}_baseline.log"; then
+            echo "ERROR: Benchmark failed with exit code $?"
+            exit 1
+          fi
+
+          if grep -q "dumped core" "benchmark-results/tpcds_${{ matrix.format }}_${{ matrix.table }}_baseline.log"; then
+            echo "ERROR: Benchmark crashed with core dump"
+            exit 1
+          fi
+
+          if grep -qi "unknown format\|unsupported format\|not supported" "benchmark-results/tpcds_${{ matrix.format }}_${{ matrix.table }}_baseline.log"; then
+            echo "ERROR: Format ${{ matrix.format }} not supported by this build"
+            exit 1
+          fi
+
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpcds-benchmark-logs-suite-${{ matrix.format }}-${{ matrix.table }}
+          path: benchmark-results/tpcds_${{ matrix.format }}_${{ matrix.table }}_baseline.log
+          retention-days: 30
+          if-no-files-found: ignore
+
+  tpcds-optimization-benchmarks:
+    name: TPC-DS Optimization Benchmarks (${{ matrix.format }}-${{ matrix.mode }})
+    runs-on: ubuntu-22.04
+    needs: [resolve-images, build-matrix]
+    timeout-minutes: 20
+    container:
+      image: ${{ matrix.image == 'base' && needs.resolve-images.outputs.base_image || needs.resolve-images.outputs.lance_image }}
+      options: --user root
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Parquet benchmarks
+          - format: parquet
+            mode: baseline
+            table: store_returns
+            image: base
+          - format: parquet
+            mode: baseline
+            table: store_sales
+            image: base
+          - format: parquet
+            mode: zero-copy
+            table: store_returns
+            image: base
+          - format: parquet
+            mode: zero-copy
+            table: store_sales
+            image: base
+          # Lance benchmarks
+          - format: lance
+            mode: baseline
+            table: store_returns
+            image: lance
+          - format: lance
+            mode: baseline
+            table: store_sales
+            image: lance
+          - format: lance
+            mode: zero-copy
+            table: store_returns
+            image: lance
+          - format: lance
+            mode: zero-copy
+            table: store_sales
+            image: lance
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tpch-benchmark-${{ matrix.image }}
+          path: .
+
+      - name: Setup benchmark executable
+        run: |
+          chmod +x tpcds_benchmark
+          mkdir -p benchmark-results
+          export LD_LIBRARY_PATH=/opt/dependencies/lib:$LD_LIBRARY_PATH
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Run optimization benchmark
+        run: |
+          MODE_FLAGS=""
+          if [ "${{ matrix.mode }}" = "zero-copy" ]; then
+            MODE_FLAGS="--zero-copy"
+          fi
+
+          if ! timeout 600 ./tpcds_benchmark \
+            --scale-factor 1 \
+            --format ${{ matrix.format }} \
+            --table ${{ matrix.table }} \
+            --output-dir benchmark-results/ \
+            $MODE_FLAGS \
+            2>&1 | grep -v "^DEBUG:" | tee "benchmark-results/tpcds_${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"; then
+            echo "ERROR: Benchmark failed with exit code $?"
+            exit 1
+          fi
+
+          if grep -q "dumped core" "benchmark-results/tpcds_${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"; then
+            echo "ERROR: Benchmark crashed with core dump"
+            exit 1
+          fi
+
+          if grep -qi "unknown format\|unsupported format\|not supported" "benchmark-results/tpcds_${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log"; then
+            echo "ERROR: Format ${{ matrix.format }} not supported by this build"
+            exit 1
+          fi
+
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpcds-benchmark-logs-optimization-${{ matrix.format }}-${{ matrix.mode }}-${{ matrix.table }}
+          path: benchmark-results/tpcds_${{ matrix.format }}_${{ matrix.table }}_${{ matrix.mode }}.log
           retention-days: 30
           if-no-files-found: ignore
 
   results-aggregation:
     name: Aggregate Results
     runs-on: ubuntu-22.04
-    needs: [benchmark-suite, optimization-benchmarks]
+    needs: [tpch-benchmark-suite, tpch-optimization-benchmarks, tpcds-benchmark-suite, tpcds-optimization-benchmarks]
     if: always()
 
     steps:
