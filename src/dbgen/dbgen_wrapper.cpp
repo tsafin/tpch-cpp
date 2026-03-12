@@ -351,7 +351,11 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table, d
     // Dictionary type shorthand for low-cardinality string columns.
     // Lance routes these to DictionaryDataBlock where compute_stat() is a no-op
     // (zero HLL/XXH3 overhead). Indices stored as int8 (up to 127 values).
-    auto dict8 = arrow::dictionary(arrow::int8(), utf8());
+    auto dict8  = arrow::dictionary(arrow::int8(), utf8());
+    // dict16: for medium-cardinality columns (128..32767 values).
+    // Date fields use dict16 (2556 values > int8 range, fit in int16).
+    // p_type has 150 values — uses dict16.
+    auto dict16 = arrow::dictionary(arrow::int16(), utf8());
 
     // TPC-H row counts per SF=1 (from spec).  Multiplied by scale_factor to get
     // per-run cardinality hints for high-cardinality utf8 columns.  The hint causes
@@ -369,7 +373,7 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table, d
     switch (table) {
         case TableType::LINEITEM:
             // Low-cardinality columns use dict8 → zero statistics overhead in Lance.
-            // Date fields keep utf8+hint (2556 values exceed int8 range).
+            // Date fields use dict16 (2556 values > int8 range, fit in int16).
             return arrow::schema({
                 tpch_field("l_orderkey",       int64()),
                 tpch_field("l_partkey",        int64()),
@@ -381,9 +385,9 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table, d
                 tpch_field("l_tax",            float64()),
                 tpch_field("l_returnflag",     dict8),              // 3 values: A/N/R
                 tpch_field("l_linestatus",     dict8),              // 2 values: F/O
-                tpch_field("l_commitdate",     utf8(),  2556),
-                tpch_field("l_shipdate",       utf8(),  2556),
-                tpch_field("l_receiptdate",    utf8(),  2556),
+                tpch_field("l_commitdate",     dict16),             // 2556 date values
+                tpch_field("l_shipdate",       dict16),             // 2556 date values
+                tpch_field("l_receiptdate",    dict16),             // 2556 date values
                 tpch_field("l_shipinstruct",   dict8),              // 4 values
                 tpch_field("l_shipmode",       dict8),              // 7 values
                 tpch_field("l_comment",        utf8(),  lineitem),  // ~unique per row
@@ -395,7 +399,7 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table, d
                 tpch_field("o_custkey",       int64()),
                 tpch_field("o_orderstatus",   dict8),              // 3 values: F/O/P
                 tpch_field("o_totalprice",    float64()),
-                tpch_field("o_orderdate",     utf8(),  2556),
+                tpch_field("o_orderdate",     dict16),             // 2556 date values
                 tpch_field("o_orderpriority", dict8),              // 5 values: 1-URGENT..5-LOW
                 tpch_field("o_clerk",         utf8(),  clerk_card), // SF*1000 unique clerks
                 tpch_field("o_shippriority",  int64()),
@@ -415,13 +419,13 @@ std::shared_ptr<arrow::Schema> tpch::DBGenWrapper::get_schema(TableType table, d
             });
 
         case TableType::PART:
-            // p_type has 150 values (exceeds int8 range) — keep utf8 with hint.
+            // p_type has 150 values — uses dict16 (exceeds int8 range, fits in int16).
             return arrow::schema({
                 tpch_field("p_partkey",     int64()),
                 tpch_field("p_name",        utf8(),  part),    // unique per part
                 tpch_field("p_mfgr",        dict8),           // 5 values
                 tpch_field("p_brand",       dict8),           // 25 values
-                tpch_field("p_type",        utf8(),  150),    // 150 values, keep hint
+                tpch_field("p_type",        dict16),          // 150 values
                 tpch_field("p_size",        int64()),
                 tpch_field("p_container",   dict8),           // 40 values
                 tpch_field("p_retailprice", float64()),

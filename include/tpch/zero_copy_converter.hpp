@@ -292,6 +292,60 @@ public:
         return (int8_t)(prefix * 8 + size);
     }
 
+    // O(1) date encoder: "YYYY-MM-DD" → day offset from 1992-01-01 (int16)
+    // TPC-H dates span 1992-01-01 to 1998-12-31 → indices 0..2556
+    static inline int16_t encode_date(const char* s) {
+        // Parse last 2 digits of year (92-98), month, day
+        int y = (s[2] - '0') * 10 + (s[3] - '0');  // 92..98
+        int m = (s[5] - '0') * 10 + (s[6] - '0');  // 1..12
+        int d = (s[8] - '0') * 10 + (s[9] - '0');  // 1..31
+        // Cumulative days before each year (1992=0, 1993=366 because 1992 is leap, ...)
+        static const int16_t year_base[7] = {0, 366, 731, 1096, 1461, 1827, 2192};
+        // Days before each month in non-leap and leap years
+        static const int16_t mbase_nonleap[12] = {0,31,59,90,120,151,181,212,243,273,304,334};
+        static const int16_t mbase_leap[12]    = {0,31,60,91,121,152,182,213,244,274,305,335};
+        bool leap = (y == 92 || y == 96);
+        int16_t doy = (leap ? mbase_leap : mbase_nonleap)[m - 1] + (int16_t)(d - 1);
+        return year_base[y - 92] + doy;
+    }
+
+    // O(1) p_type encoder: "SYLLABLE1 SYLLABLE2 SYLLABLE3" → index 0..149
+    // syllable1: STANDARD(0), SMALL(1), MEDIUM(2), LARGE(3), ECONOMY(4), PROMO(5)
+    // syllable2: ANODIZED(0), BURNISHED(1), PLATED(2), POLISHED(3), BRUSHED(4)
+    // syllable3: TIN(0), NICKEL(1), BRASS(2), STEEL(3), COPPER(4)
+    static inline int16_t encode_ptype(const char* s) {
+        int8_t s1;
+        switch (s[0]) {
+            case 'S': s1 = (s[1] == 'T') ? 0 : 1; break;  // STANDARD vs SMALL
+            case 'M': s1 = 2; break;
+            case 'L': s1 = 3; break;
+            case 'E': s1 = 4; break;
+            default:  s1 = 5; break;  // PROMO
+        }
+        const char* p2 = s;
+        while (*p2 && *p2 != ' ') p2++;
+        if (*p2 == ' ') p2++;
+        int8_t s2;
+        switch (p2[0]) {
+            case 'A': s2 = 0; break;
+            case 'B': s2 = (p2[1] == 'U') ? 1 : 4; break;  // BURNISHED vs BRUSHED
+            case 'P': s2 = (p2[1] == 'L') ? 2 : 3; break;  // PLATED vs POLISHED
+            default:  s2 = 0; break;
+        }
+        const char* p3 = p2;
+        while (*p3 && *p3 != ' ') p3++;
+        if (*p3 == ' ') p3++;
+        int8_t s3;
+        switch (p3[0]) {
+            case 'T': s3 = 0; break;
+            case 'N': s3 = 1; break;
+            case 'B': s3 = 2; break;
+            case 'S': s3 = 3; break;
+            default:  s3 = 4; break;  // COPPER
+        }
+        return (int16_t)(s1 * 25 + s2 * 5 + s3);
+    }
+
     /**
      * Return the static string dictionary array for a known low-cardinality field.
      * Returns nullptr for fields that are not dictionary-encoded.
@@ -318,6 +372,14 @@ private:
     static arrow::Result<std::shared_ptr<arrow::Array>>
     build_dict_int8_array(std::span<const int8_t> indices,
                           const std::shared_ptr<arrow::Array>& dictionary);
+
+    /**
+     * Build DictionaryArray<Int16Type, StringArray> from index buffer + static dictionary.
+     * Used for medium-cardinality TPC-H columns (date fields: 2556 values, p_type: 150 values)
+     */
+    static arrow::Result<std::shared_ptr<arrow::Array>>
+    build_dict_int16_array(std::span<const int16_t> indices,
+                           const std::shared_ptr<arrow::Array>& dictionary);
 
     /**
      * Build Int64 array from contiguous memory

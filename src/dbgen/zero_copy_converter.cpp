@@ -114,6 +114,21 @@ ZeroCopyConverter::build_dict_int8_array(
     return arrow::DictionaryArray::FromArrays(dict_type, index_array, dictionary);
 }
 
+arrow::Result<std::shared_ptr<arrow::Array>>
+ZeroCopyConverter::build_dict_int16_array(
+    std::span<const int16_t> indices,
+    const std::shared_ptr<arrow::Array>& dictionary)
+{
+    const int64_t count = static_cast<int64_t>(indices.size());
+
+    ARROW_ASSIGN_OR_RAISE(auto index_buf, arrow::AllocateBuffer(count * sizeof(int16_t)));
+    std::memcpy(index_buf->mutable_data(), indices.data(), count * sizeof(int16_t));
+
+    auto index_array = std::make_shared<arrow::Int16Array>(count, std::move(index_buf));
+    auto dict_type = arrow::dictionary(arrow::int16(), arrow::utf8());
+    return arrow::DictionaryArray::FromArrays(dict_type, index_array, dictionary);
+}
+
 std::shared_ptr<arrow::Array>
 ZeroCopyConverter::get_dict_for_field(const std::string& name) {
     static auto returnflag   = make_string_dict({"A", "N", "R"});
@@ -143,6 +158,41 @@ ZeroCopyConverter::get_dict_for_field(const std::string& name) {
         "JUMBO BOX", "JUMBO BAG", "JUMBO JAR", "JUMBO PKG", "JUMBO PACK", "JUMBO CAN", "JUMBO DRUM", "JUMBO CUP",
         "WRAP BOX",  "WRAP BAG",  "WRAP JAR",  "WRAP PKG",  "WRAP PACK",  "WRAP CAN",  "WRAP DRUM",  "WRAP CUP"});
 
+    // Date dictionary: all TPC-H dates 1992-01-01 .. 1998-12-31 in day order
+    static auto date_dict = []() -> std::shared_ptr<arrow::Array> {
+        arrow::StringBuilder b;
+        static const int days_in_month[2][12] = {
+            {31,28,31,30,31,30,31,31,30,31,30,31},  // non-leap
+            {31,29,31,30,31,30,31,31,30,31,30,31}   // leap
+        };
+        for (int y = 1992; y <= 1998; ++y) {
+            bool leap = (y % 4 == 0);
+            for (int m = 1; m <= 12; ++m) {
+                for (int d = 1; d <= days_in_month[leap ? 1 : 0][m - 1]; ++d) {
+                    char buf[11];
+                    std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+                    b.Append(buf, 10).ok();
+                }
+            }
+        }
+        return *b.Finish();
+    }();
+
+    // p_type dictionary: 150 = 6×5×5 syllable combinations in index order
+    static auto ptype_dict = []() -> std::shared_ptr<arrow::Array> {
+        static const char* s1[] = {"STANDARD","SMALL","MEDIUM","LARGE","ECONOMY","PROMO"};
+        static const char* s2[] = {"ANODIZED","BURNISHED","PLATED","POLISHED","BRUSHED"};
+        static const char* s3[] = {"TIN","NICKEL","BRASS","STEEL","COPPER"};
+        arrow::StringBuilder b;
+        for (int i = 0; i < 6; ++i)
+            for (int j = 0; j < 5; ++j)
+                for (int k = 0; k < 5; ++k) {
+                    std::string v = std::string(s1[i]) + " " + s2[j] + " " + s3[k];
+                    b.Append(v).ok();
+                }
+        return *b.Finish();
+    }();
+
     if (name == "l_returnflag")     return returnflag;
     if (name == "l_linestatus")     return linestatus;
     if (name == "l_shipinstruct")   return shipinstruct;
@@ -153,6 +203,9 @@ ZeroCopyConverter::get_dict_for_field(const std::string& name) {
     if (name == "p_mfgr")           return mfgr;
     if (name == "p_brand")          return brand;
     if (name == "p_container")      return container;
+    if (name == "l_shipdate" || name == "l_commitdate" || name == "l_receiptdate" ||
+        name == "o_orderdate")  return date_dict;
+    if (name == "p_type")       return ptype_dict;
     return nullptr;
 }
 
@@ -232,10 +285,10 @@ ZeroCopyConverter::lineitem_to_recordbatch(
     std::vector<int8_t> linestatus_idxs;
     std::vector<int8_t> shipinstruct_idxs;
     std::vector<int8_t> shipmode_idxs;
-    // Date and comment columns stay as utf8
-    std::vector<std::string_view> shipdates;
-    std::vector<std::string_view> commitdates;
-    std::vector<std::string_view> receiptdates;
+    // Date fields: dict16-encoded (2556 unique values, fit in int16)
+    std::vector<int16_t> shipdate_idxs;
+    std::vector<int16_t> commitdate_idxs;
+    std::vector<int16_t> receiptdate_idxs;
     std::vector<std::string_view> comments;
 
     // Reserve space
@@ -250,9 +303,9 @@ ZeroCopyConverter::lineitem_to_recordbatch(
 
     returnflag_idxs.reserve(count);
     linestatus_idxs.reserve(count);
-    shipdates.reserve(count);
-    commitdates.reserve(count);
-    receiptdates.reserve(count);
+    shipdate_idxs.reserve(count);
+    commitdate_idxs.reserve(count);
+    receiptdate_idxs.reserve(count);
     shipinstruct_idxs.reserve(count);
     shipmode_idxs.reserve(count);
     comments.reserve(count);
@@ -276,10 +329,10 @@ ZeroCopyConverter::lineitem_to_recordbatch(
         linestatus_idxs.push_back(encode_linestatus(line.lstatus[0]));
         shipinstruct_idxs.push_back(encode_shipinstruct(line.shipinstruct));
         shipmode_idxs.push_back(encode_shipmode(line.shipmode));
-        // Date and comment fields: utf8 string views
-        shipdates.emplace_back(line.sdate, strlen_fast(line.sdate));
-        commitdates.emplace_back(line.cdate, strlen_fast(line.cdate));
-        receiptdates.emplace_back(line.rdate, strlen_fast(line.rdate));
+        // Date fields: encode to int16 index (dict16)
+        shipdate_idxs.push_back(encode_date(line.sdate));
+        commitdate_idxs.push_back(encode_date(line.cdate));
+        receiptdate_idxs.push_back(encode_date(line.rdate));
         comments.emplace_back(line.comment, line.clen);
     }
 
@@ -298,11 +351,11 @@ ZeroCopyConverter::lineitem_to_recordbatch(
     ARROW_ASSIGN_OR_RAISE(auto linestatus_array,
         build_dict_int8_array(linestatus_idxs, get_dict_for_field("l_linestatus")));
     ARROW_ASSIGN_OR_RAISE(auto commitdate_array,
-        build_string_array(commitdates));
+        build_dict_int16_array(commitdate_idxs, get_dict_for_field("l_commitdate")));
     ARROW_ASSIGN_OR_RAISE(auto shipdate_array,
-        build_string_array(shipdates));
+        build_dict_int16_array(shipdate_idxs, get_dict_for_field("l_shipdate")));
     ARROW_ASSIGN_OR_RAISE(auto receiptdate_array,
-        build_string_array(receiptdates));
+        build_dict_int16_array(receiptdate_idxs, get_dict_for_field("l_receiptdate")));
     ARROW_ASSIGN_OR_RAISE(auto shipinstruct_array,
         build_dict_int8_array(shipinstruct_idxs, get_dict_for_field("l_shipinstruct")));
     ARROW_ASSIGN_OR_RAISE(auto shipmode_array,
@@ -353,7 +406,7 @@ ZeroCopyConverter::orders_to_recordbatch(
 
     std::vector<int8_t> orderstatus_idxs;
     std::vector<int8_t> orderpriority_idxs;
-    std::vector<std::string_view> orderdates;
+    std::vector<int16_t> orderdate_idxs;
     std::vector<std::string_view> clerks;
     std::vector<std::string_view> comments;
 
@@ -364,7 +417,7 @@ ZeroCopyConverter::orders_to_recordbatch(
     shippriorities.reserve(count);
     orderstatus_idxs.reserve(count);
     orderpriority_idxs.reserve(count);
-    orderdates.reserve(count);
+    orderdate_idxs.reserve(count);
     clerks.reserve(count);
     comments.reserve(count);
 
@@ -379,8 +432,8 @@ ZeroCopyConverter::orders_to_recordbatch(
         // Dict-encoded
         orderstatus_idxs.push_back(encode_orderstatus(order.orderstatus));
         orderpriority_idxs.push_back(encode_orderpriority(order.opriority));
-        // utf8 fields
-        orderdates.emplace_back(order.odate, strlen_fast(order.odate));
+        // orderdate: dict16-encoded (2556 unique values, fit in int16)
+        orderdate_idxs.push_back(encode_date(order.odate));
         clerks.emplace_back(order.clerk, strlen_fast(order.clerk));
         comments.emplace_back(order.comment, order.clen);
     }
@@ -393,7 +446,8 @@ ZeroCopyConverter::orders_to_recordbatch(
 
     ARROW_ASSIGN_OR_RAISE(auto orderstatus_array,
         build_dict_int8_array(orderstatus_idxs, get_dict_for_field("o_orderstatus")));
-    ARROW_ASSIGN_OR_RAISE(auto orderdate_array, build_string_array(orderdates));
+    ARROW_ASSIGN_OR_RAISE(auto orderdate_array,
+        build_dict_int16_array(orderdate_idxs, get_dict_for_field("o_orderdate")));
     ARROW_ASSIGN_OR_RAISE(auto orderpriority_array,
         build_dict_int8_array(orderpriority_idxs, get_dict_for_field("o_orderpriority")));
     ARROW_ASSIGN_OR_RAISE(auto clerk_array, build_string_array(clerks));
@@ -510,7 +564,7 @@ ZeroCopyConverter::part_to_recordbatch(
     std::vector<std::string_view> names;
     std::vector<int8_t> mfgr_idxs;
     std::vector<int8_t> brand_idxs;
-    std::vector<std::string_view> types;
+    std::vector<int16_t> type_idxs;
     std::vector<int8_t> container_idxs;
     std::vector<std::string_view> comments;
 
@@ -521,7 +575,7 @@ ZeroCopyConverter::part_to_recordbatch(
     names.reserve(count);
     mfgr_idxs.reserve(count);
     brand_idxs.reserve(count);
-    types.reserve(count);
+    type_idxs.reserve(count);
     container_idxs.reserve(count);
     comments.reserve(count);
 
@@ -536,9 +590,9 @@ ZeroCopyConverter::part_to_recordbatch(
         mfgr_idxs.push_back(encode_mfgr(part.mfgr));
         brand_idxs.push_back(encode_brand(part.brand));
         container_idxs.push_back(encode_container(part.container));
-        // utf8 fields
+        // p_type: dict16-encoded (150 values)
+        type_idxs.push_back(encode_ptype(part.type));
         names.emplace_back(part.name, part.nlen);
-        types.emplace_back(part.type, part.tlen);
         comments.emplace_back(part.comment, part.clen);
     }
 
@@ -552,7 +606,8 @@ ZeroCopyConverter::part_to_recordbatch(
         build_dict_int8_array(mfgr_idxs, get_dict_for_field("p_mfgr")));
     ARROW_ASSIGN_OR_RAISE(auto brand_array,
         build_dict_int8_array(brand_idxs, get_dict_for_field("p_brand")));
-    ARROW_ASSIGN_OR_RAISE(auto type_array, build_string_array(types));
+    ARROW_ASSIGN_OR_RAISE(auto type_array,
+        build_dict_int16_array(type_idxs, get_dict_for_field("p_type")));
     ARROW_ASSIGN_OR_RAISE(auto container_array,
         build_dict_int8_array(container_idxs, get_dict_for_field("p_container")));
     ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(comments));
@@ -839,10 +894,10 @@ ZeroCopyConverter::lineitem_to_recordbatch_wrapped(
     std::vector<int8_t> linestatus_idxs; linestatus_idxs.reserve(count);
     std::vector<int8_t> shipinstruct_idxs; shipinstruct_idxs.reserve(count);
     std::vector<int8_t> shipmode_idxs; shipmode_idxs.reserve(count);
-    // Date and comment columns stay as utf8 (managed lifetime)
-    auto shipdates    = lifetime_mgr->create_string_view_buffer(count);
-    auto commitdates  = lifetime_mgr->create_string_view_buffer(count);
-    auto receiptdates = lifetime_mgr->create_string_view_buffer(count);
+    // Date fields: dict16-encoded (2556 unique values, fit in int16)
+    std::vector<int16_t> shipdate_idxs; shipdate_idxs.reserve(count);
+    std::vector<int16_t> commitdate_idxs; commitdate_idxs.reserve(count);
+    std::vector<int16_t> receiptdate_idxs; receiptdate_idxs.reserve(count);
     auto comments     = lifetime_mgr->create_string_view_buffer(count);
 
     // Single pass: extract all fields into managed vectors
@@ -862,10 +917,10 @@ ZeroCopyConverter::lineitem_to_recordbatch_wrapped(
         linestatus_idxs.push_back(encode_linestatus(line.lstatus[0]));
         shipinstruct_idxs.push_back(encode_shipinstruct(line.shipinstruct));
         shipmode_idxs.push_back(encode_shipmode(line.shipmode));
-        // Date/comment fields: utf8 views
-        shipdates->emplace_back(line.sdate, strlen_fast(line.sdate));
-        commitdates->emplace_back(line.cdate, strlen_fast(line.cdate));
-        receiptdates->emplace_back(line.rdate, strlen_fast(line.rdate));
+        // Date fields: encode to int16 index (dict16)
+        shipdate_idxs.push_back(encode_date(line.sdate));
+        commitdate_idxs.push_back(encode_date(line.cdate));
+        receiptdate_idxs.push_back(encode_date(line.rdate));
         comments->emplace_back(line.comment, line.clen);
     }
 
@@ -888,10 +943,13 @@ ZeroCopyConverter::lineitem_to_recordbatch_wrapped(
         build_dict_int8_array(shipinstruct_idxs, get_dict_for_field("l_shipinstruct")));
     ARROW_ASSIGN_OR_RAISE(auto shipmode_array,
         build_dict_int8_array(shipmode_idxs, get_dict_for_field("l_shipmode")));
-    // utf8 columns
-    ARROW_ASSIGN_OR_RAISE(auto shipdate_array, build_string_array(*shipdates));
-    ARROW_ASSIGN_OR_RAISE(auto commitdate_array, build_string_array(*commitdates));
-    ARROW_ASSIGN_OR_RAISE(auto receiptdate_array, build_string_array(*receiptdates));
+    // dict16 date columns
+    ARROW_ASSIGN_OR_RAISE(auto shipdate_array,
+        build_dict_int16_array(shipdate_idxs, get_dict_for_field("l_shipdate")));
+    ARROW_ASSIGN_OR_RAISE(auto commitdate_array,
+        build_dict_int16_array(commitdate_idxs, get_dict_for_field("l_commitdate")));
+    ARROW_ASSIGN_OR_RAISE(auto receiptdate_array,
+        build_dict_int16_array(receiptdate_idxs, get_dict_for_field("l_receiptdate")));
     ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));
 
     // Assemble RecordBatch
@@ -949,7 +1007,8 @@ ZeroCopyConverter::orders_to_recordbatch_wrapped(
     // Dict-encoded string columns
     std::vector<int8_t> orderstatus_idxs; orderstatus_idxs.reserve(count);
     std::vector<int8_t> orderpriority_idxs; orderpriority_idxs.reserve(count);
-    auto orderdates = lifetime_mgr->create_string_view_buffer(count);
+    // orderdate: dict16-encoded (2556 unique values, fit in int16)
+    std::vector<int16_t> orderdate_idxs; orderdate_idxs.reserve(count);
     auto clerks     = lifetime_mgr->create_string_view_buffer(count);
     auto comments   = lifetime_mgr->create_string_view_buffer(count);
 
@@ -964,8 +1023,8 @@ ZeroCopyConverter::orders_to_recordbatch_wrapped(
         // Dict-encoded
         orderstatus_idxs.push_back(encode_orderstatus(order.orderstatus));
         orderpriority_idxs.push_back(encode_orderpriority(order.opriority));
-        // utf8 fields
-        orderdates->emplace_back(order.odate, strlen_fast(order.odate));
+        // orderdate: dict16 index
+        orderdate_idxs.push_back(encode_date(order.odate));
         clerks->emplace_back(order.clerk, strlen_fast(order.clerk));
         comments->emplace_back(order.comment, order.clen);
     }
@@ -978,7 +1037,8 @@ ZeroCopyConverter::orders_to_recordbatch_wrapped(
 
     ARROW_ASSIGN_OR_RAISE(auto orderstatus_array,
         build_dict_int8_array(orderstatus_idxs, get_dict_for_field("o_orderstatus")));
-    ARROW_ASSIGN_OR_RAISE(auto orderdate_array, build_string_array(*orderdates));
+    ARROW_ASSIGN_OR_RAISE(auto orderdate_array,
+        build_dict_int16_array(orderdate_idxs, get_dict_for_field("o_orderdate")));
     ARROW_ASSIGN_OR_RAISE(auto orderpriority_array,
         build_dict_int8_array(orderpriority_idxs, get_dict_for_field("o_orderpriority")));
     ARROW_ASSIGN_OR_RAISE(auto clerk_array, build_string_array(*clerks));
@@ -1097,7 +1157,8 @@ ZeroCopyConverter::part_to_recordbatch_wrapped(
     auto names     = lifetime_mgr->create_string_view_buffer(count);
     std::vector<int8_t> mfgr_idxs;      mfgr_idxs.reserve(count);
     std::vector<int8_t> brand_idxs;     brand_idxs.reserve(count);
-    auto types     = lifetime_mgr->create_string_view_buffer(count);
+    // p_type: dict16-encoded (150 values)
+    std::vector<int16_t> type_idxs;     type_idxs.reserve(count);
     std::vector<int8_t> container_idxs; container_idxs.reserve(count);
     auto comments  = lifetime_mgr->create_string_view_buffer(count);
 
@@ -1112,9 +1173,9 @@ ZeroCopyConverter::part_to_recordbatch_wrapped(
         mfgr_idxs.push_back(encode_mfgr(part.mfgr));
         brand_idxs.push_back(encode_brand(part.brand));
         container_idxs.push_back(encode_container(part.container));
-        // utf8 fields
+        // p_type: dict16 index
+        type_idxs.push_back(encode_ptype(part.type));
         names->emplace_back(part.name, part.nlen);
-        types->emplace_back(part.type, part.tlen);
         comments->emplace_back(part.comment, part.clen);
     }
 
@@ -1128,7 +1189,8 @@ ZeroCopyConverter::part_to_recordbatch_wrapped(
         build_dict_int8_array(mfgr_idxs, get_dict_for_field("p_mfgr")));
     ARROW_ASSIGN_OR_RAISE(auto brand_array,
         build_dict_int8_array(brand_idxs, get_dict_for_field("p_brand")));
-    ARROW_ASSIGN_OR_RAISE(auto type_array, build_string_array(*types));
+    ARROW_ASSIGN_OR_RAISE(auto type_array,
+        build_dict_int16_array(type_idxs, get_dict_for_field("p_type")));
     ARROW_ASSIGN_OR_RAISE(auto container_array,
         build_dict_int8_array(container_idxs, get_dict_for_field("p_container")));
     ARROW_ASSIGN_OR_RAISE(auto comment_array, build_string_array(*comments));

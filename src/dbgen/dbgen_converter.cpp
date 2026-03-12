@@ -51,15 +51,13 @@ void append_lineitem_to_builders(
     static_cast<arrow::Int8Builder*>(builders["l_linestatus"].get())
         ->Append(tpch::ZeroCopyConverter::encode_linestatus(line->lstatus[0]));
 
-    // Date fields: utf8 (high cardinality, kept as strings)
-    auto* cdate_builder = static_cast<arrow::StringBuilder*>(builders["l_commitdate"].get());
-    cdate_builder->Append(line->cdate, simd::strlen_sse42_unaligned(line->cdate));
-
-    auto* sdate_builder = static_cast<arrow::StringBuilder*>(builders["l_shipdate"].get());
-    sdate_builder->Append(line->sdate, simd::strlen_sse42_unaligned(line->sdate));
-
-    auto* rdate_builder = static_cast<arrow::StringBuilder*>(builders["l_receiptdate"].get());
-    rdate_builder->Append(line->rdate, simd::strlen_sse42_unaligned(line->rdate));
+    // Date fields: dict16-encoded (2556 unique values, fit in int16)
+    static_cast<arrow::Int16Builder*>(builders["l_commitdate"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_date(line->cdate));
+    static_cast<arrow::Int16Builder*>(builders["l_shipdate"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_date(line->sdate));
+    static_cast<arrow::Int16Builder*>(builders["l_receiptdate"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_date(line->rdate));
 
     // Dict-encoded ship instruction and mode
     static_cast<arrow::Int8Builder*>(builders["l_shipinstruct"].get())
@@ -91,8 +89,9 @@ void append_orders_to_builders(
     static_cast<arrow::DoubleBuilder*>(builders["o_totalprice"].get())
         ->Append(static_cast<double>(order->totalprice) / 100.0);
 
-    auto* odate_builder = static_cast<arrow::StringBuilder*>(builders["o_orderdate"].get());
-    odate_builder->Append(order->odate, simd::strlen_sse42_unaligned(order->odate));
+    // orderdate: dict16-encoded (2556 unique values, fit in int16)
+    static_cast<arrow::Int16Builder*>(builders["o_orderdate"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_date(order->odate));
 
     static_cast<arrow::Int8Builder*>(builders["o_orderpriority"].get())
         ->Append(tpch::ZeroCopyConverter::encode_orderpriority(order->opriority));
@@ -156,8 +155,9 @@ void append_part_to_builders(
     static_cast<arrow::Int8Builder*>(builders["p_brand"].get())
         ->Append(tpch::ZeroCopyConverter::encode_brand(part->brand));
 
-    auto* type_builder = static_cast<arrow::StringBuilder*>(builders["p_type"].get());
-    type_builder->Append(std::string(part->type, part->tlen));
+    // p_type: dict16-encoded (150 values)
+    static_cast<arrow::Int16Builder*>(builders["p_type"].get())
+        ->Append(tpch::ZeroCopyConverter::encode_ptype(part->type));
 
     static_cast<arrow::Int64Builder*>(builders["p_size"].get())
         ->Append(part->size);

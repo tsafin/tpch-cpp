@@ -341,10 +341,18 @@ create_builders_from_schema(std::shared_ptr<arrow::Schema> schema) {
             (void)builder->ReserveData(capacity * 50);
             builders[field->name()] = builder;
         } else if (field->type()->id() == arrow::Type::DICTIONARY) {
-            // Phase 3.3: dict columns use Int8Builder; finish_batch wraps in DictionaryArray
-            auto builder = std::make_shared<arrow::Int8Builder>();
-            (void)builder->Reserve(capacity);
-            builders[field->name()] = builder;
+            const auto& dict_type = static_cast<const arrow::DictionaryType&>(*field->type());
+            if (dict_type.index_type()->id() == arrow::Type::INT16) {
+                // dict16: date fields (2556 values) and p_type (150 values)
+                auto builder = std::make_shared<arrow::Int16Builder>();
+                (void)builder->Reserve(capacity);
+                builders[field->name()] = builder;
+            } else {
+                // INT8 (default for low-cardinality columns, up to 127 values)
+                auto builder = std::make_shared<arrow::Int8Builder>();
+                (void)builder->Reserve(capacity);
+                builders[field->name()] = builder;
+            }
         } else {
             throw std::runtime_error("Unsupported type: " + field->type()->ToString());
         }
