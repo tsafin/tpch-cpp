@@ -59,7 +59,7 @@ std::string IcebergWriter::arrow_type_to_iceberg_type(
                    + std::to_string(decimal_type->scale()) + ")";
         }
         case arrow::Type::DICTIONARY:
-            return "string";  // dict8<int8, utf8> written as Parquet dict page, exposed as string
+            return "string";  // dictionary<int8|int16, utf8> — parquet::arrow::WriteTable handles natively
         default:
             throw std::runtime_error(
                 std::string("Unsupported Arrow type for Iceberg: ") + arrow_type->ToString()

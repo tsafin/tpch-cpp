@@ -33,7 +33,7 @@ std::string arrow_type_to_orc_type_name(const std::shared_ptr<arrow::DataType>& 
     } else if (type->id() == arrow::Type::STRING) {
         return "string";
     } else if (type->id() == arrow::Type::DICTIONARY) {
-        return "string";  // dict8<int8, utf8> expanded to string on write
+        return "string";  // dictionary<int8|int16, utf8> expanded to string on write
     } else {
         throw std::runtime_error("Unsupported Arrow type for ORC conversion");
     }
@@ -143,7 +143,8 @@ void copy_array_to_orc_column(
             }
         }
     } else if (array->type()->id() == arrow::Type::DICTIONARY) {
-        // Expand dict8<int8, utf8> to ORC string column via index lookup.
+        // Expand dictionary<int8|int16, utf8> to ORC string column via index lookup.
+        // GetValueIndex() returns int64 regardless of index width — works for both.
         // string_view points into the dictionary buffer which outlives this function.
         auto dict_array = std::static_pointer_cast<arrow::DictionaryArray>(array);
         auto dict_values = std::static_pointer_cast<arrow::StringArray>(dict_array->dictionary());
