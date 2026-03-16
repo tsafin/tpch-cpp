@@ -1,8 +1,15 @@
 # Parallel TPC-DS Generation with General io_uring Layer
 
-**Status**: Design / pre-implementation
-**Target branch**: `tpcds_cpp_embedded`
+**Status**: DS-10.1 complete; DS-10.2 next
+**Target branch**: `tsafin/parallel_tpcds`
 **Phase label**: DS-10
+
+| Phase | Status | Commit |
+|-------|--------|--------|
+| DS-10.1 | ✅ done | `81c7539` |
+| DS-10.2 | 🔲 next | — |
+| DS-10.3 | 🔲 pending | — |
+| DS-10.4 | 🔲 pending (optional) | — |
 
 ---
 
@@ -403,23 +410,33 @@ implementation detail of `--parallel`.
 
 ## Implementation Phases
 
-### DS-10.1 — Fork-after-init parallel generation
+### DS-10.1 — Fork-after-init parallel generation ✅ `81c7539`
 
-**Files**: `src/tpcds_main.cpp`, `include/tpch/dsdgen_wrapper.hpp`,
+**Files changed**: `src/tpcds_main.cpp`, `include/tpch/dsdgen_wrapper.hpp`,
 `src/dsdgen/dsdgen_wrapper.cpp`
-**New lines**: ~165
+**Net change**: +347 / -98 lines
 
-Steps:
-1. Add `set_skip_init(bool)` and `clear_tmp_path()` to `DSDGenWrapper`.
-2. Add `Options::parallel` and `Options::parallel_tables` fields + getopt parsing.
-3. Implement `generate_all_tables_parallel(const Options&)`:
-   - Build the canonical table list (all 24 implemented tables).
-   - Init one `DSDGenWrapper` in the parent; call `init_dsdgen()`.
-   - Fork loop: each child calls `set_skip_init` + `clear_tmp_path`, creates its own
-     writer, generates its table, exits.
-   - Parent: `waitpid(-1, &status, 0)` loop; unlinks temp dist file after all children
-     finish; returns non-zero if any child failed.
-4. Wire into `main()`: if `opts.parallel`, call `generate_all_tables_parallel`.
+What was built:
+1. `DSDGenWrapper::prepare_for_fork()` — public wrapper around `init_dsdgen()`; call
+   in parent before any `fork()`.
+2. `DSDGenWrapper::clear_tmp_path()` — call immediately after `fork()` in each child;
+   prevents child destructor from unlinking the parent's temp dist file.
+3. `dispatch_generation()` — extracted the 24-entry if-else table dispatch; used by
+   both the single-table path and the parallel path (no duplication).
+4. `ALL_TPCDS_TABLES` — ordered: tiny dims → small dims → large dims → fact tables,
+   so small tables complete quickly and free slots for the heavier fact tables.
+5. `generate_all_tables_parallel()` — rolling N-slot fork loop using `waitpid(-1)`:
+   forks up to `--parallel-tables N` children simultaneously (default: all 24),
+   refills freed slots immediately; parent unlinks temp dist file on exit.
+6. `run_table_child()` — per-child setup: clears tmp path, creates writer, calls
+   dispatch_generation, prints per-table timing line, exits.
+7. `main()`: if `opts.parallel`, delegates to `generate_all_tables_parallel` and
+   returns; single-table path unchanged.
+
+**Observed performance** (SF=1, default 1000-row smoke test):
+- Sequential (24 tables × ~0.24s each): ~5.8s
+- `--parallel` (24 slots): **0.14s wall** — ~40× faster on smoke workload
+- `--parallel --parallel-tables 4` (rolling 4-slot window): 0.08s wall
 
 ### DS-10.2 — `IoUringPool` + `IoUringOutputStream`
 
@@ -531,9 +548,10 @@ CMakeLists.txt               ← add src/io/*.cpp to tpch_core sources
 
 ## Open Questions
 
-1. **Rolling fork vs batch**: The `pidfd` + `POLL_ADD` scheduler loop is inherently
-   rolling — a new child is forked immediately when a CQE fires, keeping N slots
-   busy at all times. No separate "batch" vs "rolling" decision is needed. ✅ Resolved.
+1. **Rolling fork vs batch**: DS-10.1 uses `waitpid(-1)` for the rolling window —
+   a new child is forked immediately when any child exits, keeping N slots busy.
+   DS-10.2 will upgrade this to the `pidfd` + `IORING_OP_POLL_ADD` event loop so the
+   same anchor ring drives both scheduling and I/O. ✅ Resolved (DS-10.1 interim).
 
 2. **Lance `--zero-copy` in parallel mode**: Each child uses its own Lance writer
    independently. Streaming mode (`zero_copy_mode=async`) spawns a Tokio runtime per
