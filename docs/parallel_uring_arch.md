@@ -1,15 +1,15 @@
 # Parallel TPC-DS Generation with General io_uring Layer
 
-**Status**: DS-10.1 complete; DS-10.2 next
+**Status**: DS-10.1/10.2/10.3 complete; DS-10.4 optional next
 **Target branch**: `tsafin/parallel_tpcds`
 **Phase label**: DS-10
 
 | Phase | Status | Commit |
 |-------|--------|--------|
 | DS-10.1 | ✅ done | `81c7539` |
-| DS-10.2 | 🔲 next | — |
-| DS-10.3 | 🔲 pending | — |
-| DS-10.4 | 🔲 pending (optional) | — |
+| DS-10.2 | ✅ done | `141624a` |
+| DS-10.3 | ✅ done | `141624a` |
+| DS-10.4 | 🔲 optional | — |
 
 ---
 
@@ -438,39 +438,43 @@ What was built:
 - `--parallel` (24 slots): **0.14s wall** — ~40× faster on smoke workload
 - `--parallel --parallel-tables 4` (rolling 4-slot window): 0.08s wall
 
-### DS-10.2 — `IoUringPool` + `IoUringOutputStream`
+### DS-10.2 + DS-10.3 — `IoUringPool` + `IoUringOutputStream` + Parquet injection ✅ `141624a`
 
-**Files**: `include/tpch/io_uring_pool.hpp`, `src/io/io_uring_pool.cpp`,
-`include/tpch/io_uring_output_stream.hpp`, `src/io/io_uring_output_stream.cpp`
-**New lines**: ~300
-**Build gate**: `TPCH_ENABLE_ASYNC_IO` (already exists); stubs compile to
-`FileOutputStream` fallback when flag is off.
+**Files**: `include/tpch/io_uring_pool.hpp`, `src/async/io_uring_pool.cpp`,
+`include/tpch/io_uring_output_stream.hpp`, `src/async/io_uring_output_stream.cpp`,
+`include/tpch/parquet_writer.hpp`, `src/writers/parquet_writer.cpp`,
+`src/tpcds_main.cpp` (parallel init + child injection), `CMakeLists.txt`
+**Net change**: +664 lines
 
-Steps:
-1. `IoUringPool::init_anchor(output_dir)`:
-   - `sysfs_queue_depth(output_dir)` → calibrate QD.
-   - `io_uring_setup(qd, 0)` → `anchor_fd_`.
-2. `IoUringPool::create_child_ring()`:
-   - `io_uring_setup(qd, IORING_SETUP_ATTACH_WQ, .wq_fd = anchor_fd_)`.
-   - Falls back to plain ring if `anchor_fd_ == -1`.
-3. `IoUringOutputStream`:
-   - Constructor: open file `O_WRONLY|O_CREAT|O_TRUNC`; spawn worker thread.
-   - `Write()`: atomically pre-claim offset; enqueue `WriteJob` to MPSC; block
-     until `done` future resolves.
-   - Worker loop: pop jobs, fill SQ with 512 KB SQEs, `io_uring_submit_and_wait`,
-     drain CQEs, resolve futures.
-   - `Close()`: send sentinel; join worker; close file fd.
+What was built:
 
-### DS-10.3 — Inject stream into `create_writer()` factory
+1. **`IoUringPool`** — dual-role anchor ring manager:
+   - `init(output_dir)`: sysfs QD calibration + `io_uring_queue_init`.
+   - `watch_child(pidfd, user_data)`: submits `POLL_ADD` on anchor ring.
+   - `wait_any()`: blocks on `io_uring_wait_cqe`, drains CQ batch.
+   - `create_child_ring_struct()`: allocates child ring with `IORING_SETUP_ATTACH_WQ`.
+   - `free_ring(ring)`: `io_uring_queue_exit` + `delete`.
+   - Stub when `TPCH_ENABLE_ASYNC_IO=OFF`: `available()` returns false, all no-ops.
 
-**Files**: `src/tpcds_main.cpp` (mainly), `src/writers/parquet_writer.cpp`,
-`src/writers/csv_writer.cpp`
-**New lines**: ~50
+2. **`IoUringOutputStream`** — format-agnostic `arrow::io::OutputStream`:
+   - Opens file in constructor; spawns worker thread when ring != nullptr.
+   - `Write()`: atomic offset pre-claim (`fetch_add`), copy to `WriteJob`,
+     enqueue MPSC, block on `std::future` until worker drains CQEs.
+   - Worker: 512 KB SQE chunks; submit when SQ full; drain all CQEs per job.
+   - Sync fallback (ring == nullptr): `pwrite(2)` directly, no worker thread.
+   - No SQPOLL, no O_DIRECT (both hurt on WSL2/VirtIO).
 
-`create_writer()` gains an optional `std::shared_ptr<arrow::io::OutputStream>` parameter.
-When provided (parallel mode + io_uring available), writers use it directly instead of
-opening their own `FileOutputStream`.
-Writers themselves do not change; the injection is in the factory.
+3. **Parquet stream injection**:
+   - `ParquetWriter::set_output_stream(stream)`: store injected stream.
+   - `init_file_writer()`: uses injected stream if set, else `FileOutputStream::Open`.
+
+4. **Parallel path wiring** (`tpcds_main.cpp`):
+   - `generate_all_tables_parallel()`: calls `IoUringPool::init(output_dir)` before fork.
+   - `run_table_child()`: when `IoUringPool::available() && parquet && --zero-copy`,
+     creates child ring, wraps in `IoUringOutputStream`, injects into `ParquetWriter`.
+
+**Activation**: `--parallel --format parquet --zero-copy` with `TPCH_ENABLE_ASYNC_IO=ON`.
+**Fallback**: when `ASYNC_IO=OFF` or `available()==false`, uses `FileOutputStream` as before.
 
 ### DS-10.4 — Lance: share kernel worker pool (optional)
 
