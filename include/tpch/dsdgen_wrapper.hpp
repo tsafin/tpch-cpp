@@ -210,6 +210,20 @@ public:
     long scale_factor() const { return scale_factor_; }
 
     /**
+     * Load distributions and seed RNG in the parent process before fork().
+     * Children inherit the fully-initialised state via COW.
+     * Must be called before any fork(); call clear_tmp_path() in each child.
+     */
+    void prepare_for_fork();
+
+    /**
+     * Clear the temp-file path so this process's destructor does not unlink it.
+     * Call immediately after fork() in each child process.
+     * The parent retains the path and unlinks the file after all children exit.
+     */
+    void clear_tmp_path();
+
+    /**
      * Return the Arrow schema for a table type.
      */
     static std::shared_ptr<arrow::Schema> get_schema(TableType table, double scale_factor = 1.0);

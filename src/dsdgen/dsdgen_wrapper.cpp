@@ -679,6 +679,14 @@ DSDGenWrapper::~DSDGenWrapper() {
     }
 }
 
+void DSDGenWrapper::prepare_for_fork() {
+    init_dsdgen();
+}
+
+void DSDGenWrapper::clear_tmp_path() {
+    tmp_dist_path_.clear();
+}
+
 // ---------------------------------------------------------------------------
 // Initialization
 // ---------------------------------------------------------------------------

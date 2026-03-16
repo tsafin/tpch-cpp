@@ -17,9 +17,13 @@
 #include <string>
 #include <chrono>
 #include <cctype>
+#include <vector>
 #include <getopt.h>
 #include <stdexcept>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <arrow/api.h>
 #include <arrow/builder.h>
@@ -46,15 +50,17 @@
 namespace {
 
 struct Options {
-    long        scale_factor = 1;
-    std::string format       = "parquet";
-    std::string output_dir   = "/tmp";
-    long        max_rows     = 1000;
-    std::string table        = "store_sales";
-    std::string compression  = "zstd";    // snappy, zstd, none
-    bool        verbose      = false;
-    bool        zero_copy    = false;     // streaming mode: O(batch) memory instead of O(total)
-    std::string zero_copy_mode = "sync";  // sync, auto, async (lance-specific selection)
+    long        scale_factor    = 1;
+    std::string format          = "parquet";
+    std::string output_dir      = "/tmp";
+    long        max_rows        = 1000;
+    std::string table           = "store_sales";
+    std::string compression     = "zstd";    // snappy, zstd, none
+    bool        verbose         = false;
+    bool        zero_copy       = false;     // streaming mode: O(batch) memory instead of O(total)
+    std::string zero_copy_mode  = "sync";    // sync, auto, async (lance-specific selection)
+    bool        parallel        = false;     // generate all tables in parallel
+    int         parallel_tables = 0;         // max concurrent tables; 0 = all
 };
 
 void print_usage(const char* prog) {
@@ -85,6 +91,8 @@ void print_usage(const char* prog) {
         "  --zero-copy-mode <m>   Zero-copy mode for Lance: sync, auto, async (default: sync)\n"
 #ifdef TPCH_ENABLE_LANCE
 #endif
+        "  --parallel             Generate all tables in parallel (fork-after-init)\n"
+        "  --parallel-tables <N>  Max concurrent tables (default: all)\n"
         "  --verbose              Verbose output\n"
         "  --help                 Show this help\n"
         "\n"
@@ -103,21 +111,25 @@ Options parse_args(int argc, char* argv[]) {
     Options opts;
 
     enum {
-        OPT_COMPRESSION = 1000,
+        OPT_COMPRESSION    = 1000,
         OPT_ZERO_COPY,
-        OPT_ZERO_COPY_MODE
+        OPT_ZERO_COPY_MODE,
+        OPT_PARALLEL,
+        OPT_PARALLEL_TABLES
     };
     static struct option long_opts[] = {
-        {"format",       required_argument, nullptr, 'f'},
-        {"table",        required_argument, nullptr, 't'},
-        {"scale-factor", required_argument, nullptr, 's'},
-        {"output-dir",   required_argument, nullptr, 'o'},
-        {"max-rows",     required_argument, nullptr, 'm'},
-        {"compression",  required_argument, nullptr, OPT_COMPRESSION},
-        {"zero-copy",    no_argument,       nullptr, OPT_ZERO_COPY},
-        {"zero-copy-mode", required_argument, nullptr, OPT_ZERO_COPY_MODE},
-        {"verbose",      no_argument,       nullptr, 'v'},
-        {"help",         no_argument,       nullptr, 'h'},
+        {"format",          required_argument, nullptr, 'f'},
+        {"table",           required_argument, nullptr, 't'},
+        {"scale-factor",    required_argument, nullptr, 's'},
+        {"output-dir",      required_argument, nullptr, 'o'},
+        {"max-rows",        required_argument, nullptr, 'm'},
+        {"compression",     required_argument, nullptr, OPT_COMPRESSION},
+        {"zero-copy",       no_argument,       nullptr, OPT_ZERO_COPY},
+        {"zero-copy-mode",  required_argument, nullptr, OPT_ZERO_COPY_MODE},
+        {"parallel",        no_argument,       nullptr, OPT_PARALLEL},
+        {"parallel-tables", required_argument, nullptr, OPT_PARALLEL_TABLES},
+        {"verbose",         no_argument,       nullptr, 'v'},
+        {"help",            no_argument,       nullptr, 'h'},
         {nullptr, 0, nullptr, 0}
     };
 
@@ -129,9 +141,15 @@ Options parse_args(int argc, char* argv[]) {
             case 's': opts.scale_factor = std::stol(optarg); break;
             case 'o': opts.output_dir   = optarg; break;
             case 'm': opts.max_rows     = std::stol(optarg); break;
-            case OPT_COMPRESSION: opts.compression = optarg; break;
-            case OPT_ZERO_COPY: opts.zero_copy = true; break;
-            case OPT_ZERO_COPY_MODE: opts.zero_copy_mode = optarg; break;
+            case OPT_COMPRESSION:    opts.compression     = optarg; break;
+            case OPT_ZERO_COPY:      opts.zero_copy       = true;   break;
+            case OPT_ZERO_COPY_MODE: opts.zero_copy_mode  = optarg; break;
+            case OPT_PARALLEL:       opts.parallel        = true;   break;
+            case OPT_PARALLEL_TABLES:
+                opts.parallel_tables = std::stoi(optarg);
+                if (opts.parallel_tables <= 0)
+                    throw std::invalid_argument("--parallel-tables must be > 0");
+                break;
             case 'z': opts.zero_copy    = true;   break;
             case 'v': opts.verbose      = true;   break;
             case 'h': print_usage(argv[0]); exit(0);
@@ -371,6 +389,283 @@ std::string file_extension(const std::string& fmt) {
     return "." + fmt;
 }
 
+// ---------------------------------------------------------------------------
+// dispatch_generation — maps TableType to the correct DSDGenWrapper method
+// ---------------------------------------------------------------------------
+
+size_t dispatch_generation(
+    const Options& opts,
+    tpcds::TableType table_type,
+    std::shared_ptr<arrow::Schema> schema,
+    std::unique_ptr<tpch::WriterInterface>& writer,
+    tpcds::DSDGenWrapper& dsdgen)
+{
+    if (table_type == tpcds::TableType::StoreSales)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_store_sales(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::Inventory)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_inventory(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::CatalogSales)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_catalog_sales(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::WebSales)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_web_sales(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::Customer)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_customer(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::Item)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_item(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::DateDim)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_date_dim(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::StoreReturns)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_store_returns(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::CatalogReturns)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_catalog_returns(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::WebReturns)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_web_returns(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::CallCenter)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_call_center(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::CatalogPage)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_catalog_page(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::WebPage)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_web_page(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::WebSite)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_web_site(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::Warehouse)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_warehouse(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::ShipMode)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_ship_mode(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::HouseholdDemographics)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_household_demographics(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::CustomerDemographics)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_customer_demographics(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::CustomerAddress)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_customer_address(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::IncomeBand)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_income_band(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::Reason)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_reason(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::TimeDim)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_time_dim(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::Promotion)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_promotion(cb, opts.max_rows); });
+    if (table_type == tpcds::TableType::Store)
+        return run_generation(opts, schema, writer,
+            [&](auto cb) { dsdgen.generate_store(cb, opts.max_rows); });
+    throw std::invalid_argument("dispatch_generation: unhandled table type");
+}
+
+// ---------------------------------------------------------------------------
+// Parallel generation — DS-10.1
+// ---------------------------------------------------------------------------
+
+// All 24 implemented TPC-DS tables, ordered: small dimensions first so they
+// complete quickly and their slots open for the heavier fact tables.
+static const std::vector<std::pair<std::string, tpcds::TableType>> ALL_TPCDS_TABLES = {
+    // tiny dimensions (< 100 rows at any SF)
+    {"income_band",             tpcds::TableType::IncomeBand},
+    {"ship_mode",               tpcds::TableType::ShipMode},
+    {"warehouse",               tpcds::TableType::Warehouse},
+    {"reason",                  tpcds::TableType::Reason},
+    {"call_center",             tpcds::TableType::CallCenter},
+    // small dimensions
+    {"web_site",                tpcds::TableType::WebSite},
+    {"web_page",                tpcds::TableType::WebPage},
+    {"catalog_page",            tpcds::TableType::CatalogPage},
+    {"household_demographics",  tpcds::TableType::HouseholdDemographics},
+    {"promotion",               tpcds::TableType::Promotion},
+    {"store",                   tpcds::TableType::Store},
+    // medium dimensions
+    {"item",                    tpcds::TableType::Item},
+    {"date_dim",                tpcds::TableType::DateDim},
+    {"time_dim",                tpcds::TableType::TimeDim},
+    {"customer_demographics",   tpcds::TableType::CustomerDemographics},
+    // large dimensions
+    {"customer_address",        tpcds::TableType::CustomerAddress},
+    {"customer",                tpcds::TableType::Customer},
+    // fact tables (heaviest last so all slots are warm when they start)
+    {"inventory",               tpcds::TableType::Inventory},
+    {"web_returns",             tpcds::TableType::WebReturns},
+    {"catalog_returns",         tpcds::TableType::CatalogReturns},
+    {"store_returns",           tpcds::TableType::StoreReturns},
+    {"web_sales",               tpcds::TableType::WebSales},
+    {"catalog_sales",           tpcds::TableType::CatalogSales},
+    {"store_sales",             tpcds::TableType::StoreSales},
+};
+
+// Child process: generate one table, write output, exit.
+// dsdgen is already initialised (inherited via COW from parent).
+// Returns exit code (0 = success).
+static int run_table_child(
+    const Options& opts,
+    tpcds::TableType table_type,
+    tpcds::DSDGenWrapper& dsdgen)
+{
+    const std::string tname = tpcds::DSDGenWrapper::table_name(table_type);
+    const std::string filepath = opts.output_dir + "/" + tname + file_extension(opts.format);
+
+    bool lance_async = (opts.format == "lance" && opts.zero_copy &&
+                        opts.zero_copy_mode == "async");
+
+    std::unique_ptr<tpch::WriterInterface> writer;
+    try {
+        writer = create_writer(opts.format, filepath, opts.compression,
+                               opts.zero_copy, lance_async);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[%s] failed to create writer: %s\n", tname.c_str(), e.what());
+        return 1;
+    }
+
+#ifdef TPCH_ENABLE_LANCE
+    if (opts.format == "lance") {
+        if (auto* lw = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+            if (opts.zero_copy && !lance_async)
+                lw->set_buffered_flush_config(128, 1'048'576);
+        }
+    }
+#endif
+
+    // run_generation uses opts.table for append_dsdgen_row_to_builders dispatch
+    Options child_opts  = opts;
+    child_opts.table    = tname;
+
+    auto schema = tpcds::DSDGenWrapper::get_schema(table_type, opts.scale_factor);
+
+    auto t0 = std::chrono::steady_clock::now();
+    size_t rows = 0;
+    try {
+        rows = dispatch_generation(child_opts, table_type, schema, writer, dsdgen);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[%s] generation error: %s\n", tname.c_str(), e.what());
+        return 1;
+    }
+    writer->close();
+
+    double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t0).count();
+    printf("tpcds_benchmark: %-28s  SF=%ld  rows=%zu  elapsed=%.2fs  rate=%.0f rows/s\n",
+           tname.c_str(), opts.scale_factor, rows,
+           elapsed, elapsed > 0 ? rows / elapsed : 0.0);
+    printf("  output: %s\n", filepath.c_str());
+    fflush(stdout);
+    return 0;
+}
+
+// Fork-after-init parallel generation with rolling N-slot window.
+// Returns 0 if all children succeeded, 1 if any failed.
+static int generate_all_tables_parallel(const Options& opts)
+{
+    const size_t ntables = ALL_TPCDS_TABLES.size();
+    const size_t slot_limit = (opts.parallel_tables > 0)
+        ? static_cast<size_t>(opts.parallel_tables)
+        : ntables;
+
+    // Initialise dsdgen ONCE in the parent.  All children inherit the loaded
+    // distributions and seeded RNG streams via COW — no re-init needed.
+    tpcds::DSDGenWrapper parent_dsdgen(opts.scale_factor, opts.verbose);
+    parent_dsdgen.prepare_for_fork();
+
+    auto t_wall = std::chrono::steady_clock::now();
+
+    fprintf(stderr,
+        "tpcds_benchmark: parallel  SF=%ld  tables=%zu  slots=%zu  format=%s\n",
+        opts.scale_factor, ntables, slot_limit, opts.format.c_str());
+
+    // pid → table index map so we can report which table finished
+    std::vector<pid_t>  pids(ntables, -1);
+    std::vector<size_t> slot_table(slot_limit, SIZE_MAX); // slot → table index
+    size_t next   = 0;   // index of next table to fork
+    size_t active = 0;   // number of live children
+    int    failed = 0;
+
+    auto fork_next = [&](size_t slot) {
+        if (next >= ntables) return;
+        const auto& [tname, ttype] = ALL_TPCDS_TABLES[next];
+
+        pid_t pid = ::fork();
+        if (pid < 0) {
+            perror("fork");
+            ++failed;
+            ++next;
+            return;
+        }
+        if (pid == 0) {
+            // Child: temp file belongs to parent — don't unlink on exit.
+            parent_dsdgen.clear_tmp_path();
+            int rc = run_table_child(opts, ttype, parent_dsdgen);
+            std::exit(rc);
+        }
+        // Parent
+        pids[next]       = pid;
+        slot_table[slot] = next;
+        ++next;
+        ++active;
+    };
+
+    // Fill initial slots
+    for (size_t s = 0; s < slot_limit && next < ntables; ++s)
+        fork_next(s);
+
+    // Rolling wait: as each child finishes, fork the next table into its slot
+    while (active > 0) {
+        int status;
+        pid_t done = ::waitpid(-1, &status, 0);
+        if (done < 0) { perror("waitpid"); break; }
+
+        // Find which slot this pid occupied
+        size_t freed_slot = SIZE_MAX;
+        for (size_t s = 0; s < slot_limit; ++s) {
+            if (slot_table[s] < ntables && pids[slot_table[s]] == done) {
+                freed_slot = s;
+                break;
+            }
+        }
+
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            const char* tname = (freed_slot < slot_limit && slot_table[freed_slot] < ntables)
+                ? ALL_TPCDS_TABLES[slot_table[freed_slot]].first.c_str()
+                : "unknown";
+            fprintf(stderr, "tpcds_benchmark: [%s] child failed (pid=%d status=%d)\n",
+                    tname, done, status);
+            ++failed;
+        }
+        --active;
+
+        if (freed_slot != SIZE_MAX)
+            fork_next(freed_slot);
+    }
+
+    // Parent owns the temp distribution file — destructor unlinks it.
+    double wall = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t_wall).count();
+    fprintf(stderr,
+        "tpcds_benchmark: parallel done  SF=%ld  %zu tables  wall=%.2fs  %s\n",
+        opts.scale_factor, ntables, wall,
+        failed ? "SOME TABLES FAILED" : "all ok");
+
+    return failed ? 1 : 0;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -396,7 +691,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Resolve table
+    // Parallel mode: generate all tables and return immediately
+    if (opts.parallel)
+        return generate_all_tables_parallel(opts);
+
+    // Resolve table (single-table path)
     tpcds::TableType table_type;
     try {
         table_type = parse_table(opts.table);
@@ -460,79 +759,7 @@ int main(int argc, char* argv[]) {
     // Generate
     size_t actual_rows = 0;
     try {
-        if (table_type == tpcds::TableType::StoreSales) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_store_sales(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::Inventory) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_inventory(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CatalogSales) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_catalog_sales(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WebSales) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_web_sales(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::Customer) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_customer(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::Item) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_item(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::DateDim) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_date_dim(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::StoreReturns) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_store_returns(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CatalogReturns) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_catalog_returns(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WebReturns) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_web_returns(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CallCenter) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_call_center(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CatalogPage) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_catalog_page(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WebPage) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_web_page(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::WebSite) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_web_site(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::Warehouse) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_warehouse(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::ShipMode) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_ship_mode(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::HouseholdDemographics) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_household_demographics(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CustomerDemographics) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_customer_demographics(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::CustomerAddress) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_customer_address(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::IncomeBand) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_income_band(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::Reason) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_reason(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::TimeDim) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_time_dim(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::Promotion) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_promotion(cb, opts.max_rows); });
-        } else if (table_type == tpcds::TableType::Store) {
-            actual_rows = run_generation(opts, schema, writer,
-                [&](auto cb) { dsdgen.generate_store(cb, opts.max_rows); });
-        }
+        actual_rows = dispatch_generation(opts, table_type, schema, writer, dsdgen);
     } catch (const std::exception& e) {
         fprintf(stderr, "tpcds_benchmark: generation error: %s\n", e.what());
         return 1;
