@@ -115,6 +115,10 @@ void ParquetWriter::enable_streaming_write(bool use_threads) {
     use_threads_ = use_threads;
 }
 
+void ParquetWriter::set_output_stream(std::shared_ptr<arrow::io::OutputStream> stream) {
+    injected_stream_ = std::move(stream);
+}
+
 void ParquetWriter::write_managed_batch(const ManagedRecordBatch& managed_batch) {
     if (closed_) {
         throw std::runtime_error("Cannot write to a closed Parquet writer");
@@ -211,12 +215,17 @@ void ParquetWriter::init_file_writer() {
         .set_use_threads(use_threads_)
         ->build();
 
-    // Create output stream
-    auto outfile_result = arrow::io::FileOutputStream::Open(filepath_);
-    if (!outfile_result.ok()) {
-        throw std::runtime_error("Failed to open file: " + outfile_result.status().message());
+    // Create output stream — use injected stream (e.g. IoUringOutputStream) if provided
+    std::shared_ptr<arrow::io::OutputStream> outfile;
+    if (injected_stream_) {
+        outfile = injected_stream_;
+    } else {
+        auto outfile_result = arrow::io::FileOutputStream::Open(filepath_);
+        if (!outfile_result.ok()) {
+            throw std::runtime_error("Failed to open file: " + outfile_result.status().message());
+        }
+        outfile = outfile_result.ValueOrDie();
     }
-    auto outfile = outfile_result.ValueOrDie();
 
     // Create FileWriter for streaming RecordBatches
     auto writer_result = parquet::arrow::FileWriter::Open(

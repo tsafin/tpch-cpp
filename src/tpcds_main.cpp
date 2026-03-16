@@ -33,6 +33,8 @@
 #include "tpch/parquet_writer.hpp"
 #include "tpch/dsdgen_wrapper.hpp"
 #include "tpch/dsdgen_converter.hpp"
+#include "tpch/io_uring_pool.hpp"
+#include "tpch/io_uring_output_stream.hpp"
 
 #ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
@@ -545,6 +547,19 @@ static int run_table_child(
     }
 #endif
 
+    // DS-10.3: inject IoUringOutputStream into Parquet streaming path when available.
+    // Works in child processes after IoUringPool::init() was called in the parent.
+    if (tpch::IoUringPool::available() &&
+        opts.format == "parquet" && opts.zero_copy) {
+        void* ring = tpch::IoUringPool::create_child_ring_struct();
+        // IoUringOutputStream takes ownership of ring; stream owns the file fd.
+        auto io_stream = std::make_shared<tpch::IoUringOutputStream>(
+            filepath, ring);
+        if (auto* pw = dynamic_cast<tpch::ParquetWriter*>(writer.get())) {
+            pw->set_output_stream(std::move(io_stream));
+        }
+    }
+
     // run_generation uses opts.table for append_dsdgen_row_to_builders dispatch
     Options child_opts  = opts;
     child_opts.table    = tname;
@@ -585,11 +600,16 @@ static int generate_all_tables_parallel(const Options& opts)
     tpcds::DSDGenWrapper parent_dsdgen(opts.scale_factor, opts.verbose);
     parent_dsdgen.prepare_for_fork();
 
+    // DS-10.2: Initialise anchor io_uring ring before fork so children can
+    // attach via IORING_SETUP_ATTACH_WQ and share one kernel worker pool.
+    bool io_uring_ready = tpch::IoUringPool::init(opts.output_dir);
+
     auto t_wall = std::chrono::steady_clock::now();
 
     fprintf(stderr,
-        "tpcds_benchmark: parallel  SF=%ld  tables=%zu  slots=%zu  format=%s\n",
-        opts.scale_factor, ntables, slot_limit, opts.format.c_str());
+        "tpcds_benchmark: parallel  SF=%ld  tables=%zu  slots=%zu  format=%s  io_uring=%s\n",
+        opts.scale_factor, ntables, slot_limit, opts.format.c_str(),
+        io_uring_ready ? "yes" : "no");
 
     // pid → table index map so we can report which table finished
     std::vector<pid_t>  pids(ntables, -1);

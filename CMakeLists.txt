@@ -402,6 +402,12 @@ set(TPCH_CORE_SOURCES
     ${DBGEN_OBJECTS}
 )
 
+# DS-10.2: io_uring pool + output stream (handle #ifdef internally, always compile)
+list(APPEND TPCH_CORE_SOURCES
+    src/async/io_uring_pool.cpp
+    src/async/io_uring_output_stream.cpp
+)
+
 # Add async IO sources only if enabled
 if(TPCH_ENABLE_ASYNC_IO)
     list(APPEND TPCH_CORE_SOURCES
