@@ -5,6 +5,7 @@
 #include <string>
 #include <arrow/record_batch.h>
 #include <arrow/memory_pool.h>
+#include <arrow/io/interfaces.h>
 
 #include "writer_interface.hpp"
 #include "buffer_lifetime_manager.hpp"
@@ -97,6 +98,13 @@ public:
      */
     void set_compression(const std::string& codec);
 
+    /**
+     * Inject an external output stream (e.g. IoUringOutputStream).
+     * When set, init_file_writer() uses this stream instead of opening filepath_.
+     * Must be called before the first write_batch() and with streaming_mode_ enabled.
+     */
+    void set_output_stream(std::shared_ptr<arrow::io::OutputStream> stream);
+
 private:
     std::string filepath_;
     std::shared_ptr<arrow::RecordBatch> first_batch_;
@@ -116,6 +124,9 @@ private:
     bool use_threads_ = true;
     std::unique_ptr<parquet::arrow::FileWriter> parquet_file_writer_;
     std::string compression_codec_ = "zstd";     // snappy, zstd, none
+
+    // DS-10.3: injected output stream (io_uring or other backend)
+    std::shared_ptr<arrow::io::OutputStream> injected_stream_;
 
     // Initialize the Parquet FileWriter for streaming mode
     void init_file_writer();
