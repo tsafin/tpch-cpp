@@ -1062,7 +1062,7 @@ static void wire_io_uring(const Options& opts, const std::string& path,
     if (!opts.io_uring || !tpch::IoUringPool::available())
         return;
 
-#ifdef TPCH_ENABLE_LANCE
+#if defined(TPCH_ENABLE_LANCE) && defined(TPCH_LANCE_IO_URING)
     if (auto* lw = dynamic_cast<tpch::LanceWriter*>(writer)) {
         lw->enable_io_uring(true);
         return;
