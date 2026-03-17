@@ -22,8 +22,9 @@
 #include "tpch/dbgen_wrapper.hpp"
 #include "tpch/dbgen_converter.hpp"
 #include "tpch/zero_copy_converter.hpp"  // Phase 13.4: Zero-copy optimizations
-#include "tpch/async_io.hpp"
 #include "tpch/performance_counters.hpp"
+#include "tpch/io_uring_pool.hpp"
+#include "tpch/io_uring_output_stream.hpp"
 #ifdef TPCH_ENABLE_ORC
 #include "tpch/orc_writer.hpp"
 #endif
@@ -44,9 +45,9 @@ struct Options {
     std::string format = "parquet";
     std::string output_dir = "/tmp";
     long max_rows = 1000;
-    bool async_io = false;
     bool verbose = false;
     bool parallel = false;
+    int  parallel_tables = 0;  // max concurrent children; 0 = all
     bool zero_copy = false;
     std::string zero_copy_mode = "sync";  // sync, auto, async (Lance-specific)
     std::string compression = "zstd";     // snappy, zstd, none
@@ -55,7 +56,6 @@ struct Options {
     long lance_rows_per_group = 0;
     long lance_max_bytes_per_file = 0;
     bool lance_skip_auto_cleanup = false;
-    bool lance_io_uring = false;
     long lance_stream_queue = 16;
     std::string lance_stats_level;
     double lance_cardinality_sample_rate = 1.0;  // Phase 3.1: Sampling-based cardinality
@@ -68,7 +68,7 @@ constexpr int OPT_LANCE_SKIP_AUTO_CLEANUP = 1003;
 constexpr int OPT_LANCE_STREAM_QUEUE = 1004;
 constexpr int OPT_LANCE_STATS_LEVEL = 1005;
 constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
-constexpr int OPT_LANCE_IO_URING = 1007;
+constexpr int OPT_PARALLEL_TABLES = 1007;
 constexpr int OPT_ZERO_COPY_MODE = 1008;
 constexpr int OPT_COMPRESSION   = 1009;
 
@@ -96,13 +96,11 @@ void print_usage(const char* prog) {
               << "  --max-rows <N>        Maximum rows to generate (default: 1000, 0=all)\n"
               << "  --table <name>        TPC-H table: lineitem, orders, customer, part,\n"
               << "                        partsupp, supplier, nation, region (default: lineitem)\n"
-              << "  --parallel            Generate all 8 tables in parallel (Phase 12.6)\n"
+              << "  --parallel            Generate all 8 tables in parallel\n"
+              << "  --parallel-tables <N> Max concurrent table children (default: all)\n"
               << "  --zero-copy           Enable zero-copy streaming writes (O(batch) RAM)\n"
               << "  --zero-copy-mode <m>  Zero-copy mode for Lance: sync (default), auto, async\n"
               << "  --compression <c>     Parquet compression: zstd (default), snappy, none\n"
-#ifdef TPCH_ENABLE_ASYNC_IO
-              << "  --async-io            Enable async I/O with io_uring\n"
-#endif
 #ifdef TPCH_ENABLE_LANCE
               << "  --lance-rows-per-file <N>   Lance max rows per file (default: use Lance defaults)\n"
               << "  --lance-rows-per-group <N>  Lance max rows per group (default: use Lance defaults)\n"
@@ -113,7 +111,6 @@ void print_usage(const char* prog) {
               << "  --lance-cardinality-sample-rate <0.0-1.0>  Cardinality sampling rate (Phase 3.1)\n"
               << "                               Controls HyperLogLog sampling: 1.0=100% (default),\n"
               << "                               0.5=50%, 0.1=10%. Smaller rates = faster writes.\n"
-              << "  --lance-io-uring            Use io_uring for Lance disk writes (Linux only)\n"
 #endif
               << "  --verbose             Verbose output\n"
               << "  --help                Show this help message\n";
@@ -128,7 +125,8 @@ Options parse_args(int argc, char* argv[]) {
         {"output-dir", required_argument, nullptr, 'o'},
         {"max-rows", required_argument, nullptr, 'm'},
         {"table", required_argument, nullptr, 't'},
-        {"parallel", no_argument, nullptr, 'p'},  // Phase 12.6: Fork-after-init
+        {"parallel", no_argument, nullptr, 'p'},
+        {"parallel-tables", required_argument, nullptr, OPT_PARALLEL_TABLES},
         {"zero-copy", no_argument, nullptr, 'z'},
         {"zero-copy-mode", required_argument, nullptr, OPT_ZERO_COPY_MODE},
         {"compression",  required_argument, nullptr, OPT_COMPRESSION},
@@ -140,10 +138,6 @@ Options parse_args(int argc, char* argv[]) {
         {"lance-stream-queue", required_argument, nullptr, OPT_LANCE_STREAM_QUEUE},
         {"lance-stats-level", required_argument, nullptr, OPT_LANCE_STATS_LEVEL},
         {"lance-cardinality-sample-rate", required_argument, nullptr, OPT_LANCE_CARDINALITY_SAMPLE_RATE},
-        {"lance-io-uring", no_argument, nullptr, OPT_LANCE_IO_URING},
-#endif
-#ifdef TPCH_ENABLE_ASYNC_IO
-        {"async-io", no_argument, nullptr, 'a'},
 #endif
         {"verbose", no_argument, nullptr, 'v'},
         {"help", no_argument, nullptr, 'h'},
@@ -151,11 +145,7 @@ Options parse_args(int argc, char* argv[]) {
     };
 
     int c;
-#ifdef TPCH_ENABLE_ASYNC_IO
-    while ((c = getopt_long(argc, argv, "s:f:o:m:t:pzavh", long_options, nullptr)) != -1) {
-#else
     while ((c = getopt_long(argc, argv, "s:f:o:m:t:pzvh", long_options, nullptr)) != -1) {
-#endif
         switch (c) {
             case 's':
                 opts.scale_factor = std::stol(optarg);
@@ -174,6 +164,13 @@ Options parse_args(int argc, char* argv[]) {
                 break;
             case 'p':
                 opts.parallel = true;
+                break;
+            case OPT_PARALLEL_TABLES:
+                opts.parallel_tables = std::stoi(optarg);
+                if (opts.parallel_tables <= 0) {
+                    std::cerr << "Error: --parallel-tables must be > 0\n";
+                    exit(1);
+                }
                 break;
             case 'z':
                 opts.zero_copy = true;
@@ -213,14 +210,6 @@ Options parse_args(int argc, char* argv[]) {
                     exit(1);
                 }
                 break;
-            case OPT_LANCE_IO_URING:
-                opts.lance_io_uring = true;
-                break;
-#ifdef TPCH_ENABLE_ASYNC_IO
-            case 'a':
-                opts.async_io = true;
-                break;
-#endif
             case 'v':
                 opts.verbose = true;
                 break;
@@ -1115,211 +1104,188 @@ void generate_region_true_zero_copy(
  *
  * This eliminates the 8× initialization overhead that made Phase 12.3 broken.
  */
-int generate_all_tables_parallel_v2(const Options& opts) {
+// Run one table in a child process.  Called after fork() — must not return to parent.
+static void run_table_child(const Options& opts, const std::string& table) {
+    try {
+        std::string output_path = get_output_filename(opts.output_dir, opts.format, table);
+
+        tpch::DBGenWrapper dbgen(opts.scale_factor, opts.verbose);
+        dbgen.set_skip_init(true);  // distributions already loaded by parent (COW)
+
+        std::shared_ptr<arrow::Schema> schema;
+        if (table == "lineitem")  schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM,  opts.scale_factor);
+        else if (table == "orders")   schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS,   opts.scale_factor);
+        else if (table == "customer") schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER, opts.scale_factor);
+        else if (table == "part")     schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART,     opts.scale_factor);
+        else if (table == "partsupp") schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP, opts.scale_factor);
+        else if (table == "supplier") schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER, opts.scale_factor);
+        else if (table == "nation")   schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION,   opts.scale_factor);
+        else if (table == "region")   schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION,   opts.scale_factor);
+        else { fprintf(stderr, "tpch_benchmark: unknown table %s\n", table.c_str()); exit(1); }
+
+        auto writer = create_writer(opts.format, output_path, opts.compression, opts.zero_copy);
+
+#ifdef TPCH_ENABLE_LANCE
+        if (auto* lw = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
+            if (opts.zero_copy) {
+                bool use_async = (opts.zero_copy_mode == "async") || (opts.zero_copy_mode == "auto");
+                lw->enable_streaming_write(!use_async);
+            }
+        }
+#endif
+
+        // Inject IoUringOutputStream into Parquet streaming path when available.
+        if (tpch::IoUringPool::available() &&
+            opts.format == "parquet" && opts.zero_copy) {
+            void* ring = tpch::IoUringPool::create_child_ring_struct();
+            auto io_stream = std::make_shared<tpch::IoUringOutputStream>(output_path, ring);
+            if (auto* pw = dynamic_cast<tpch::ParquetWriter*>(writer.get()))
+                pw->set_output_stream(std::move(io_stream));
+        }
+
+        size_t total_rows = 0;
+        Options child_opts = opts;
+        child_opts.table = table;
+
+        auto t0 = std::chrono::steady_clock::now();
+
+        if (table == "lineitem") {
+            if (opts.zero_copy) generate_lineitem_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+            else generate_with_dbgen(dbgen, child_opts, schema, writer,
+                [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
+        } else if (table == "orders") {
+            if (opts.zero_copy) generate_orders_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+            else generate_with_dbgen(dbgen, child_opts, schema, writer,
+                [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);
+        } else if (table == "customer") {
+            if (opts.zero_copy) generate_customer_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+            else generate_with_dbgen(dbgen, child_opts, schema, writer,
+                [&](auto& g, auto& cb) { g.generate_customer(cb, opts.max_rows); }, total_rows);
+        } else if (table == "part") {
+            if (opts.zero_copy) generate_part_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+            else generate_with_dbgen(dbgen, child_opts, schema, writer,
+                [&](auto& g, auto& cb) { g.generate_part(cb, opts.max_rows); }, total_rows);
+        } else if (table == "partsupp") {
+            if (opts.zero_copy) generate_partsupp_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+            else generate_with_dbgen(dbgen, child_opts, schema, writer,
+                [&](auto& g, auto& cb) { g.generate_partsupp(cb, opts.max_rows); }, total_rows);
+        } else if (table == "supplier") {
+            if (opts.zero_copy) generate_supplier_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+            else generate_with_dbgen(dbgen, child_opts, schema, writer,
+                [&](auto& g, auto& cb) { g.generate_supplier(cb, opts.max_rows); }, total_rows);
+        } else if (table == "nation") {
+            if (opts.zero_copy) generate_nation_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+            else generate_with_dbgen(dbgen, child_opts, schema, writer,
+                [&](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
+        } else if (table == "region") {
+            if (opts.zero_copy) generate_region_zero_copy(dbgen, child_opts, schema, writer, total_rows);
+            else generate_with_dbgen(dbgen, child_opts, schema, writer,
+                [&](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
+        }
+
+        writer->close();
+
+        double elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - t0).count();
+        printf("tpch_benchmark: %-12s  SF=%ld  rows=%zu  elapsed=%.2fs  rate=%.0f rows/s\n",
+               table.c_str(), opts.scale_factor, total_rows,
+               elapsed, elapsed > 0 ? total_rows / elapsed : 0.0);
+        printf("  output: %s\n", output_path.c_str());
+        fflush(stdout);
+        exit(0);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "tpch_benchmark: [%s] failed: %s\n", table.c_str(), e.what());
+        exit(1);
+    }
+}
+
+// Fork-after-init parallel generation with rolling N-slot window.
+int generate_all_tables_parallel(const Options& opts) {
     static const std::vector<std::string> tables = {
         "region", "nation", "supplier", "part",
         "partsupp", "customer", "orders", "lineitem"
     };
+    const size_t ntables    = tables.size();
+    const size_t slot_limit = (opts.parallel_tables > 0)
+        ? static_cast<size_t>(opts.parallel_tables)
+        : ntables;
 
-    // === PARENT: Heavy initialization ONCE ===
-    std::cout << "Initializing dbgen (loading distributions)...\n";
-    auto init_start = std::chrono::high_resolution_clock::now();
-
+    // Initialize dbgen ONCE in the parent — all children inherit via COW.
+    fprintf(stderr, "tpch_benchmark: initializing dbgen (SF=%ld)...\n", opts.scale_factor);
     tpch::dbgen_init_global(opts.scale_factor, opts.verbose);
 
-    auto init_end = std::chrono::high_resolution_clock::now();
-    auto init_duration = std::chrono::duration<double>(init_end - init_start).count();
-    std::cout << "Initialization complete in " << std::fixed << std::setprecision(3)
-              << init_duration << "s. Forking " << tables.size() << " children...\n";
+    // Initialize anchor io_uring ring before fork so children can
+    // attach via IORING_SETUP_ATTACH_WQ and share one kernel worker pool.
+    bool io_uring_ready = tpch::IoUringPool::init(opts.output_dir);
 
-    std::vector<pid_t> children;
-    std::map<pid_t, std::string> pid_to_table;
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto t_wall = std::chrono::steady_clock::now();
 
-    for (const auto& table : tables) {
-        pid_t pid = fork();
+    fprintf(stderr,
+        "tpch_benchmark: parallel  SF=%ld  tables=%zu  slots=%zu  format=%s  io_uring=%s\n",
+        opts.scale_factor, ntables, slot_limit, opts.format.c_str(),
+        io_uring_ready ? "yes" : "no");
 
-        if (pid == -1) {
-            perror("fork");
-            return 1;
-        }
+    std::vector<pid_t>  pids(ntables, -1);
+    std::vector<size_t> slot_table(slot_limit, SIZE_MAX);
+    size_t next   = 0;
+    size_t active = 0;
+    int    failed = 0;
 
+    auto fork_next = [&](size_t slot) {
+        if (next >= ntables) return;
+        const std::string& tname = tables[next];
+
+        pid_t pid = ::fork();
+        if (pid < 0) { perror("fork"); ++failed; ++next; return; }
         if (pid == 0) {
-            // === CHILD: Inherits all init via COW ===
-            // Seed[] is pristine, distributions loaded, dates cached
+            run_table_child(opts, tname);  // never returns
+        }
+        pids[next]       = pid;
+        slot_table[slot] = next;
+        ++next;
+        ++active;
+    };
 
-            try {
-                std::string output_path = get_output_filename(opts.output_dir, opts.format, table);
+    // Fill initial slots
+    for (size_t s = 0; s < slot_limit && next < ntables; ++s)
+        fork_next(s);
 
-                // Create DBGenWrapper and tell it to skip init
-                tpch::DBGenWrapper dbgen(opts.scale_factor, opts.verbose);
-                dbgen.set_skip_init(true);  // Don't re-initialize!
+    // Rolling wait: as each child finishes, fork the next table into its slot
+    while (active > 0) {
+        int status;
+        pid_t done = ::waitpid(-1, &status, 0);
+        if (done < 0) { perror("waitpid"); break; }
 
-                // Get schema for this table
-                std::shared_ptr<arrow::Schema> schema;
-                if (table == "lineitem") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::LINEITEM, opts.scale_factor);
-                } else if (table == "orders") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::ORDERS, opts.scale_factor);
-                } else if (table == "customer") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::CUSTOMER, opts.scale_factor);
-                } else if (table == "part") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PART, opts.scale_factor);
-                } else if (table == "partsupp") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::PARTSUPP, opts.scale_factor);
-                } else if (table == "supplier") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::SUPPLIER, opts.scale_factor);
-                } else if (table == "nation") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::NATION, opts.scale_factor);
-                } else if (table == "region") {
-                    schema = tpch::DBGenWrapper::get_schema(tpch::TableType::REGION, opts.scale_factor);
-                } else {
-                    std::cerr << "Unknown table: " << table << "\n";
-                    exit(1);
-                }
-
-                // Create writer
-                auto writer = create_writer(opts.format, output_path, opts.compression, opts.zero_copy);
-
-#ifdef TPCH_ENABLE_LANCE
-                if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
-                    if (opts.zero_copy) {
-                        bool use_async = (opts.zero_copy_mode == "async") ||
-                                         (opts.zero_copy_mode == "auto");
-                        lance_writer->enable_streaming_write(!use_async);
-                    }
-                    #ifdef TPCH_LANCE_IO_URING
-                    if (opts.lance_io_uring) {
-                        lance_writer->enable_io_uring(true);
-                    }
-                    #endif
-                }
-#endif
-
-                // Generate table
-                size_t total_rows = 0;
-                Options child_opts = opts;
-                child_opts.table = table;
-
-                if (table == "lineitem") {
-                    if (opts.zero_copy) generate_lineitem_zero_copy(dbgen, child_opts, schema, writer, total_rows);
-                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_lineitem(cb, opts.max_rows); }, total_rows);
-                } else if (table == "orders") {
-                    if (opts.zero_copy) generate_orders_zero_copy(dbgen, child_opts, schema, writer, total_rows);
-                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_orders(cb, opts.max_rows); }, total_rows);
-                } else if (table == "customer") {
-                    if (opts.zero_copy) generate_customer_zero_copy(dbgen, child_opts, schema, writer, total_rows);
-                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_customer(cb, opts.max_rows); }, total_rows);
-                } else if (table == "part") {
-                    if (opts.zero_copy) generate_part_zero_copy(dbgen, child_opts, schema, writer, total_rows);
-                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_part(cb, opts.max_rows); }, total_rows);
-                } else if (table == "partsupp") {
-                    if (opts.zero_copy) generate_partsupp_zero_copy(dbgen, child_opts, schema, writer, total_rows);
-                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_partsupp(cb, opts.max_rows); }, total_rows);
-                } else if (table == "supplier") {
-                    if (opts.zero_copy) generate_supplier_zero_copy(dbgen, child_opts, schema, writer, total_rows);
-                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_supplier(cb, opts.max_rows); }, total_rows);
-                } else if (table == "nation") {
-                    if (opts.zero_copy) generate_nation_zero_copy(dbgen, child_opts, schema, writer, total_rows);
-                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_nation(cb); }, total_rows);
-                } else if (table == "region") {
-                    if (opts.zero_copy) generate_region_zero_copy(dbgen, child_opts, schema, writer, total_rows);
-                    else generate_with_dbgen(dbgen, child_opts, schema, writer,
-                        [&](auto& g, auto& cb) { g.generate_region(cb); }, total_rows);
-                }
-
-                writer->close();
-
-                exit(0);  // Success
-            } catch (const std::exception& e) {
-                std::cerr << "Child process for table " << table << " failed: " << e.what() << "\n";
-                exit(1);
+        size_t freed_slot = SIZE_MAX;
+        for (size_t s = 0; s < slot_limit; ++s) {
+            if (slot_table[s] < ntables && pids[slot_table[s]] == done) {
+                freed_slot = s;
+                break;
             }
         }
 
-        // Parent continues
-        children.push_back(pid);
-        pid_to_table[pid] = table;
-        std::cout << "  Forked " << table << " (PID " << pid << ")\n";
-    }
-
-    // Wait for all children
-    int failed = 0;
-    std::map<std::string, int> table_status;
-
-    for (size_t i = 0; i < children.size(); ++i) {
-        int status;
-        pid_t finished_pid = waitpid(-1, &status, 0);  // Wait for any child
-
-        if (finished_pid == -1) {
-            perror("waitpid");
-            continue;
-        }
-
-        std::string table_name = pid_to_table[finished_pid];
-
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-            std::cout << "  " << table_name << " FAILED (status=" << WEXITSTATUS(status) << ")\n";
-            table_status[table_name] = 1;
-            failed++;
-        } else {
-            std::cout << "  " << table_name << " completed successfully\n";
-            table_status[table_name] = 0;
+            const char* tname = (freed_slot < slot_limit && slot_table[freed_slot] < ntables)
+                ? tables[slot_table[freed_slot]].c_str()
+                : "unknown";
+            fprintf(stderr, "tpch_benchmark: [%s] child failed (pid=%d status=%d)\n",
+                    tname, done, status);
+            ++failed;
         }
+        --active;
+
+        if (freed_slot != SIZE_MAX)
+            fork_next(freed_slot);
     }
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration<double>(end_time - start_time).count();
+    double wall = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t_wall).count();
+    fprintf(stderr,
+        "tpch_benchmark: parallel done  SF=%ld  %zu tables  wall=%.2fs  %s\n",
+        opts.scale_factor, ntables, wall,
+        failed ? "SOME TABLES FAILED" : "all ok");
 
-    std::cout << "\n=== Parallel Generation Summary ===\n";
-    std::cout << "Total time (excluding init): " << std::fixed << std::setprecision(3)
-              << duration << "s\n";
-    std::cout << "Total time (including init): " << std::fixed << std::setprecision(3)
-              << (duration + init_duration) << "s\n";
-
-    // Calculate total rows across all tables
-    long total_rows_all_tables = 0;
-    for (const auto& table_name : tables) {
-        // Skip failed tables
-        if (table_status.count(table_name) && table_status[table_name] != 0) {
-            continue;
-        }
-        // Get expected row count for this table
-        tpch::TableType table_type;
-        if (table_name == "lineitem") table_type = tpch::TableType::LINEITEM;
-        else if (table_name == "orders") table_type = tpch::TableType::ORDERS;
-        else if (table_name == "customer") table_type = tpch::TableType::CUSTOMER;
-        else if (table_name == "part") table_type = tpch::TableType::PART;
-        else if (table_name == "partsupp") table_type = tpch::TableType::PARTSUPP;
-        else if (table_name == "supplier") table_type = tpch::TableType::SUPPLIER;
-        else if (table_name == "nation") table_type = tpch::TableType::NATION;
-        else if (table_name == "region") table_type = tpch::TableType::REGION;
-        else continue;
-
-        total_rows_all_tables += tpch::get_row_count(table_type, opts.scale_factor);
-    }
-
-    // Output throughput for all successfully generated tables
-    if (total_rows_all_tables > 0 && duration > 0) {
-        double throughput = static_cast<double>(total_rows_all_tables) / duration;
-        std::cout << "Throughput: " << std::fixed << std::setprecision(0)
-                  << throughput << " rows/sec\n";
-    }
-
-    if (failed > 0) {
-        std::cout << "Failed tables: " << failed << "/" << tables.size() << "\n";
-        return 1;
-    } else {
-        std::cout << "All tables generated successfully!\n";
-        return 0;
-    }
+    return failed ? 1 : 0;
 }
 
 }  // anonymous namespace
@@ -1328,9 +1294,8 @@ int main(int argc, char* argv[]) {
     try {
         auto opts = parse_args(argc, argv);
 
-        // Phase 12.6: Fork-after-init parallel generation
         if (opts.parallel) {
-            return generate_all_tables_parallel_v2(opts);
+            return generate_all_tables_parallel(opts);
         }
 
         // Validate format
@@ -1393,22 +1358,6 @@ int main(int argc, char* argv[]) {
             std::cout << "Schema: " << schema->ToString() << "\n";
         }
 
-        // Create async I/O context if enabled
-        std::shared_ptr<tpch::AsyncIOContext> async_context;
-#ifdef TPCH_ENABLE_ASYNC_IO
-        if (opts.async_io) {
-            try {
-                async_context = std::make_shared<tpch::AsyncIOContext>(256);
-                if (opts.verbose) {
-                    std::cout << "Async I/O enabled (io_uring queue depth: 256)\n";
-                }
-            } catch (const std::exception& e) {
-                std::cerr << "Warning: Failed to initialize async I/O: " << e.what() << "\n";
-                std::cerr << "Falling back to synchronous I/O\n";
-            }
-        }
-#endif
-
         // Create writer
         auto writer = create_writer(opts.format, output_path, opts.compression, opts.zero_copy);
 
@@ -1447,25 +1396,8 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Enable io_uring write path if requested
-#ifdef TPCH_LANCE_IO_URING
-            if (opts.lance_io_uring) {
-                lance_writer->enable_io_uring(true);
-                if (opts.verbose) {
-                    std::cout << "Lance io_uring write path enabled\n";
-                }
-            }
-#endif
         }
 #endif
-
-        // Set async context if available
-        if (async_context) {
-            writer->set_async_context(async_context);
-            if (opts.verbose) {
-                std::cout << "Async I/O context configured for writer\n";
-            }
-        }
 
         // Start timing
         auto start_time = std::chrono::high_resolution_clock::now();
