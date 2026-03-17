@@ -52,23 +52,9 @@ struct Options {
     std::string zero_copy_mode = "sync";  // sync, auto, async (Lance-specific)
     std::string compression = "zstd";     // snappy, zstd, none
     std::string table = "lineitem";
-    long lance_rows_per_file = 0;
-    long lance_rows_per_group = 0;
-    long lance_max_bytes_per_file = 0;
-    bool lance_skip_auto_cleanup = false;
-    long lance_stream_queue = 16;
-    std::string lance_stats_level;
-    double lance_cardinality_sample_rate = 1.0;  // Phase 3.1: Sampling-based cardinality
     bool io_uring = false;  // use io_uring for disk writes (Parquet: IoUringOutputStream; Lance: Rust io_uring)
 };
 
-constexpr int OPT_LANCE_ROWS_PER_FILE = 1000;
-constexpr int OPT_LANCE_ROWS_PER_GROUP = 1001;
-constexpr int OPT_LANCE_MAX_BYTES_PER_FILE = 1002;
-constexpr int OPT_LANCE_SKIP_AUTO_CLEANUP = 1003;
-constexpr int OPT_LANCE_STREAM_QUEUE = 1004;
-constexpr int OPT_LANCE_STATS_LEVEL = 1005;
-constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
 constexpr int OPT_PARALLEL_TABLES = 1007;
 constexpr int OPT_ZERO_COPY_MODE = 1008;
 constexpr int OPT_COMPRESSION   = 1009;
@@ -105,17 +91,6 @@ void print_usage(const char* prog) {
               << "  --compression <c>     Parquet compression: zstd (default), snappy, none\n"
               << "  --io-uring            Use io_uring for disk writes (Parquet: kernel async I/O;\n"
               << "                        Lance: delegated to Rust runtime)\n"
-#ifdef TPCH_ENABLE_LANCE
-              << "  --lance-rows-per-file <N>   Lance max rows per file (default: use Lance defaults)\n"
-              << "  --lance-rows-per-group <N>  Lance max rows per group (default: use Lance defaults)\n"
-              << "  --lance-max-bytes-per-file <N>  Lance max bytes per file (default: use Lance defaults)\n"
-              << "  --lance-skip-auto-cleanup   Skip Lance auto cleanup during commit\n"
-              << "  --lance-stream-queue <N>    Lance streaming queue depth (default: 16)\n"
-              << "  --lance-stats-level <full|light>  Lance stats level (default: full)\n"
-              << "  --lance-cardinality-sample-rate <0.0-1.0>  Cardinality sampling rate (Phase 3.1)\n"
-              << "                               Controls HyperLogLog sampling: 1.0=100% (default),\n"
-              << "                               0.5=50%, 0.1=10%. Smaller rates = faster writes.\n"
-#endif
               << "  --verbose             Verbose output\n"
               << "  --help                Show this help message\n";
 }
@@ -134,15 +109,6 @@ Options parse_args(int argc, char* argv[]) {
         {"zero-copy", no_argument, nullptr, 'z'},
         {"zero-copy-mode", required_argument, nullptr, OPT_ZERO_COPY_MODE},
         {"compression",  required_argument, nullptr, OPT_COMPRESSION},
-#ifdef TPCH_ENABLE_LANCE
-        {"lance-rows-per-file", required_argument, nullptr, OPT_LANCE_ROWS_PER_FILE},
-        {"lance-rows-per-group", required_argument, nullptr, OPT_LANCE_ROWS_PER_GROUP},
-        {"lance-max-bytes-per-file", required_argument, nullptr, OPT_LANCE_MAX_BYTES_PER_FILE},
-        {"lance-skip-auto-cleanup", no_argument, nullptr, OPT_LANCE_SKIP_AUTO_CLEANUP},
-        {"lance-stream-queue", required_argument, nullptr, OPT_LANCE_STREAM_QUEUE},
-        {"lance-stats-level", required_argument, nullptr, OPT_LANCE_STATS_LEVEL},
-        {"lance-cardinality-sample-rate", required_argument, nullptr, OPT_LANCE_CARDINALITY_SAMPLE_RATE},
-#endif
         {"io-uring", no_argument, nullptr, OPT_IO_URING},
         {"verbose", no_argument, nullptr, 'v'},
         {"help", no_argument, nullptr, 'h'},
@@ -189,31 +155,6 @@ Options parse_args(int argc, char* argv[]) {
                 break;
             case OPT_COMPRESSION:
                 opts.compression = optarg;
-                break;
-            case OPT_LANCE_ROWS_PER_FILE:
-                opts.lance_rows_per_file = std::stol(optarg);
-                break;
-            case OPT_LANCE_ROWS_PER_GROUP:
-                opts.lance_rows_per_group = std::stol(optarg);
-                break;
-            case OPT_LANCE_MAX_BYTES_PER_FILE:
-                opts.lance_max_bytes_per_file = std::stol(optarg);
-                break;
-            case OPT_LANCE_SKIP_AUTO_CLEANUP:
-                opts.lance_skip_auto_cleanup = true;
-                break;
-            case OPT_LANCE_STREAM_QUEUE:
-                opts.lance_stream_queue = std::stol(optarg);
-                break;
-            case OPT_LANCE_STATS_LEVEL:
-                opts.lance_stats_level = optarg;
-                break;
-            case OPT_LANCE_CARDINALITY_SAMPLE_RATE:
-                opts.lance_cardinality_sample_rate = std::stod(optarg);
-                if (opts.lance_cardinality_sample_rate < 0.01 || opts.lance_cardinality_sample_rate > 1.0) {
-                    std::cerr << "Error: cardinality-sample-rate must be between 0.01 and 1.0\n";
-                    exit(1);
-                }
                 break;
             case OPT_IO_URING:
                 opts.io_uring = true;
@@ -1389,40 +1330,11 @@ int main(int argc, char* argv[]) {
         wire_io_uring(opts, output_path, writer.get());
 
 #ifdef TPCH_ENABLE_LANCE
-        if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
-            if (!opts.lance_stats_level.empty()) {
-                setenv("LANCE_STATS_LEVEL", opts.lance_stats_level.c_str(), 1);
-                if (opts.verbose) {
-                    std::cout << "Lance stats level set to: " << opts.lance_stats_level << "\n";
-                }
-            }
-            // Phase 3.1: Set cardinality sampling rate via environment variable
-            if (opts.lance_cardinality_sample_rate < 1.0) {
-                std::string rate_str = std::to_string(opts.lance_cardinality_sample_rate);
-                setenv("LANCE_CARDINALITY_SAMPLE_RATE", rate_str.c_str(), 1);
-                if (opts.verbose) {
-                    std::cout << "Lance cardinality sample rate set to: " << opts.lance_cardinality_sample_rate << "\n";
-                }
-            }
-            lance_writer->set_write_params(
-                opts.lance_rows_per_file,
-                opts.lance_rows_per_group,
-                opts.lance_max_bytes_per_file,
-                opts.lance_skip_auto_cleanup);
-            if (opts.lance_stream_queue > 0) {
-                lance_writer->set_stream_queue_depth(static_cast<size_t>(opts.lance_stream_queue));
-            }
-
+        if (auto* lw = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
             if (opts.zero_copy) {
-                bool use_async = (opts.zero_copy_mode == "async") ||
-                                 (opts.zero_copy_mode == "auto");
-                lance_writer->enable_streaming_write(!use_async);
-                if (opts.verbose) {
-                    std::cout << "Lance streaming write mode enabled (zero-copy, mode="
-                              << opts.zero_copy_mode << ")\n";
-                }
+                bool use_async = (opts.zero_copy_mode == "async") || (opts.zero_copy_mode == "auto");
+                lw->enable_streaming_write(!use_async);
             }
-
         }
 #endif
 
