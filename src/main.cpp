@@ -59,6 +59,7 @@ struct Options {
     long lance_stream_queue = 16;
     std::string lance_stats_level;
     double lance_cardinality_sample_rate = 1.0;  // Phase 3.1: Sampling-based cardinality
+    bool io_uring = false;  // use io_uring for disk writes (Parquet: IoUringOutputStream; Lance: Rust io_uring)
 };
 
 constexpr int OPT_LANCE_ROWS_PER_FILE = 1000;
@@ -71,6 +72,7 @@ constexpr int OPT_LANCE_CARDINALITY_SAMPLE_RATE = 1006;  // Phase 3.1
 constexpr int OPT_PARALLEL_TABLES = 1007;
 constexpr int OPT_ZERO_COPY_MODE = 1008;
 constexpr int OPT_COMPRESSION   = 1009;
+constexpr int OPT_IO_URING       = 1010;
 
 constexpr size_t DBGEN_BATCH_SIZE = 8192;  // aligned with Lance max_rows_per_group
 
@@ -101,6 +103,8 @@ void print_usage(const char* prog) {
               << "  --zero-copy           Enable zero-copy streaming writes (O(batch) RAM)\n"
               << "  --zero-copy-mode <m>  Zero-copy mode for Lance: sync (default), auto, async\n"
               << "  --compression <c>     Parquet compression: zstd (default), snappy, none\n"
+              << "  --io-uring            Use io_uring for disk writes (Parquet: kernel async I/O;\n"
+              << "                        Lance: delegated to Rust runtime)\n"
 #ifdef TPCH_ENABLE_LANCE
               << "  --lance-rows-per-file <N>   Lance max rows per file (default: use Lance defaults)\n"
               << "  --lance-rows-per-group <N>  Lance max rows per group (default: use Lance defaults)\n"
@@ -139,6 +143,7 @@ Options parse_args(int argc, char* argv[]) {
         {"lance-stats-level", required_argument, nullptr, OPT_LANCE_STATS_LEVEL},
         {"lance-cardinality-sample-rate", required_argument, nullptr, OPT_LANCE_CARDINALITY_SAMPLE_RATE},
 #endif
+        {"io-uring", no_argument, nullptr, OPT_IO_URING},
         {"verbose", no_argument, nullptr, 'v'},
         {"help", no_argument, nullptr, 'h'},
         {nullptr, 0, nullptr, 0}
@@ -209,6 +214,9 @@ Options parse_args(int argc, char* argv[]) {
                     std::cerr << "Error: cardinality-sample-rate must be between 0.01 and 1.0\n";
                     exit(1);
                 }
+                break;
+            case OPT_IO_URING:
+                opts.io_uring = true;
                 break;
             case 'v':
                 opts.verbose = true;
@@ -1104,6 +1112,28 @@ void generate_region_true_zero_copy(
  *
  * This eliminates the 8× initialization overhead that made Phase 12.3 broken.
  */
+// Wire io_uring into a writer after IoUringPool::init() has been called.
+// For Lance: delegates to the Rust runtime via enable_io_uring().
+// For Parquet (and future formats): injects IoUringOutputStream.
+// No-op if opts.io_uring is false or IoUringPool is unavailable.
+static void wire_io_uring(const Options& opts, const std::string& path,
+                          tpch::WriterInterface* writer) {
+    if (!opts.io_uring || !tpch::IoUringPool::available())
+        return;
+
+#ifdef TPCH_ENABLE_LANCE
+    if (auto* lw = dynamic_cast<tpch::LanceWriter*>(writer)) {
+        lw->enable_io_uring(true);
+        return;
+    }
+#endif
+    if (auto* pw = dynamic_cast<tpch::ParquetWriter*>(writer)) {
+        void* ring = tpch::IoUringPool::create_child_ring_struct();
+        pw->set_output_stream(std::make_shared<tpch::IoUringOutputStream>(path, ring));
+    }
+    // Other formats (csv, orc, …) don't yet support stream injection — silently skip.
+}
+
 // Run one table in a child process.  Called after fork() — must not return to parent.
 static void run_table_child(const Options& opts, const std::string& table) {
     try {
@@ -1134,14 +1164,7 @@ static void run_table_child(const Options& opts, const std::string& table) {
         }
 #endif
 
-        // Inject IoUringOutputStream into Parquet streaming path when available.
-        if (tpch::IoUringPool::available() &&
-            opts.format == "parquet" && opts.zero_copy) {
-            void* ring = tpch::IoUringPool::create_child_ring_struct();
-            auto io_stream = std::make_shared<tpch::IoUringOutputStream>(output_path, ring);
-            if (auto* pw = dynamic_cast<tpch::ParquetWriter*>(writer.get()))
-                pw->set_output_stream(std::move(io_stream));
-        }
+        wire_io_uring(opts, output_path, writer.get());
 
         size_t total_rows = 0;
         Options child_opts = opts;
@@ -1216,7 +1239,7 @@ int generate_all_tables_parallel(const Options& opts) {
 
     // Initialize anchor io_uring ring before fork so children can
     // attach via IORING_SETUP_ATTACH_WQ and share one kernel worker pool.
-    bool io_uring_ready = tpch::IoUringPool::init(opts.output_dir);
+    bool io_uring_ready = opts.io_uring && tpch::IoUringPool::init(opts.output_dir);
 
     auto t_wall = std::chrono::steady_clock::now();
 
@@ -1359,7 +1382,11 @@ int main(int argc, char* argv[]) {
         }
 
         // Create writer
+        if (opts.io_uring)
+            tpch::IoUringPool::init(opts.output_dir);
+
         auto writer = create_writer(opts.format, output_path, opts.compression, opts.zero_copy);
+        wire_io_uring(opts, output_path, writer.get());
 
 #ifdef TPCH_ENABLE_LANCE
         if (auto lance_writer = dynamic_cast<tpch::LanceWriter*>(writer.get())) {
