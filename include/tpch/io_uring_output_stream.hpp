@@ -62,10 +62,10 @@ public:
     /** Convenience overload accepting a Buffer. */
     arrow::Status Write(const std::shared_ptr<arrow::Buffer>& data) override;
 
-    /** No-op: Write() already blocks until data is on disk. */
+    /** No-op: Write() blocks until CQEs are drained (data in page cache). */
     arrow::Status Flush() override;
 
-    /** Stop worker thread (if running), fsync, close file fd. */
+    /** Stop worker thread (if running), close file fd. */
     arrow::Status Close() override;
 
     arrow::Result<int64_t> Tell() const override;
