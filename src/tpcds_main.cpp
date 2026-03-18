@@ -570,11 +570,11 @@ static int run_table_child(
     size_t rows = 0;
     try {
         rows = dispatch_generation(child_opts, table_type, schema, writer, dsdgen);
+        writer->close();
     } catch (const std::exception& e) {
-        fprintf(stderr, "[%s] generation error: %s\n", tname.c_str(), e.what());
+        fprintf(stderr, "[%s] error: %s\n", tname.c_str(), e.what());
         return 1;
     }
-    writer->close();
 
     double elapsed = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - t0).count();

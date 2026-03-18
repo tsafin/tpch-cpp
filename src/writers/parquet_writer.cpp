@@ -116,6 +116,10 @@ void ParquetWriter::enable_streaming_write(bool use_threads) {
 }
 
 void ParquetWriter::set_output_stream(std::shared_ptr<arrow::io::OutputStream> stream) {
+    if (!streaming_mode_)
+        throw std::runtime_error("set_output_stream: streaming mode must be enabled first");
+    if (parquet_file_writer_)
+        throw std::runtime_error("set_output_stream: must be called before the first write");
     injected_stream_ = std::move(stream);
 }
 

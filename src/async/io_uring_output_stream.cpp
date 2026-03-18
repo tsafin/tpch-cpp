@@ -2,6 +2,7 @@
 #include "tpch/io_uring_pool.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <stdexcept>
@@ -92,7 +93,8 @@ arrow::Status IoUringOutputStream::Write(
     return Write(data->data(), data->size());
 }
 
-// Write() already blocks until the worker drains CQEs, so Flush is a no-op.
+// Write() blocks until the worker drains all CQEs for the job (data in kernel
+// page cache). No fsync is performed — sufficient for benchmark use.
 arrow::Status IoUringOutputStream::Flush() { return arrow::Status::OK(); }
 
 arrow::Status IoUringOutputStream::Close() {
@@ -177,10 +179,17 @@ void IoUringOutputStream::worker_loop() {
                 io_uring_submit(ring);
                 struct io_uring_cqe* cqe = nullptr;
                 int r = io_uring_wait_cqe(ring, &cqe);
-                if (r == 0) {
+                if (r < 0) {
+                    if (st.ok())
+                        st = arrow::Status::IOError(
+                            "io_uring_wait_cqe: ", strerror(-r));
+                } else {
+                    size_t expected = static_cast<size_t>(cqe->user_data);
                     if (cqe->res < 0 && st.ok())
                         st = arrow::Status::IOError(
                             "io_uring write: ", strerror(-cqe->res));
+                    else if (st.ok() && static_cast<size_t>(cqe->res) != expected)
+                        st = arrow::Status::IOError("io_uring write: short write");
                     io_uring_cqe_seen(ring, cqe);
                     --inflight;
                 }
@@ -196,7 +205,7 @@ void IoUringOutputStream::worker_loop() {
             io_uring_prep_write(sqe, file_fd_, ptr,
                                 static_cast<unsigned>(chunk),
                                 static_cast<off_t>(off));
-            sqe->user_data = 0;
+            sqe->user_data = static_cast<uint64_t>(chunk);  // for partial-write check
             ++inflight;
 
             ptr  += chunk;
@@ -210,12 +219,19 @@ void IoUringOutputStream::worker_loop() {
             while (inflight > 0) {
                 struct io_uring_cqe* cqe = nullptr;
                 int r = io_uring_wait_cqe(ring, &cqe);
-                if (r == 0) {
-                    if (cqe->res < 0 && st.ok())
+                if (r < 0) {
+                    if (st.ok())
                         st = arrow::Status::IOError(
-                            "io_uring write: ", strerror(-cqe->res));
-                    io_uring_cqe_seen(ring, cqe);
+                            "io_uring_wait_cqe: ", strerror(-r));
+                    break;  // ring in bad state; remaining SQEs are abandoned
                 }
+                size_t expected = static_cast<size_t>(cqe->user_data);
+                if (cqe->res < 0 && st.ok())
+                    st = arrow::Status::IOError(
+                        "io_uring write: ", strerror(-cqe->res));
+                else if (st.ok() && static_cast<size_t>(cqe->res) != expected)
+                    st = arrow::Status::IOError("io_uring write: short write");
+                io_uring_cqe_seen(ring, cqe);
                 --inflight;
             }
         }
